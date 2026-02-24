@@ -636,9 +636,8 @@ impl MetadataStore for SqliteMetadataStore {
             // SQLite has a 999-variable limit; reserve 1 for bucket = 998 keys per batch.
             const BATCH_SIZE: usize = 998;
             for chunk in keys.chunks(BATCH_SIZE) {
-                let placeholders: Vec<String> = (0..chunk.len())
-                    .map(|i| format!("?{}", i + 2))
-                    .collect();
+                let placeholders: Vec<String> =
+                    (0..chunk.len()).map(|i| format!("?{}", i + 2)).collect();
                 let sql = format!(
                     "DELETE FROM objects WHERE bucket = ?1 AND key IN ({})",
                     placeholders.join(", ")

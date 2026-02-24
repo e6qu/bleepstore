@@ -58,6 +58,12 @@ pub struct AuthCache {
     credentials: RwLock<HashMap<String, CredCacheEntry>>,
 }
 
+impl Default for AuthCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AuthCache {
     /// Create a new empty cache.
     pub fn new() -> Self {
@@ -103,8 +109,7 @@ impl AuthCache {
                 cache_key,
                 SigningKeyCacheEntry {
                     key,
-                    expires: Instant::now()
-                        + std::time::Duration::from_secs(SIGNING_KEY_TTL_SECS),
+                    expires: Instant::now() + std::time::Duration::from_secs(SIGNING_KEY_TTL_SECS),
                 },
             );
         }
@@ -131,8 +136,7 @@ impl AuthCache {
                 access_key_id.to_string(),
                 CredCacheEntry {
                     cred,
-                    expires: Instant::now()
-                        + std::time::Duration::from_secs(CREDENTIAL_TTL_SECS),
+                    expires: Instant::now() + std::time::Duration::from_secs(CREDENTIAL_TTL_SECS),
                 },
             );
         }
