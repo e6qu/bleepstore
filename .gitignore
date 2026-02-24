@@ -1,5 +1,9 @@
 # Data
-data/
+data/*
+!data/.gitkeep
+!data/objects/
+data/objects/*
+!data/objects/.gitkeep
 *.db
 *.db-wal
 *.db-shm
