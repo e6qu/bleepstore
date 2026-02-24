@@ -32,6 +32,42 @@ class StorageBackend(Protocol):
         """
         ...
 
+    async def put_stream(
+        self, bucket: str, key: str, stream: AsyncIterator[bytes],
+        content_length: int | None = None,
+    ) -> tuple[str, int]:
+        """Stream-write an object, return (md5_hex, bytes_written).
+
+        Args:
+            bucket: The bucket name.
+            key: The object key.
+            stream: Async iterator of byte chunks.
+            content_length: Expected total size (optional).
+
+        Returns:
+            A tuple of (hex-encoded MD5, total bytes written).
+        """
+        ...
+
+    async def put_part_stream(
+        self, bucket: str, key: str, upload_id: str, part_number: int,
+        stream: AsyncIterator[bytes], content_length: int | None = None,
+    ) -> tuple[str, int]:
+        """Stream-write a multipart part, return (md5_hex, bytes_written).
+
+        Args:
+            bucket: The bucket name.
+            key: The object key.
+            upload_id: The multipart upload identifier.
+            part_number: The sequential part number.
+            stream: Async iterator of byte chunks.
+            content_length: Expected total size (optional).
+
+        Returns:
+            A tuple of (hex-encoded MD5, total bytes written).
+        """
+        ...
+
     async def get(self, bucket: str, key: str) -> bytes:
         """Retrieve an object's bytes.
 

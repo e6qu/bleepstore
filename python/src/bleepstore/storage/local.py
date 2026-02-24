@@ -10,6 +10,7 @@ Crash-only design:
     - Startup cleans orphan temp files in ``.tmp/`` subdirectories.
 """
 
+import errno
 import hashlib
 import logging
 import os
@@ -67,9 +68,15 @@ class LocalStorageBackend:
         logger.info("Local storage backend initialized at %s", self.root)
 
     def _clean_temp_files(self) -> None:
-        """Remove orphan temp files left by interrupted atomic writes."""
+        """Remove orphan temp files left by interrupted atomic writes.
+
+        Only matches files containing '.tmp.' — the naming convention used
+        by the atomic write pattern — to minimise directory traversal cost.
+        """
         count = 0
-        for dirpath, _dirnames, filenames in os.walk(self.root):
+        for dirpath, dirnames, filenames in os.walk(self.root):
+            # Skip hidden directories other than .parts (e.g. .git)
+            dirnames[:] = [d for d in dirnames if not d.startswith(".") or d == ".parts"]
             for fname in filenames:
                 if ".tmp." in fname:
                     try:
@@ -114,15 +121,102 @@ class LocalStorageBackend:
             finally:
                 os.close(fd)
             tmp.rename(path)
-        except Exception:
+        except OSError as exc:
             # Clean up temp file on failure
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            if exc.errno == errno.ENOSPC:
+                logger.error("Disk full writing %s/%s (%d bytes)", bucket, key, len(data))
+            raise
+
+        return md5
+
+    async def put_stream(
+        self, bucket: str, key: str, stream: AsyncIterator[bytes],
+        content_length: int | None = None,
+    ) -> tuple[str, int]:
+        """Stream-write an object from an async iterator.
+
+        Uses the atomic temp-fsync-rename pattern. Computes MD5
+        incrementally during write.
+
+        Args:
+            bucket: The bucket name.
+            key: The object key.
+            stream: Async iterator of byte chunks.
+            content_length: Expected total size (optional, unused).
+
+        Returns:
+            A tuple of (hex-encoded MD5, total bytes written).
+        """
+        path = self._object_path(bucket, key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        md5 = hashlib.md5()
+        total = 0
+        tmp = path.with_name(f"{path.name}.tmp.{uuid.uuid4().hex[:8]}")
+        try:
+            fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+            try:
+                async for chunk in stream:
+                    os.write(fd, chunk)
+                    md5.update(chunk)
+                    total += len(chunk)
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            tmp.rename(path)
+        except OSError as exc:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            if exc.errno == errno.ENOSPC:
+                logger.error("Disk full streaming %s/%s (%d bytes written)", bucket, key, total)
+            raise
+
+        return md5.hexdigest(), total
+
+    async def put_part_stream(
+        self, bucket: str, key: str, upload_id: str, part_number: int,
+        stream: AsyncIterator[bytes], content_length: int | None = None,
+    ) -> tuple[str, int]:
+        """Stream-write a multipart part from an async iterator.
+
+        Uses the atomic temp-fsync-rename pattern. Computes MD5
+        incrementally during write.
+
+        Returns:
+            A tuple of (hex-encoded MD5, total bytes written).
+        """
+        part_dir = self.root / ".parts" / upload_id
+        part_dir.mkdir(parents=True, exist_ok=True)
+        part_path = part_dir / str(part_number)
+
+        md5 = hashlib.md5()
+        total = 0
+        tmp = part_path.with_name(f"{part_path.name}.tmp.{uuid.uuid4().hex[:8]}")
+        try:
+            fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+            try:
+                async for chunk in stream:
+                    os.write(fd, chunk)
+                    md5.update(chunk)
+                    total += len(chunk)
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            tmp.rename(part_path)
+        except Exception:
             try:
                 tmp.unlink(missing_ok=True)
             except OSError:
                 pass
             raise
 
-        return md5
+        return md5.hexdigest(), total
 
     async def get(self, bucket: str, key: str) -> bytes:
         """Retrieve an object's bytes from the local filesystem.
@@ -346,9 +440,11 @@ class LocalStorageBackend:
         dst_bucket: str,
         dst_key: str,
     ) -> str:
-        """Copy an object from one location to another.
+        """Copy an object from one location to another using streaming.
 
-        Reads source bytes and writes to destination atomically.
+        Reads the source file in chunks and writes to the destination
+        atomically (temp-fsync-rename), computing MD5 incrementally.
+        Memory usage is O(chunk_size), not O(object_size).
 
         Args:
             src_bucket: The source bucket name.
@@ -359,5 +455,36 @@ class LocalStorageBackend:
         Returns:
             The hex-encoded MD5 ETag of the copied object.
         """
-        data = await self.get(src_bucket, src_key)
-        return await self.put(dst_bucket, dst_key, data)
+        src_path = self._object_path(src_bucket, src_key)
+        dst_path = self._object_path(dst_bucket, dst_key)
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+
+        md5 = hashlib.md5()
+        tmp = dst_path.with_name(f"{dst_path.name}.tmp.{uuid.uuid4().hex[:8]}")
+        try:
+            with open(src_path, "rb") as src_f:
+                fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+                try:
+                    while True:
+                        chunk = src_f.read(_CHUNK_SIZE)
+                        if not chunk:
+                            break
+                        os.write(fd, chunk)
+                        md5.update(chunk)
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+            tmp.rename(dst_path)
+        except OSError as exc:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            if exc.errno == errno.ENOSPC:
+                logger.error(
+                    "Disk full copying %s/%s -> %s/%s",
+                    src_bucket, src_key, dst_bucket, dst_key,
+                )
+            raise
+
+        return md5.hexdigest()

@@ -133,6 +133,30 @@ class AzureGatewayBackend:
         await blob_client.upload_blob(data, overwrite=True)
         return md5
 
+    async def put_stream(
+        self, bucket: str, key: str, stream: AsyncIterator[bytes],
+        content_length: int | None = None,
+    ) -> tuple[str, int]:
+        """Stream-write: collect stream and delegate to put()."""
+        chunks = []
+        async for chunk in stream:
+            chunks.append(chunk)
+        data = b"".join(chunks)
+        md5_hex = await self.put(bucket, key, data)
+        return md5_hex, len(data)
+
+    async def put_part_stream(
+        self, bucket: str, key: str, upload_id: str, part_number: int,
+        stream: AsyncIterator[bytes], content_length: int | None = None,
+    ) -> tuple[str, int]:
+        """Stream-write part: collect stream and delegate to put_part()."""
+        chunks = []
+        async for chunk in stream:
+            chunks.append(chunk)
+        data = b"".join(chunks)
+        md5_hex = await self.put_part(bucket, key, upload_id, part_number, data)
+        return md5_hex, len(data)
+
     async def get(self, bucket: str, key: str) -> bytes:
         """Download an object from the upstream Azure container.
 

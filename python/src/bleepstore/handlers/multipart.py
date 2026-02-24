@@ -215,12 +215,18 @@ class MultipartHandler:
         if upload is None:
             raise NoSuchUpload(upload_id)
 
-        # Read the part data
-        data = await request.body()
-        size = len(data)
-
-        # Write part to storage (atomic: temp-fsync-rename)
-        md5_hex = await self.storage.put_part(bucket, key, upload_id, part_number, data)
+        # Stream or buffer the part data depending on whether body was pre-read
+        if hasattr(request, "_body") and request._body is not None:
+            data = await request.body()
+            size = len(data)
+            md5_hex = await self.storage.put_part(bucket, key, upload_id, part_number, data)
+        else:
+            content_length = request.headers.get("content-length")
+            cl_int = int(content_length) if content_length else None
+            md5_hex, size = await self.storage.put_part_stream(
+                bucket, key, upload_id, part_number, request.stream(),
+                content_length=cl_int,
+            )
 
         # Quote the ETag
         etag = f'"{md5_hex}"'

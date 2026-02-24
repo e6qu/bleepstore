@@ -1,5 +1,23 @@
 # BleepStore Python -- What We Did
 
+## Session 19 -- Stage 15: Performance Optimization & Production Readiness (2026-02-24)
+
+Skipped Stages 12–14 (Raft clustering) — Stage 15 is independent of clustering, targets single-node performance.
+
+### Changes by file:
+- **server.py**: Fixed SigV4 authenticator cache bug (create once in lifespan, reuse via app.state); added per-request structured logging (method, path, status, duration_ms, request_id) with time import
+- **storage/backend.py**: Added `put_stream()` and `put_part_stream()` to StorageBackend protocol
+- **storage/local.py**: Implemented streaming `put_stream()`, `put_part_stream()`, streaming `copy_object()` with incremental MD5; added ENOSPC error logging; optimized `_clean_temp_files()` to skip hidden dirs
+- **storage/aws.py**, **storage/gcp.py**, **storage/azure.py**: Added `put_stream()` and `put_part_stream()` (collect-and-delegate pattern for gateway backends)
+- **handlers/object.py**: PutObject now uses streaming write when body not pre-consumed; added Content-Length size limit check against max_object_size
+- **handlers/multipart.py**: UploadPart now uses streaming write when body not pre-consumed
+- **metadata/sqlite.py**: Batch delete reduced from 2N to 2 queries using IN clause; list_objects truncation detection from over-fetch (no separate SELECT); schema check skips DDL on warm starts; added OperationalError logging
+- **config.py**: Added log_level, log_format, shutdown_timeout, max_object_size to ServerConfig
+- **cli.py**: Added --log-level, --log-format, --shutdown-timeout CLI args; uses configure_logging(); passes timeout_graceful_shutdown and timeout_keep_alive to uvicorn
+- **logging_config.py**: NEW — JSONFormatter class and configure_logging() function
+
+### Results: 582/582 unit tests, 86/86 E2E tests pass
+
 ## Session 18 -- Stage 11b: Azure Blob Storage Gateway Backend (2026-02-23)
 - **pyproject.toml**: Added `azure-storage-blob>=12.19.0` and `azure-identity>=1.15.0` as optional `azure` dependency and to dev deps
 - **src/bleepstore/storage/azure.py**: Complete rewrite from stub to full implementation (~260 lines):
