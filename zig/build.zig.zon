@@ -1,0 +1,17 @@
+.{
+    .name = .bleepstore,
+    .version = "0.1.0",
+    .fingerprint = 0xff1da1bdff3d370e,
+    .minimum_zig_version = "0.15.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+    .dependencies = .{
+        .tokamak = .{
+            .url = "git+https://github.com/cztomsik/tokamak?ref=main#22e5ef8719d9496e5cf26e701ce05f9cd27d85bf",
+            .hash = "tokamak-2.0.0-FbnSecXvBgD2Lu1k2bzdRn3XJBeJX8FH1EiEBhiciWWy",
+        },
+    },
+}

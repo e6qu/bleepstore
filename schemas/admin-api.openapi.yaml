@@ -1,0 +1,1157 @@
+openapi: 3.1.0
+info:
+  title: BleepStore Admin API
+  version: 1.0.0
+  description: |
+    Management and administration API for BleepStore, an S3-compatible object store.
+
+    This API is separate from the S3-compatible data API and covers cluster management,
+    server administration, credential management, storage backend monitoring, and
+    configuration retrieval. All endpoints are secured with bearer token authentication
+    using a shared admin secret.
+  contact:
+    name: BleepStore
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+
+servers:
+  - url: http://localhost:8081
+    description: Local development admin endpoint
+  - url: https://{host}:{port}
+    description: Configurable admin endpoint
+    variables:
+      host:
+        default: localhost
+      port:
+        default: "8081"
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Status
+    description: Server health and observability
+  - name: Cluster
+    description: Cluster topology and Raft consensus management
+  - name: Storage
+    description: Storage backend status and usage statistics
+  - name: Credentials
+    description: S3 access key lifecycle management
+  - name: Configuration
+    description: Server configuration inspection
+
+paths:
+  # ---------------------------------------------------------------------------
+  # Server Status
+  # ---------------------------------------------------------------------------
+  /admin/status:
+    get:
+      operationId: getServerStatus
+      summary: Server health and info
+      description: |
+        Returns the current server health status including software version,
+        uptime, and operating mode (embedded or cluster).
+      tags:
+        - Status
+      responses:
+        "200":
+          description: Server is healthy and responding.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServerStatus"
+              example:
+                version: "1.0.0"
+                uptime_seconds: 86432
+                mode: cluster
+                healthy: true
+                started_at: "2026-02-20T10:15:30Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /admin/metrics:
+    get:
+      operationId: getMetrics
+      summary: Prometheus-compatible metrics
+      description: |
+        Exposes server metrics in Prometheus text exposition format.
+        Intended for scraping by Prometheus or compatible monitoring systems.
+      tags:
+        - Status
+      responses:
+        "200":
+          description: Metrics in Prometheus text exposition format.
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: |
+                # HELP bleepstore_requests_total Total number of requests.
+                # TYPE bleepstore_requests_total counter
+                bleepstore_requests_total{method="GET"} 1234
+                bleepstore_requests_total{method="PUT"} 567
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ---------------------------------------------------------------------------
+  # Cluster Management
+  # ---------------------------------------------------------------------------
+  /admin/cluster/status:
+    get:
+      operationId: getClusterStatus
+      summary: Cluster health overview
+      description: |
+        Returns the overall cluster health including current leader information,
+        the state of every known node, and the current Raft term.
+      tags:
+        - Cluster
+      responses:
+        "200":
+          description: Cluster status retrieved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClusterStatus"
+              example:
+                healthy: true
+                leader_id: node-1
+                term: 42
+                nodes:
+                  - id: node-1
+                    addr: "10.0.0.1:8080"
+                    state: leader
+                    healthy: true
+                  - id: node-2
+                    addr: "10.0.0.2:8080"
+                    state: follower
+                    healthy: true
+                  - id: node-3
+                    addr: "10.0.0.3:8080"
+                    state: follower
+                    healthy: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /admin/cluster/nodes:
+    get:
+      operationId: listClusterNodes
+      summary: List all nodes
+      description: Returns the list of all nodes currently registered in the cluster.
+      tags:
+        - Cluster
+      responses:
+        "200":
+          description: Node list retrieved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NodeList"
+              example:
+                nodes:
+                  - id: node-1
+                    addr: "10.0.0.1:8080"
+                    state: leader
+                    healthy: true
+                  - id: node-2
+                    addr: "10.0.0.2:8080"
+                    state: follower
+                    healthy: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    post:
+      operationId: addClusterNode
+      summary: Add a new node
+      description: |
+        Registers a new node in the cluster. The node must be reachable at the
+        given address and will begin participating in Raft consensus once it
+        catches up with the leader's log.
+      tags:
+        - Cluster
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddNodeRequest"
+            example:
+              id: node-4
+              addr: "10.0.0.4:8080"
+      responses:
+        "201":
+          description: Node added successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Node"
+              example:
+                id: node-4
+                addr: "10.0.0.4:8080"
+                state: follower
+                healthy: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: A node with the given ID already exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error: conflict
+                message: "Node with id 'node-4' already exists in the cluster."
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /admin/cluster/nodes/{nodeId}:
+    delete:
+      operationId: removeClusterNode
+      summary: Remove a node
+      description: |
+        Removes a node from the cluster. The node will be deregistered from the
+        Raft group and will no longer receive log entries. Cannot remove the
+        current leader; leadership must be transferred first.
+      tags:
+        - Cluster
+      parameters:
+        - $ref: "#/components/parameters/NodeId"
+      responses:
+        "204":
+          description: Node removed successfully.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Cannot remove the current leader node.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error: conflict
+                message: "Cannot remove the current leader. Transfer leadership first."
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /admin/cluster/raft/stats:
+    get:
+      operationId: getRaftStats
+      summary: Raft protocol statistics
+      description: |
+        Returns detailed statistics about the Raft consensus protocol including
+        the current term, commit index, applied index, and log size.
+      tags:
+        - Cluster
+      responses:
+        "200":
+          description: Raft statistics retrieved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RaftStats"
+              example:
+                state: leader
+                term: 42
+                last_log_index: 10584
+                last_log_term: 42
+                commit_index: 10584
+                applied_index: 10584
+                fsm_pending: 0
+                last_snapshot_index: 10000
+                last_snapshot_term: 41
+                num_peers: 2
+                last_contact: "0s"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /admin/cluster/raft/snapshot:
+    post:
+      operationId: triggerRaftSnapshot
+      summary: Trigger manual snapshot
+      description: |
+        Forces the Raft subsystem to take an immediate snapshot of the current
+        state. This is useful before planned maintenance or to reduce log replay
+        time on node restarts.
+      tags:
+        - Cluster
+      responses:
+        "200":
+          description: Snapshot triggered successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SnapshotResult"
+              example:
+                success: true
+                snapshot_index: 10584
+                snapshot_term: 42
+                size_bytes: 5242880
+                created_at: "2026-02-22T14:30:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ---------------------------------------------------------------------------
+  # Storage Backend
+  # ---------------------------------------------------------------------------
+  /admin/storage/status:
+    get:
+      operationId: getStorageStatus
+      summary: Backend status and info
+      description: |
+        Returns the current storage backend status including the backend type,
+        its operational state, and the configured data directory or remote target.
+      tags:
+        - Storage
+      responses:
+        "200":
+          description: Storage backend status retrieved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StorageStatus"
+              example:
+                backend: filesystem
+                state: healthy
+                data_directory: /var/lib/bleepstore/data
+                read_only: false
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /admin/storage/stats:
+    get:
+      operationId: getStorageStats
+      summary: Storage usage statistics
+      description: |
+        Returns aggregate storage usage statistics including total object count,
+        total size in bytes, and the number of buckets.
+      tags:
+        - Storage
+      responses:
+        "200":
+          description: Storage statistics retrieved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StorageStats"
+              example:
+                total_objects: 145832
+                total_size_bytes: 10737418240
+                total_buckets: 12
+                total_multipart_uploads: 3
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ---------------------------------------------------------------------------
+  # Credentials Management
+  # ---------------------------------------------------------------------------
+  /admin/credentials:
+    get:
+      operationId: listCredentials
+      summary: List all access keys
+      description: |
+        Returns all S3 access key records. Secret keys are never included in the
+        response; only the access key ID, status, and metadata are returned.
+      tags:
+        - Credentials
+      responses:
+        "200":
+          description: Credential list retrieved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CredentialList"
+              example:
+                credentials:
+                  - access_key_id: AKBS00000001
+                    status: active
+                    created_at: "2026-01-15T08:00:00Z"
+                    description: "Primary application key"
+                  - access_key_id: AKBS00000002
+                    status: disabled
+                    created_at: "2026-02-01T12:00:00Z"
+                    description: "CI pipeline key"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    post:
+      operationId: createCredential
+      summary: Create new access key pair
+      description: |
+        Generates a new S3-compatible access key and secret key pair. The secret
+        key is returned **only once** in this response and cannot be retrieved
+        again. Store it securely.
+      tags:
+        - Credentials
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCredentialRequest"
+            example:
+              description: "Backup service key"
+      responses:
+        "201":
+          description: Credential created successfully. The secret key is included only in this response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedCredential"
+              example:
+                access_key_id: AKBS00000003
+                secret_access_key: "bsSecretKey0123456789abcdefghijklmnopqrst"
+                status: active
+                created_at: "2026-02-22T14:30:00Z"
+                description: "Backup service key"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /admin/credentials/{accessKeyId}:
+    delete:
+      operationId: deleteCredential
+      summary: Delete access key
+      description: |
+        Permanently deletes an S3 access key pair. Any in-flight requests
+        authenticated with this key may fail once deletion is propagated.
+        This action cannot be undone.
+      tags:
+        - Credentials
+      parameters:
+        - $ref: "#/components/parameters/AccessKeyId"
+      responses:
+        "204":
+          description: Access key deleted successfully.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /admin/credentials/{accessKeyId}/status:
+    put:
+      operationId: updateCredentialStatus
+      summary: Enable or disable an access key
+      description: |
+        Updates the status of an existing access key to either `active` or
+        `disabled`. Disabled keys will be rejected during S3 authentication
+        but are not deleted and can be re-enabled later.
+      tags:
+        - Credentials
+      parameters:
+        - $ref: "#/components/parameters/AccessKeyId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCredentialStatusRequest"
+            example:
+              status: disabled
+      responses:
+        "200":
+          description: Credential status updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Credential"
+              example:
+                access_key_id: AKBS00000002
+                status: disabled
+                created_at: "2026-02-01T12:00:00Z"
+                description: "CI pipeline key"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ---------------------------------------------------------------------------
+  # Configuration
+  # ---------------------------------------------------------------------------
+  /admin/config:
+    get:
+      operationId: getConfig
+      summary: Get current server configuration
+      description: |
+        Returns the running server configuration. Sensitive values such as
+        secret keys, tokens, and passwords are redacted and replaced with
+        a placeholder string.
+      tags:
+        - Configuration
+      responses:
+        "200":
+          description: Configuration retrieved successfully. Secrets are redacted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServerConfig"
+              example:
+                listen_addr: "0.0.0.0:8080"
+                admin_listen_addr: "0.0.0.0:8081"
+                data_directory: /var/lib/bleepstore/data
+                mode: cluster
+                admin_token: "**REDACTED**"
+                cluster:
+                  node_id: node-1
+                  bind_addr: "10.0.0.1:8300"
+                  peers:
+                    - "10.0.0.2:8300"
+                    - "10.0.0.3:8300"
+                storage:
+                  backend: filesystem
+                  max_object_size_bytes: 5368709120
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+# =============================================================================
+# Components
+# =============================================================================
+components:
+  # ---------------------------------------------------------------------------
+  # Security Schemes
+  # ---------------------------------------------------------------------------
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Admin API authentication using a shared secret bearer token.
+        Include the token in the Authorization header:
+        `Authorization: Bearer <admin-token>`
+
+  # ---------------------------------------------------------------------------
+  # Reusable Parameters
+  # ---------------------------------------------------------------------------
+  parameters:
+    NodeId:
+      name: nodeId
+      in: path
+      required: true
+      description: Unique identifier of the cluster node.
+      schema:
+        type: string
+        minLength: 1
+        examples:
+          - node-1
+
+    AccessKeyId:
+      name: accessKeyId
+      in: path
+      required: true
+      description: The S3 access key ID.
+      schema:
+        type: string
+        pattern: "^AKBS[A-Z0-9]{8,}$"
+        examples:
+          - AKBS00000001
+
+  # ---------------------------------------------------------------------------
+  # Reusable Responses
+  # ---------------------------------------------------------------------------
+  responses:
+    BadRequest:
+      description: The request body or parameters are invalid.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: bad_request
+            message: "Validation failed: 'addr' is required."
+
+    Unauthorized:
+      description: Missing or invalid bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: unauthorized
+            message: "Missing or invalid admin bearer token."
+
+    NotFound:
+      description: The requested resource was not found.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: not_found
+            message: "The requested resource does not exist."
+
+    InternalServerError:
+      description: An unexpected server error occurred.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: internal_error
+            message: "An unexpected error occurred. Check server logs for details."
+
+    ServiceUnavailable:
+      description: The cluster is unavailable or has no elected leader.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: service_unavailable
+            message: "Cluster has no elected leader. Try again later."
+
+  # ---------------------------------------------------------------------------
+  # Schemas
+  # ---------------------------------------------------------------------------
+  schemas:
+    # -- Shared ---------------------------------------------------------------
+    Error:
+      type: object
+      description: Standard error response returned by all endpoints on failure.
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Machine-readable error code.
+          examples:
+            - bad_request
+            - unauthorized
+            - not_found
+            - conflict
+            - internal_error
+            - service_unavailable
+        message:
+          type: string
+          description: Human-readable error description.
+          examples:
+            - "Validation failed: 'addr' is required."
+
+    # -- Status ---------------------------------------------------------------
+    ServerStatus:
+      type: object
+      description: Server health and version information.
+      required:
+        - version
+        - uptime_seconds
+        - mode
+        - healthy
+        - started_at
+      properties:
+        version:
+          type: string
+          description: BleepStore software version.
+          examples:
+            - "1.0.0"
+        uptime_seconds:
+          type: integer
+          format: int64
+          description: Number of seconds since the server started.
+          minimum: 0
+          examples:
+            - 86432
+        mode:
+          type: string
+          description: Server operating mode.
+          enum:
+            - embedded
+            - cluster
+        healthy:
+          type: boolean
+          description: Whether the server considers itself healthy.
+        started_at:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp of when the server started.
+
+    # -- Cluster --------------------------------------------------------------
+    Node:
+      type: object
+      description: A single node in the cluster.
+      required:
+        - id
+        - addr
+        - state
+        - healthy
+      properties:
+        id:
+          type: string
+          description: Unique node identifier.
+          examples:
+            - node-1
+        addr:
+          type: string
+          description: Network address of the node (host:port).
+          examples:
+            - "10.0.0.1:8080"
+        state:
+          type: string
+          description: Current Raft role of the node.
+          enum:
+            - leader
+            - follower
+            - candidate
+            - shutdown
+            - unknown
+        healthy:
+          type: boolean
+          description: Whether the node is reachable and operating normally.
+
+    NodeList:
+      type: object
+      description: Wrapper for a list of cluster nodes.
+      required:
+        - nodes
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/Node"
+
+    ClusterStatus:
+      type: object
+      description: Overall cluster health and topology.
+      required:
+        - healthy
+        - leader_id
+        - term
+        - nodes
+      properties:
+        healthy:
+          type: boolean
+          description: Whether the cluster has quorum and an elected leader.
+        leader_id:
+          type: string
+          description: ID of the current Raft leader.
+          examples:
+            - node-1
+        term:
+          type: integer
+          format: int64
+          description: Current Raft term number.
+          minimum: 0
+        nodes:
+          type: array
+          description: State of every known node.
+          items:
+            $ref: "#/components/schemas/Node"
+
+    AddNodeRequest:
+      type: object
+      description: Request body to add a new node to the cluster.
+      required:
+        - id
+        - addr
+      properties:
+        id:
+          type: string
+          description: Unique identifier for the new node.
+          minLength: 1
+          examples:
+            - node-4
+        addr:
+          type: string
+          description: Network address of the new node (host:port).
+          minLength: 1
+          examples:
+            - "10.0.0.4:8080"
+
+    RaftStats:
+      type: object
+      description: Detailed Raft consensus protocol statistics.
+      required:
+        - state
+        - term
+        - last_log_index
+        - last_log_term
+        - commit_index
+        - applied_index
+        - fsm_pending
+        - last_snapshot_index
+        - last_snapshot_term
+        - num_peers
+        - last_contact
+      properties:
+        state:
+          type: string
+          description: Local Raft state.
+          enum:
+            - leader
+            - follower
+            - candidate
+            - shutdown
+        term:
+          type: integer
+          format: int64
+          description: Current Raft term.
+          minimum: 0
+        last_log_index:
+          type: integer
+          format: int64
+          description: Index of the last log entry.
+          minimum: 0
+        last_log_term:
+          type: integer
+          format: int64
+          description: Term of the last log entry.
+          minimum: 0
+        commit_index:
+          type: integer
+          format: int64
+          description: Index of the last committed entry.
+          minimum: 0
+        applied_index:
+          type: integer
+          format: int64
+          description: Index of the last entry applied to the FSM.
+          minimum: 0
+        fsm_pending:
+          type: integer
+          format: int64
+          description: Number of pending FSM apply operations.
+          minimum: 0
+        last_snapshot_index:
+          type: integer
+          format: int64
+          description: Index at which the last snapshot was taken.
+          minimum: 0
+        last_snapshot_term:
+          type: integer
+          format: int64
+          description: Term at which the last snapshot was taken.
+          minimum: 0
+        num_peers:
+          type: integer
+          description: Number of peer nodes (excluding self).
+          minimum: 0
+        last_contact:
+          type: string
+          description: |
+            Time since last contact with the leader. For the leader itself
+            this is "0s". Formatted as a Go duration string.
+          examples:
+            - "0s"
+            - "12ms"
+
+    SnapshotResult:
+      type: object
+      description: Result of a manual Raft snapshot operation.
+      required:
+        - success
+        - snapshot_index
+        - snapshot_term
+        - size_bytes
+        - created_at
+      properties:
+        success:
+          type: boolean
+          description: Whether the snapshot completed successfully.
+        snapshot_index:
+          type: integer
+          format: int64
+          description: Raft index captured in the snapshot.
+          minimum: 0
+        snapshot_term:
+          type: integer
+          format: int64
+          description: Raft term captured in the snapshot.
+          minimum: 0
+        size_bytes:
+          type: integer
+          format: int64
+          description: Size of the snapshot in bytes.
+          minimum: 0
+        created_at:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp of when the snapshot was created.
+
+    # -- Storage --------------------------------------------------------------
+    StorageStatus:
+      type: object
+      description: Storage backend operational status.
+      required:
+        - backend
+        - state
+        - data_directory
+        - read_only
+      properties:
+        backend:
+          type: string
+          description: Type of storage backend in use.
+          enum:
+            - filesystem
+            - memory
+          examples:
+            - filesystem
+        state:
+          type: string
+          description: Current operational state of the backend.
+          enum:
+            - healthy
+            - degraded
+            - unavailable
+        data_directory:
+          type: string
+          description: Path to the data directory (filesystem backend) or an identifier for remote backends.
+          examples:
+            - /var/lib/bleepstore/data
+        read_only:
+          type: boolean
+          description: Whether the storage backend is in read-only mode.
+
+    StorageStats:
+      type: object
+      description: Aggregate storage usage statistics.
+      required:
+        - total_objects
+        - total_size_bytes
+        - total_buckets
+        - total_multipart_uploads
+      properties:
+        total_objects:
+          type: integer
+          format: int64
+          description: Total number of objects stored.
+          minimum: 0
+        total_size_bytes:
+          type: integer
+          format: int64
+          description: Total size of all stored objects in bytes.
+          minimum: 0
+        total_buckets:
+          type: integer
+          description: Total number of buckets.
+          minimum: 0
+        total_multipart_uploads:
+          type: integer
+          description: Number of in-progress multipart uploads.
+          minimum: 0
+
+    # -- Credentials ----------------------------------------------------------
+    Credential:
+      type: object
+      description: An S3 access key record (secret key is never returned after creation).
+      required:
+        - access_key_id
+        - status
+        - created_at
+      properties:
+        access_key_id:
+          type: string
+          description: The S3 access key ID.
+          examples:
+            - AKBS00000001
+        status:
+          $ref: "#/components/schemas/CredentialStatus"
+        created_at:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp of when the key was created.
+        description:
+          type: string
+          description: Optional human-readable description of the key's purpose.
+          examples:
+            - "Primary application key"
+
+    CredentialList:
+      type: object
+      description: Wrapper for a list of credentials.
+      required:
+        - credentials
+      properties:
+        credentials:
+          type: array
+          items:
+            $ref: "#/components/schemas/Credential"
+
+    CreateCredentialRequest:
+      type: object
+      description: Optional metadata when creating a new access key pair.
+      properties:
+        description:
+          type: string
+          description: Human-readable description of the key's intended use.
+          maxLength: 256
+          examples:
+            - "Backup service key"
+
+    CreatedCredential:
+      type: object
+      description: |
+        A newly created credential including the secret key. The secret key is
+        returned only once at creation time and cannot be retrieved again.
+      required:
+        - access_key_id
+        - secret_access_key
+        - status
+        - created_at
+      properties:
+        access_key_id:
+          type: string
+          description: The S3 access key ID.
+          examples:
+            - AKBS00000003
+        secret_access_key:
+          type: string
+          description: |
+            The S3 secret access key. This value is returned **only once** at
+            creation time. Store it securely.
+          examples:
+            - "bsSecretKey0123456789abcdefghijklmnopqrst"
+        status:
+          $ref: "#/components/schemas/CredentialStatus"
+        created_at:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp of when the key was created.
+        description:
+          type: string
+          description: Optional human-readable description of the key's purpose.
+
+    UpdateCredentialStatusRequest:
+      type: object
+      description: Request body to update the status of an access key.
+      required:
+        - status
+      properties:
+        status:
+          $ref: "#/components/schemas/CredentialStatus"
+
+    CredentialStatus:
+      type: string
+      description: Whether an access key is active and can be used for authentication.
+      enum:
+        - active
+        - disabled
+
+    # -- Configuration --------------------------------------------------------
+    ServerConfig:
+      type: object
+      description: |
+        The running server configuration. Secret values are replaced with
+        the placeholder string "**REDACTED**".
+      required:
+        - listen_addr
+        - admin_listen_addr
+        - data_directory
+        - mode
+      properties:
+        listen_addr:
+          type: string
+          description: Address the S3-compatible API listens on.
+          examples:
+            - "0.0.0.0:8080"
+        admin_listen_addr:
+          type: string
+          description: Address the admin API listens on.
+          examples:
+            - "0.0.0.0:8081"
+        data_directory:
+          type: string
+          description: Path to the persistent data directory.
+          examples:
+            - /var/lib/bleepstore/data
+        mode:
+          type: string
+          description: Server operating mode.
+          enum:
+            - embedded
+            - cluster
+        admin_token:
+          type: string
+          description: Admin bearer token (always redacted in responses).
+          examples:
+            - "**REDACTED**"
+        cluster:
+          $ref: "#/components/schemas/ClusterConfig"
+        storage:
+          $ref: "#/components/schemas/StorageConfig"
+
+    ClusterConfig:
+      type: object
+      description: Cluster-specific configuration (only present in cluster mode).
+      properties:
+        node_id:
+          type: string
+          description: This node's unique identifier.
+          examples:
+            - node-1
+        bind_addr:
+          type: string
+          description: Address used for intra-cluster Raft communication.
+          examples:
+            - "10.0.0.1:8300"
+        peers:
+          type: array
+          description: Initial peer addresses for cluster bootstrap.
+          items:
+            type: string
+          examples:
+            - ["10.0.0.2:8300", "10.0.0.3:8300"]
+
+    StorageConfig:
+      type: object
+      description: Storage backend configuration.
+      properties:
+        backend:
+          type: string
+          description: Storage backend type.
+          enum:
+            - filesystem
+            - memory
+          examples:
+            - filesystem
+        max_object_size_bytes:
+          type: integer
+          format: int64
+          description: Maximum allowed size for a single object in bytes.
+          minimum: 0
+          examples:
+            - 5368709120

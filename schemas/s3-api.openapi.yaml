@@ -1,0 +1,1881 @@
+openapi: 3.1.0
+
+info:
+  title: BleepStore S3-Compatible API
+  version: 1.0.0
+  description: |
+    BleepStore implements a core subset of the Amazon S3 REST API, providing
+    S3-compatible object storage via path-style URLs. This schema covers
+    Phase 1 operations including bucket management, object CRUD, access-control
+    lists, and multipart uploads.
+
+    All XML request and response bodies use the S3 namespace:
+    http://s3.amazonaws.com/doc/2006-03-01/
+  license:
+    name: MIT
+
+servers:
+  - url: https://localhost:9000
+    description: Local BleepStore development server
+  - url: https://s3.bleepstore.example.com
+    description: BleepStore production endpoint
+
+security:
+  - sigv4: []
+
+# ---------------------------------------------------------------------------
+# Tags
+# ---------------------------------------------------------------------------
+tags:
+  - name: Bucket
+    description: Operations on buckets (containers for objects).
+  - name: Object
+    description: Operations on individual objects stored in buckets.
+  - name: MultipartUpload
+    description: Multipart upload lifecycle operations.
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+paths:
+  # =======================================================================
+  # Service-level: GET /
+  # =======================================================================
+  /:
+    get:
+      operationId: ListBuckets
+      summary: List all buckets owned by the authenticated sender
+      tags: [Bucket]
+      responses:
+        "200":
+          description: Bucket list returned successfully.
+          headers:
+            x-amz-request-id:
+              $ref: "#/components/headers/x-amz-request-id"
+          content:
+            application/xml:
+              schema:
+                $ref: "#/components/schemas/ListAllMyBucketsResult"
+        "403":
+          $ref: "#/components/responses/AccessDenied"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # =======================================================================
+  # Bucket-level: /{Bucket}
+  # =======================================================================
+  /{Bucket}:
+    parameters:
+      - $ref: "#/components/parameters/BucketParam"
+
+    # ----- PUT /{Bucket} --------------------------------------------------
+    put:
+      operationId: CreateBucket
+      summary: Create a new bucket
+      tags: [Bucket]
+      parameters:
+        - $ref: "#/components/parameters/AclQueryParam"
+        - name: x-amz-acl
+          in: header
+          description: Canned ACL to apply to the bucket.
+          schema:
+            $ref: "#/components/schemas/CannedAcl"
+      requestBody:
+        description: |
+          Optional CreateBucketConfiguration specifying the location constraint.
+          When the `acl` query parameter is present this endpoint acts as
+          PutBucketAcl and expects an AccessControlPolicy body instead.
+        required: false
+        content:
+          application/xml:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/CreateBucketConfiguration"
+                - $ref: "#/components/schemas/AccessControlPolicy"
+      responses:
+        "200":
+          description: Bucket created (or ACL set) successfully.
+          headers:
+            Location:
+              description: URI of the newly created bucket.
+              schema:
+                type: string
+            x-amz-request-id:
+              $ref: "#/components/headers/x-amz-request-id"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/AccessDenied"
+        "409":
+          description: Bucket already exists or is owned by someone else.
+          content:
+            application/xml:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    # ----- DELETE /{Bucket} -----------------------------------------------
+    delete:
+      operationId: DeleteBucket
+      summary: Delete an empty bucket
+      tags: [Bucket]
+      responses:
+        "204":
+          description: Bucket deleted successfully.
+          headers:
+            x-amz-request-id:
+              $ref: "#/components/headers/x-amz-request-id"
+        "403":
+          $ref: "#/components/responses/AccessDenied"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Bucket is not empty.
+          content:
+            application/xml:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    # ----- HEAD /{Bucket} -------------------------------------------------
+    head:
+      operationId: HeadBucket
+      summary: Check whether a bucket exists and you have permission to access it
+      tags: [Bucket]
+      responses:
+        "200":
+          description: Bucket exists and is accessible.
+          headers:
+            x-amz-request-id:
+              $ref: "#/components/headers/x-amz-request-id"
+            x-amz-bucket-region:
+              description: Region where the bucket resides.
+              schema:
+                type: string
+        "403":
+          description: Access denied (no body for HEAD).
+        "404":
+          description: Bucket does not exist (no body for HEAD).
+        "500":
+          description: Internal server error (no body for HEAD).
+
+    # ----- GET /{Bucket} --------------------------------------------------
+    get:
+      operationId: GetBucket
+      summary: |
+        Multiplex endpoint: ListObjectsV2 (list-type=2), ListObjects (legacy),
+        GetBucketLocation (?location), GetBucketAcl (?acl), or
+        ListMultipartUploads (?uploads).
+      tags: [Bucket, Object, MultipartUpload]
+      parameters:
+        # -- discriminator query params --
+        - name: list-type
+          in: query
+          description: Set to `2` to use ListObjectsV2.
+          schema:
+            type: string
+            enum: ["2"]
+        - name: location
+          in: query
+          description: When present (no value needed), returns the bucket location.
+          allowEmptyValue: true
+          schema:
+            type: string
+        - name: acl
+          in: query
+          description: When present (no value needed), returns the bucket ACL.
+          allowEmptyValue: true
+          schema:
+            type: string
+        - name: uploads
+          in: query
+          description: When present (no value needed), lists in-progress multipart uploads.
+          allowEmptyValue: true
+          schema:
+            type: string
+        # -- ListObjects / ListObjectsV2 common params --
+        - name: prefix
+          in: query
+          description: Limits the response to keys beginning with this prefix.
+          schema:
+            type: string
+        - name: delimiter
+          in: query
+          description: Character used to group keys (commonly `/`).
+          schema:
+            type: string
+        - name: max-keys
+          in: query
+          description: Maximum number of keys to return (default 1000).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 1000
+        - name: encoding-type
+          in: query
+          description: Encode keys in the response (only `url` is supported).
+          schema:
+            type: string
+            enum: [url]
+        # -- ListObjectsV2 specific --
+        - name: continuation-token
+          in: query
+          description: Token from a previous ListObjectsV2 response to continue listing.
+          schema:
+            type: string
+        - name: start-after
+          in: query
+          description: Start listing after this key (ListObjectsV2 only).
+          schema:
+            type: string
+        - name: fetch-owner
+          in: query
+          description: Set to true to include owner info in ListObjectsV2 results.
+          schema:
+            type: boolean
+        # -- ListObjects (v1) specific --
+        - name: marker
+          in: query
+          description: Key to start listing from (ListObjects v1 only).
+          schema:
+            type: string
+        # -- ListMultipartUploads specific --
+        - name: key-marker
+          in: query
+          description: Key at which to begin listing multipart uploads.
+          schema:
+            type: string
+        - name: upload-id-marker
+          in: query
+          description: Upload ID at which to begin listing (used with key-marker).
+          schema:
+            type: string
+        - name: max-uploads
+          in: query
+          description: Maximum number of multipart uploads to return.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 1000
+      responses:
+        "200":
+          description: |
+            Response depends on the query parameters supplied:
+            - No discriminator or `list-type=2`: object listing XML
+            - `?location`: `LocationConstraint` XML
+            - `?acl`: `AccessControlPolicy` XML
+            - `?uploads`: `ListMultipartUploadsResult` XML
+          headers:
+            x-amz-request-id:
+              $ref: "#/components/headers/x-amz-request-id"
+          content:
+            application/xml:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ListBucketResult"
+                  - $ref: "#/components/schemas/ListBucketResultV2"
+                  - $ref: "#/components/schemas/LocationConstraint"
+                  - $ref: "#/components/schemas/AccessControlPolicy"
+                  - $ref: "#/components/schemas/ListMultipartUploadsResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/AccessDenied"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    # ----- POST /{Bucket} -------------------------------------------------
+    post:
+      operationId: PostBucket
+      summary: |
+        Multiplex endpoint: DeleteObjects (?delete).
+      tags: [Object]
+      parameters:
+        - name: delete
+          in: query
+          required: true
+          description: Must be present to invoke multi-object delete.
+          allowEmptyValue: true
+          schema:
+            type: string
+        - name: Content-MD5
+          in: header
+          description: Base64-encoded 128-bit MD5 digest of the request body.
+          required: true
+          schema:
+            type: string
+        - name: x-amz-mfa
+          in: header
+          description: MFA device serial and token (for MFA-Delete enabled buckets).
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/xml:
+            schema:
+              $ref: "#/components/schemas/DeleteObjectsRequest"
+      responses:
+        "200":
+          description: Delete result (may contain both successful and failed deletions).
+          headers:
+            x-amz-request-id:
+              $ref: "#/components/headers/x-amz-request-id"
+          content:
+            application/xml:
+              schema:
+                $ref: "#/components/schemas/DeleteResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/AccessDenied"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # =======================================================================
+  # Object-level: /{Bucket}/{Key+}
+  # =======================================================================
+  /{Bucket}/{Key+}:
+    parameters:
+      - $ref: "#/components/parameters/BucketParam"
+      - $ref: "#/components/parameters/KeyParam"
+
+    # ----- PUT /{Bucket}/{Key+} -------------------------------------------
+    put:
+      operationId: PutObject
+      summary: |
+        Upload an object, copy an object (when x-amz-copy-source is present),
+        set an object ACL (?acl), or upload a part (?partNumber&uploadId).
+      tags: [Object, MultipartUpload]
+      parameters:
+        # discriminator / feature query params
+        - $ref: "#/components/parameters/AclQueryParam"
+        - name: partNumber
+          in: query
+          description: Part number for multipart upload (1-10000).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10000
+        - name: uploadId
+          in: query
+          description: Multipart upload ID (required with partNumber).
+          schema:
+            type: string
+        # common object headers
+        - $ref: "#/components/parameters/ContentTypeHeader"
+        - $ref: "#/components/parameters/ContentMD5Header"
+        - $ref: "#/components/parameters/ContentLengthHeader"
+        - $ref: "#/components/parameters/CacheControlHeader"
+        - $ref: "#/components/parameters/ContentDispositionHeader"
+        - $ref: "#/components/parameters/ContentEncodingHeader"
+        - $ref: "#/components/parameters/ExpiresHeader"
+        # copy source
+        - name: x-amz-copy-source
+          in: header
+          description: |
+            Source object for CopyObject in the form `/bucket/key` or
+            `/bucket/key?versionId=id`. When present the operation is a copy.
+          schema:
+            type: string
+        - name: x-amz-copy-source-if-match
+          in: header
+          description: Copy only if the source ETag matches.
+          schema:
+            type: string
+        - name: x-amz-copy-source-if-none-match
+          in: header
+          description: Copy only if the source ETag does NOT match.
+          schema:
+            type: string
+        - name: x-amz-copy-source-if-modified-since
+          in: header
+          description: Copy only if the source was modified after this date.
+          schema:
+            type: string
+            format: date-time
+        - name: x-amz-copy-source-if-unmodified-since
+          in: header
+          description: Copy only if the source was NOT modified after this date.
+          schema:
+            type: string
+            format: date-time
+        - name: x-amz-metadata-directive
+          in: header
+          description: Whether to copy or replace metadata during a copy.
+          schema:
+            type: string
+            enum: [COPY, REPLACE]
+        - name: x-amz-tagging-directive
+          in: header
+          description: Whether to copy or replace tags during a copy.
+          schema:
+            type: string
+            enum: [COPY, REPLACE]
+        # ACL
+        - name: x-amz-acl
+          in: header
+          description: Canned ACL to apply to the object.
+          schema:
+            $ref: "#/components/schemas/CannedAcl"
+        - name: x-amz-grant-read
+          in: header
+          description: Grant read access.
+          schema:
+            type: string
+        - name: x-amz-grant-write
+          in: header
+          description: Grant write access.
+          schema:
+            type: string
+        - name: x-amz-grant-read-acp
+          in: header
+          description: Grant read access to the ACL.
+          schema:
+            type: string
+        - name: x-amz-grant-write-acp
+          in: header
+          description: Grant write access to the ACL.
+          schema:
+            type: string
+        - name: x-amz-grant-full-control
+          in: header
+          description: Grant full control.
+          schema:
+            type: string
+        # SSE
+        - name: x-amz-server-side-encryption
+          in: header
+          description: Server-side encryption algorithm.
+          schema:
+            type: string
+            enum: [AES256, "aws:kms"]
+        - name: x-amz-server-side-encryption-customer-algorithm
+          in: header
+          description: SSE-C algorithm (AES256).
+          schema:
+            type: string
+        - name: x-amz-server-side-encryption-customer-key
+          in: header
+          description: SSE-C base64-encoded encryption key.
+          schema:
+            type: string
+        - name: x-amz-server-side-encryption-customer-key-MD5
+          in: header
+          description: SSE-C base64-encoded MD5 of the encryption key.
+          schema:
+            type: string
+        # storage class / tagging
+        - name: x-amz-storage-class
+          in: header
+          description: Storage class for the object.
+          schema:
+            $ref: "#/components/schemas/StorageClass"
+        - name: x-amz-tagging
+          in: header
+          description: URL-encoded tag set for the object.
+          schema:
+            type: string
+        # user metadata (free-form)
+        - name: x-amz-meta-
+          in: header
+          description: |
+            Prefix for user-defined metadata headers. Any header beginning with
+            `x-amz-meta-` is stored as object metadata. This is a wildcard
+            placeholder; actual header names vary.
+          schema:
+            type: string
+      requestBody:
+        description: |
+          Object data (PutObject / UploadPart), or AccessControlPolicy XML
+          (PutObjectAcl). Not required for CopyObject.
+        required: false
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+          application/xml:
+            schema:
+              $ref: "#/components/schemas/AccessControlPolicy"
+      responses:
+        "200":
+          description: |
+            Object stored, part uploaded, ACL set, or copy completed.
+            CopyObject returns CopyObjectResult XML. UploadPart returns
+            no body but includes ETag. PutObjectAcl returns no body.
+          headers:
+            ETag:
+              description: Entity tag of the stored object or part.
+              schema:
+                type: string
+            x-amz-request-id:
+              $ref: "#/components/headers/x-amz-request-id"
+            x-amz-server-side-encryption:
+              description: SSE algorithm used, if applicable.
+              schema:
+                type: string
+            x-amz-version-id:
+              description: Version ID of the object (if versioning is enabled).
+              schema:
+                type: string
+            x-amz-copy-source-version-id:
+              description: Version ID of the source object in a copy.
+              schema:
+                type: string
+          content:
+            application/xml:
+              schema:
+                $ref: "#/components/schemas/CopyObjectResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/AccessDenied"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    # ----- GET /{Bucket}/{Key+} -------------------------------------------
+    get:
+      operationId: GetObject
+      summary: |
+        Retrieve an object, its ACL (?acl), or list its parts (?uploadId).
+      tags: [Object, MultipartUpload]
+      parameters:
+        - $ref: "#/components/parameters/AclQueryParam"
+        - name: uploadId
+          in: query
+          description: When present (without partNumber), lists parts for the multipart upload.
+          schema:
+            type: string
+        - name: max-parts
+          in: query
+          description: Maximum number of parts to return in ListParts.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 1000
+        - name: part-number-marker
+          in: query
+          description: Part number after which to begin listing in ListParts.
+          schema:
+            type: integer
+        # conditional headers
+        - name: Range
+          in: header
+          description: "Byte range to retrieve (e.g., bytes=0-499)."
+          schema:
+            type: string
+        - name: If-Match
+          in: header
+          description: Return the object only if its ETag matches.
+          schema:
+            type: string
+        - name: If-None-Match
+          in: header
+          description: Return the object only if its ETag does NOT match.
+          schema:
+            type: string
+        - name: If-Modified-Since
+          in: header
+          description: Return the object only if it was modified after this date.
+          schema:
+            type: string
+            format: date-time
+        - name: If-Unmodified-Since
+          in: header
+          description: Return the object only if it was NOT modified after this date.
+          schema:
+            type: string
+            format: date-time
+        # SSE-C
+        - name: x-amz-server-side-encryption-customer-algorithm
+          in: header
+          description: SSE-C decryption algorithm (AES256).
+          schema:
+            type: string
+        - name: x-amz-server-side-encryption-customer-key
+          in: header
+          description: SSE-C base64-encoded decryption key.
+          schema:
+            type: string
+        - name: x-amz-server-side-encryption-customer-key-MD5
+          in: header
+          description: SSE-C base64-encoded MD5 of the decryption key.
+          schema:
+            type: string
+        # override response headers
+        - name: response-content-type
+          in: query
+          description: Override the Content-Type response header.
+          schema:
+            type: string
+        - name: response-content-disposition
+          in: query
+          description: Override the Content-Disposition response header.
+          schema:
+            type: string
+        - name: response-content-encoding
+          in: query
+          description: Override the Content-Encoding response header.
+          schema:
+            type: string
+        - name: response-content-language
+          in: query
+          description: Override the Content-Language response header.
+          schema:
+            type: string
+        - name: response-expires
+          in: query
+          description: Override the Expires response header.
+          schema:
+            type: string
+        - name: response-cache-control
+          in: query
+          description: Override the Cache-Control response header.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: |
+            Full object body, ACL XML, or ListParts XML returned.
+          headers:
+            Content-Type:
+              description: MIME type of the object.
+              schema:
+                type: string
+            Content-Length:
+              description: Size of the object in bytes.
+              schema:
+                type: integer
+                format: int64
+            ETag:
+              description: Entity tag of the object.
+              schema:
+                type: string
+            Last-Modified:
+              description: Date the object was last modified.
+              schema:
+                type: string
+                format: date-time
+            x-amz-request-id:
+              $ref: "#/components/headers/x-amz-request-id"
+            x-amz-version-id:
+              description: Version ID if versioning is enabled.
+              schema:
+                type: string
+            x-amz-server-side-encryption:
+              description: SSE algorithm used.
+              schema:
+                type: string
+            x-amz-meta-:
+              description: User-defined metadata headers (wildcard prefix).
+              schema:
+                type: string
+            x-amz-storage-class:
+              description: Storage class of the object.
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+            Content-Disposition:
+              schema:
+                type: string
+            Content-Encoding:
+              schema:
+                type: string
+            Content-Language:
+              schema:
+                type: string
+            Expires:
+              schema:
+                type: string
+            x-amz-delete-marker:
+              description: Indicates whether the object is a delete marker.
+              schema:
+                type: boolean
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+            application/xml:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/AccessControlPolicy"
+                  - $ref: "#/components/schemas/ListPartsResult"
+        "206":
+          description: Partial content returned for a Range request.
+          headers:
+            Content-Range:
+              description: Byte range delivered.
+              schema:
+                type: string
+            Content-Length:
+              description: Length of the partial content.
+              schema:
+                type: integer
+                format: int64
+            ETag:
+              description: Entity tag of the object.
+              schema:
+                type: string
+            x-amz-request-id:
+              $ref: "#/components/headers/x-amz-request-id"
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "304":
+          description: Object not modified (conditional GET).
+          headers:
+            ETag:
+              schema:
+                type: string
+            x-amz-request-id:
+              $ref: "#/components/headers/x-amz-request-id"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/AccessDenied"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+        "416":
+          $ref: "#/components/responses/RangeNotSatisfiable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    # ----- HEAD /{Bucket}/{Key+} ------------------------------------------
+    head:
+      operationId: HeadObject
+      summary: Retrieve metadata for an object without returning the body
+      tags: [Object]
+      parameters:
+        - name: Range
+          in: header
+          description: "Byte range (e.g., bytes=0-499). HEAD returns Content-Length for the range."
+          schema:
+            type: string
+        - name: If-Match
+          in: header
+          schema:
+            type: string
+        - name: If-None-Match
+          in: header
+          schema:
+            type: string
+        - name: If-Modified-Since
+          in: header
+          schema:
+            type: string
+            format: date-time
+        - name: If-Unmodified-Since
+          in: header
+          schema:
+            type: string
+            format: date-time
+        - name: x-amz-server-side-encryption-customer-algorithm
+          in: header
+          schema:
+            type: string
+        - name: x-amz-server-side-encryption-customer-key
+          in: header
+          schema:
+            type: string
+        - name: x-amz-server-side-encryption-customer-key-MD5
+          in: header
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Object metadata returned.
+          headers:
+            Content-Type:
+              schema:
+                type: string
+            Content-Length:
+              schema:
+                type: integer
+                format: int64
+            ETag:
+              schema:
+                type: string
+            Last-Modified:
+              schema:
+                type: string
+                format: date-time
+            x-amz-request-id:
+              $ref: "#/components/headers/x-amz-request-id"
+            x-amz-version-id:
+              schema:
+                type: string
+            x-amz-server-side-encryption:
+              schema:
+                type: string
+            x-amz-storage-class:
+              schema:
+                type: string
+            x-amz-meta-:
+              description: User-defined metadata (wildcard prefix).
+              schema:
+                type: string
+            x-amz-delete-marker:
+              schema:
+                type: boolean
+            Cache-Control:
+              schema:
+                type: string
+            Content-Disposition:
+              schema:
+                type: string
+            Content-Encoding:
+              schema:
+                type: string
+            Content-Language:
+              schema:
+                type: string
+            Expires:
+              schema:
+                type: string
+            x-amz-restore:
+              description: Restore status for archived objects.
+              schema:
+                type: string
+        "304":
+          description: Object not modified.
+          headers:
+            ETag:
+              schema:
+                type: string
+            x-amz-request-id:
+              $ref: "#/components/headers/x-amz-request-id"
+        "403":
+          description: Access denied (no body for HEAD).
+        "404":
+          description: Object not found (no body for HEAD).
+        "412":
+          description: Precondition failed (no body for HEAD).
+        "500":
+          description: Internal server error (no body for HEAD).
+
+    # ----- DELETE /{Bucket}/{Key+} ----------------------------------------
+    delete:
+      operationId: DeleteObject
+      summary: |
+        Delete an object or abort a multipart upload (?uploadId).
+      tags: [Object, MultipartUpload]
+      parameters:
+        - name: uploadId
+          in: query
+          description: When present, aborts the specified multipart upload instead of deleting the object.
+          schema:
+            type: string
+        - name: x-amz-mfa
+          in: header
+          description: MFA device serial and token (for MFA-Delete enabled buckets).
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Object deleted or multipart upload aborted.
+          headers:
+            x-amz-request-id:
+              $ref: "#/components/headers/x-amz-request-id"
+            x-amz-delete-marker:
+              description: True if a delete marker was created (versioned bucket).
+              schema:
+                type: boolean
+            x-amz-version-id:
+              description: Version ID of the delete marker or deleted version.
+              schema:
+                type: string
+        "403":
+          $ref: "#/components/responses/AccessDenied"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    # ----- POST /{Bucket}/{Key+} ------------------------------------------
+    post:
+      operationId: PostObject
+      summary: |
+        Multiplex: CreateMultipartUpload (?uploads) or
+        CompleteMultipartUpload (?uploadId).
+      tags: [MultipartUpload]
+      parameters:
+        - name: uploads
+          in: query
+          description: When present (no value), initiates a new multipart upload.
+          allowEmptyValue: true
+          schema:
+            type: string
+        - name: uploadId
+          in: query
+          description: When present, completes the specified multipart upload.
+          schema:
+            type: string
+        # headers used by CreateMultipartUpload
+        - $ref: "#/components/parameters/ContentTypeHeader"
+        - $ref: "#/components/parameters/CacheControlHeader"
+        - $ref: "#/components/parameters/ContentDispositionHeader"
+        - $ref: "#/components/parameters/ContentEncodingHeader"
+        - $ref: "#/components/parameters/ExpiresHeader"
+        - name: x-amz-acl
+          in: header
+          description: Canned ACL for the object created by multipart upload.
+          schema:
+            $ref: "#/components/schemas/CannedAcl"
+        - name: x-amz-grant-read
+          in: header
+          schema:
+            type: string
+        - name: x-amz-grant-read-acp
+          in: header
+          schema:
+            type: string
+        - name: x-amz-grant-write-acp
+          in: header
+          schema:
+            type: string
+        - name: x-amz-grant-full-control
+          in: header
+          schema:
+            type: string
+        - name: x-amz-server-side-encryption
+          in: header
+          schema:
+            type: string
+            enum: [AES256, "aws:kms"]
+        - name: x-amz-server-side-encryption-customer-algorithm
+          in: header
+          schema:
+            type: string
+        - name: x-amz-server-side-encryption-customer-key
+          in: header
+          schema:
+            type: string
+        - name: x-amz-server-side-encryption-customer-key-MD5
+          in: header
+          schema:
+            type: string
+        - name: x-amz-storage-class
+          in: header
+          schema:
+            $ref: "#/components/schemas/StorageClass"
+        - name: x-amz-tagging
+          in: header
+          description: URL-encoded tag set.
+          schema:
+            type: string
+        - name: x-amz-meta-
+          in: header
+          description: User-defined metadata (wildcard prefix).
+          schema:
+            type: string
+      requestBody:
+        description: |
+          CompleteMultipartUpload XML body listing all uploaded parts.
+          Not required for CreateMultipartUpload.
+        required: false
+        content:
+          application/xml:
+            schema:
+              $ref: "#/components/schemas/CompleteMultipartUploadRequest"
+      responses:
+        "200":
+          description: |
+            InitiateMultipartUploadResult (for ?uploads) or
+            CompleteMultipartUploadResult (for ?uploadId).
+          headers:
+            x-amz-request-id:
+              $ref: "#/components/headers/x-amz-request-id"
+            x-amz-server-side-encryption:
+              schema:
+                type: string
+            x-amz-version-id:
+              schema:
+                type: string
+          content:
+            application/xml:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/InitiateMultipartUploadResult"
+                  - $ref: "#/components/schemas/CompleteMultipartUploadResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/AccessDenied"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+# ===========================================================================
+# Components
+# ===========================================================================
+components:
+
+  # -------------------------------------------------------------------------
+  # Security Schemes
+  # -------------------------------------------------------------------------
+  securitySchemes:
+    sigv4:
+      type: http
+      scheme: bearer
+      description: |
+        AWS Signature Version 4 authentication. Clients must sign each
+        request using their access key ID and secret access key, placing the
+        signature in the Authorization header (or as query-string
+        parameters for pre-signed URLs). The format is:
+
+          Authorization: AWS4-HMAC-SHA256
+            Credential=<access-key>/<date>/<region>/s3/aws4_request,
+            SignedHeaders=<signed-headers>,
+            Signature=<signature>
+
+        BleepStore validates the signature against stored credentials.
+
+  # -------------------------------------------------------------------------
+  # Parameters
+  # -------------------------------------------------------------------------
+  parameters:
+    BucketParam:
+      name: Bucket
+      in: path
+      required: true
+      description: Name of the S3 bucket.
+      schema:
+        type: string
+        minLength: 3
+        maxLength: 63
+        pattern: "^[a-z0-9][a-z0-9.\\-]{1,61}[a-z0-9]$"
+
+    KeyParam:
+      name: Key+
+      in: path
+      required: true
+      description: |
+        Object key. The `+` suffix in the path template indicates that the
+        key may contain forward slashes (greedy match).
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 1024
+
+    AclQueryParam:
+      name: acl
+      in: query
+      description: When present (no value needed), the operation targets the ACL sub-resource.
+      allowEmptyValue: true
+      schema:
+        type: string
+
+    ContentTypeHeader:
+      name: Content-Type
+      in: header
+      description: MIME type of the object data.
+      schema:
+        type: string
+
+    ContentMD5Header:
+      name: Content-MD5
+      in: header
+      description: Base64-encoded 128-bit MD5 digest of the body.
+      schema:
+        type: string
+
+    ContentLengthHeader:
+      name: Content-Length
+      in: header
+      description: Size of the body in bytes.
+      schema:
+        type: integer
+        format: int64
+
+    CacheControlHeader:
+      name: Cache-Control
+      in: header
+      description: Cache-Control header to store with the object.
+      schema:
+        type: string
+
+    ContentDispositionHeader:
+      name: Content-Disposition
+      in: header
+      description: Content-Disposition header to store with the object.
+      schema:
+        type: string
+
+    ContentEncodingHeader:
+      name: Content-Encoding
+      in: header
+      description: Content-Encoding header to store with the object.
+      schema:
+        type: string
+
+    ExpiresHeader:
+      name: Expires
+      in: header
+      description: Expires header to store with the object.
+      schema:
+        type: string
+        format: date-time
+
+  # -------------------------------------------------------------------------
+  # Headers
+  # -------------------------------------------------------------------------
+  headers:
+    x-amz-request-id:
+      description: Unique identifier assigned to the request by BleepStore.
+      schema:
+        type: string
+
+  # -------------------------------------------------------------------------
+  # Responses
+  # -------------------------------------------------------------------------
+  responses:
+    BadRequest:
+      description: "400 -- The request was malformed or contained invalid parameters."
+      headers:
+        x-amz-request-id:
+          $ref: "#/components/headers/x-amz-request-id"
+      content:
+        application/xml:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    AccessDenied:
+      description: "403 -- Access denied. The credentials are invalid or lack permission."
+      headers:
+        x-amz-request-id:
+          $ref: "#/components/headers/x-amz-request-id"
+      content:
+        application/xml:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    NotFound:
+      description: "404 -- The specified bucket or object does not exist."
+      headers:
+        x-amz-request-id:
+          $ref: "#/components/headers/x-amz-request-id"
+      content:
+        application/xml:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    Conflict:
+      description: "409 -- Conflict (e.g., bucket not empty, resource already exists)."
+      headers:
+        x-amz-request-id:
+          $ref: "#/components/headers/x-amz-request-id"
+      content:
+        application/xml:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    PreconditionFailed:
+      description: "412 -- A precondition header (If-Match, If-Unmodified-Since, etc.) was not met."
+      headers:
+        x-amz-request-id:
+          $ref: "#/components/headers/x-amz-request-id"
+      content:
+        application/xml:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    RangeNotSatisfiable:
+      description: "416 -- The requested Range is not satisfiable for the object."
+      headers:
+        x-amz-request-id:
+          $ref: "#/components/headers/x-amz-request-id"
+      content:
+        application/xml:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    InternalError:
+      description: "500 -- An internal server error occurred."
+      headers:
+        x-amz-request-id:
+          $ref: "#/components/headers/x-amz-request-id"
+      content:
+        application/xml:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    ServiceUnavailable:
+      description: "503 -- The service is temporarily unavailable. Retry with exponential backoff."
+      headers:
+        x-amz-request-id:
+          $ref: "#/components/headers/x-amz-request-id"
+      content:
+        application/xml:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  # -------------------------------------------------------------------------
+  # Schemas
+  # -------------------------------------------------------------------------
+  schemas:
+
+    # === Enums / value types ==============================================
+
+    CannedAcl:
+      type: string
+      enum:
+        - private
+        - public-read
+        - public-read-write
+        - authenticated-read
+        - aws-exec-read
+        - bucket-owner-read
+        - bucket-owner-full-control
+        - log-delivery-write
+
+    StorageClass:
+      type: string
+      enum:
+        - STANDARD
+        - REDUCED_REDUNDANCY
+        - STANDARD_IA
+        - ONEZONE_IA
+        - INTELLIGENT_TIERING
+        - GLACIER
+        - DEEP_ARCHIVE
+        - GLACIER_IR
+
+    Permission:
+      type: string
+      enum:
+        - FULL_CONTROL
+        - WRITE
+        - WRITE_ACP
+        - READ
+        - READ_ACP
+
+    # === Error ============================================================
+
+    Error:
+      type: object
+      xml:
+        name: Error
+        namespace: http://s3.amazonaws.com/doc/2006-03-01/
+      properties:
+        Code:
+          type: string
+          description: Machine-readable error code (e.g. NoSuchBucket, AccessDenied).
+        Message:
+          type: string
+          description: Human-readable error description.
+        Resource:
+          type: string
+          description: The resource associated with the error.
+        RequestId:
+          type: string
+          description: Unique request identifier.
+        HostId:
+          type: string
+          description: Extended request ID for debugging.
+        BucketName:
+          type: string
+          description: Bucket name (present on some bucket-related errors).
+        Key:
+          type: string
+          description: Object key (present on some object-related errors).
+      required: [Code, Message, RequestId]
+
+    # === Bucket list ======================================================
+
+    ListAllMyBucketsResult:
+      type: object
+      xml:
+        name: ListAllMyBucketsResult
+        namespace: http://s3.amazonaws.com/doc/2006-03-01/
+      properties:
+        Owner:
+          $ref: "#/components/schemas/Owner"
+        Buckets:
+          type: object
+          properties:
+            Bucket:
+              type: array
+              items:
+                $ref: "#/components/schemas/BucketInfo"
+              xml:
+                wrapped: false
+      required: [Owner, Buckets]
+
+    BucketInfo:
+      type: object
+      xml:
+        name: Bucket
+      properties:
+        Name:
+          type: string
+        CreationDate:
+          type: string
+          format: date-time
+      required: [Name, CreationDate]
+
+    # === Bucket configuration =============================================
+
+    CreateBucketConfiguration:
+      type: object
+      xml:
+        name: CreateBucketConfiguration
+        namespace: http://s3.amazonaws.com/doc/2006-03-01/
+      properties:
+        LocationConstraint:
+          type: string
+          description: Region where the bucket should be created.
+
+    LocationConstraint:
+      type: object
+      xml:
+        name: LocationConstraint
+        namespace: http://s3.amazonaws.com/doc/2006-03-01/
+      properties:
+        value:
+          type: string
+          description: The region name (element text content).
+          xml:
+            x-text: true
+
+    # === ACL ==============================================================
+
+    AccessControlPolicy:
+      type: object
+      xml:
+        name: AccessControlPolicy
+        namespace: http://s3.amazonaws.com/doc/2006-03-01/
+      properties:
+        Owner:
+          $ref: "#/components/schemas/Owner"
+        AccessControlList:
+          type: object
+          properties:
+            Grant:
+              type: array
+              items:
+                $ref: "#/components/schemas/Grant"
+              xml:
+                wrapped: false
+      required: [Owner, AccessControlList]
+
+    Owner:
+      type: object
+      properties:
+        ID:
+          type: string
+          description: Canonical user ID.
+        DisplayName:
+          type: string
+          description: Display name of the owner.
+      required: [ID]
+
+    Grant:
+      type: object
+      properties:
+        Grantee:
+          $ref: "#/components/schemas/Grantee"
+        Permission:
+          $ref: "#/components/schemas/Permission"
+      required: [Grantee, Permission]
+
+    Grantee:
+      type: object
+      xml:
+        name: Grantee
+      properties:
+        Type:
+          type: string
+          description: "Type attribute: CanonicalUser, AmazonCustomerByEmail, or Group."
+          xml:
+            attribute: true
+            prefix: xsi
+            name: type
+          enum:
+            - CanonicalUser
+            - AmazonCustomerByEmail
+            - Group
+        ID:
+          type: string
+          description: Canonical user ID (for CanonicalUser type).
+        DisplayName:
+          type: string
+          description: Display name (for CanonicalUser type).
+        EmailAddress:
+          type: string
+          description: Email address (for AmazonCustomerByEmail type).
+        URI:
+          type: string
+          description: |
+            Group URI (for Group type). Common values:
+            - http://acs.amazonaws.com/groups/global/AllUsers
+            - http://acs.amazonaws.com/groups/global/AuthenticatedUsers
+            - http://acs.amazonaws.com/groups/s3/LogDelivery
+      required: [Type]
+
+    # === ListObjects (v1) =================================================
+
+    ListBucketResult:
+      type: object
+      xml:
+        name: ListBucketResult
+        namespace: http://s3.amazonaws.com/doc/2006-03-01/
+      properties:
+        Name:
+          type: string
+          description: Bucket name.
+        Prefix:
+          type: string
+        Marker:
+          type: string
+        NextMarker:
+          type: string
+          description: Present when IsTruncated is true and a delimiter was used.
+        MaxKeys:
+          type: integer
+        Delimiter:
+          type: string
+        IsTruncated:
+          type: boolean
+        EncodingType:
+          type: string
+        Contents:
+          type: array
+          items:
+            $ref: "#/components/schemas/ObjectEntry"
+          xml:
+            wrapped: false
+        CommonPrefixes:
+          type: array
+          items:
+            $ref: "#/components/schemas/CommonPrefix"
+          xml:
+            wrapped: false
+      required: [Name, Prefix, MaxKeys, IsTruncated]
+
+    # === ListObjectsV2 ====================================================
+
+    ListBucketResultV2:
+      type: object
+      xml:
+        name: ListBucketResult
+        namespace: http://s3.amazonaws.com/doc/2006-03-01/
+      properties:
+        Name:
+          type: string
+        Prefix:
+          type: string
+        StartAfter:
+          type: string
+        ContinuationToken:
+          type: string
+        NextContinuationToken:
+          type: string
+          description: Present when IsTruncated is true.
+        MaxKeys:
+          type: integer
+        Delimiter:
+          type: string
+        IsTruncated:
+          type: boolean
+        KeyCount:
+          type: integer
+          description: Number of keys returned in this response.
+        EncodingType:
+          type: string
+        Contents:
+          type: array
+          items:
+            $ref: "#/components/schemas/ObjectEntry"
+          xml:
+            wrapped: false
+        CommonPrefixes:
+          type: array
+          items:
+            $ref: "#/components/schemas/CommonPrefix"
+          xml:
+            wrapped: false
+      required: [Name, Prefix, MaxKeys, KeyCount, IsTruncated]
+
+    ObjectEntry:
+      type: object
+      xml:
+        name: Contents
+      properties:
+        Key:
+          type: string
+        LastModified:
+          type: string
+          format: date-time
+        ETag:
+          type: string
+        Size:
+          type: integer
+          format: int64
+        StorageClass:
+          $ref: "#/components/schemas/StorageClass"
+        Owner:
+          $ref: "#/components/schemas/Owner"
+        ChecksumAlgorithm:
+          type: string
+          description: Checksum algorithm used (e.g., SHA256, CRC32).
+      required: [Key, LastModified, ETag, Size, StorageClass]
+
+    CommonPrefix:
+      type: object
+      xml:
+        name: CommonPrefixes
+      properties:
+        Prefix:
+          type: string
+      required: [Prefix]
+
+    # === CopyObject =======================================================
+
+    CopyObjectResult:
+      type: object
+      xml:
+        name: CopyObjectResult
+        namespace: http://s3.amazonaws.com/doc/2006-03-01/
+      properties:
+        LastModified:
+          type: string
+          format: date-time
+        ETag:
+          type: string
+      required: [LastModified, ETag]
+
+    # === Delete Objects (multi-object delete) =============================
+
+    DeleteObjectsRequest:
+      type: object
+      xml:
+        name: Delete
+        namespace: http://s3.amazonaws.com/doc/2006-03-01/
+      properties:
+        Quiet:
+          type: boolean
+          description: When true, the response only includes errors.
+          default: false
+        Object:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            $ref: "#/components/schemas/ObjectIdentifier"
+          xml:
+            wrapped: false
+      required: [Object]
+
+    ObjectIdentifier:
+      type: object
+      xml:
+        name: Object
+      properties:
+        Key:
+          type: string
+          description: Key of the object to delete.
+        VersionId:
+          type: string
+          description: Version ID of the object to delete (optional).
+      required: [Key]
+
+    DeleteResult:
+      type: object
+      xml:
+        name: DeleteResult
+        namespace: http://s3.amazonaws.com/doc/2006-03-01/
+      properties:
+        Deleted:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeletedObject"
+          xml:
+            wrapped: false
+        Error:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeleteError"
+          xml:
+            wrapped: false
+
+    DeletedObject:
+      type: object
+      xml:
+        name: Deleted
+      properties:
+        Key:
+          type: string
+        VersionId:
+          type: string
+        DeleteMarker:
+          type: boolean
+        DeleteMarkerVersionId:
+          type: string
+      required: [Key]
+
+    DeleteError:
+      type: object
+      xml:
+        name: Error
+      properties:
+        Key:
+          type: string
+        VersionId:
+          type: string
+        Code:
+          type: string
+        Message:
+          type: string
+      required: [Key, Code, Message]
+
+    # === Multipart Upload =================================================
+
+    InitiateMultipartUploadResult:
+      type: object
+      xml:
+        name: InitiateMultipartUploadResult
+        namespace: http://s3.amazonaws.com/doc/2006-03-01/
+      properties:
+        Bucket:
+          type: string
+        Key:
+          type: string
+        UploadId:
+          type: string
+          description: Unique identifier for the multipart upload.
+      required: [Bucket, Key, UploadId]
+
+    CompleteMultipartUploadRequest:
+      type: object
+      xml:
+        name: CompleteMultipartUpload
+        namespace: http://s3.amazonaws.com/doc/2006-03-01/
+      properties:
+        Part:
+          type: array
+          items:
+            $ref: "#/components/schemas/CompletedPart"
+          xml:
+            wrapped: false
+      required: [Part]
+
+    CompletedPart:
+      type: object
+      xml:
+        name: Part
+      properties:
+        PartNumber:
+          type: integer
+          minimum: 1
+          maximum: 10000
+        ETag:
+          type: string
+          description: ETag returned when the part was uploaded.
+        ChecksumCRC32:
+          type: string
+        ChecksumCRC32C:
+          type: string
+        ChecksumSHA1:
+          type: string
+        ChecksumSHA256:
+          type: string
+      required: [PartNumber, ETag]
+
+    CompleteMultipartUploadResult:
+      type: object
+      xml:
+        name: CompleteMultipartUploadResult
+        namespace: http://s3.amazonaws.com/doc/2006-03-01/
+      properties:
+        Location:
+          type: string
+          description: URI of the newly created object.
+        Bucket:
+          type: string
+        Key:
+          type: string
+        ETag:
+          type: string
+          description: Entity tag of the assembled object.
+      required: [Location, Bucket, Key, ETag]
+
+    ListMultipartUploadsResult:
+      type: object
+      xml:
+        name: ListMultipartUploadsResult
+        namespace: http://s3.amazonaws.com/doc/2006-03-01/
+      properties:
+        Bucket:
+          type: string
+        KeyMarker:
+          type: string
+        UploadIdMarker:
+          type: string
+        NextKeyMarker:
+          type: string
+        NextUploadIdMarker:
+          type: string
+        MaxUploads:
+          type: integer
+        IsTruncated:
+          type: boolean
+        Prefix:
+          type: string
+        Delimiter:
+          type: string
+        EncodingType:
+          type: string
+        Upload:
+          type: array
+          items:
+            $ref: "#/components/schemas/MultipartUploadEntry"
+          xml:
+            wrapped: false
+        CommonPrefixes:
+          type: array
+          items:
+            $ref: "#/components/schemas/CommonPrefix"
+          xml:
+            wrapped: false
+      required: [Bucket, KeyMarker, UploadIdMarker, MaxUploads, IsTruncated]
+
+    MultipartUploadEntry:
+      type: object
+      xml:
+        name: Upload
+      properties:
+        Key:
+          type: string
+        UploadId:
+          type: string
+        Initiator:
+          $ref: "#/components/schemas/Initiator"
+        Owner:
+          $ref: "#/components/schemas/Owner"
+        StorageClass:
+          $ref: "#/components/schemas/StorageClass"
+        Initiated:
+          type: string
+          format: date-time
+          description: Date and time the multipart upload was initiated.
+      required: [Key, UploadId, Initiator, Owner, StorageClass, Initiated]
+
+    Initiator:
+      type: object
+      properties:
+        ID:
+          type: string
+        DisplayName:
+          type: string
+      required: [ID]
+
+    ListPartsResult:
+      type: object
+      xml:
+        name: ListPartsResult
+        namespace: http://s3.amazonaws.com/doc/2006-03-01/
+      properties:
+        Bucket:
+          type: string
+        Key:
+          type: string
+        UploadId:
+          type: string
+        Initiator:
+          $ref: "#/components/schemas/Initiator"
+        Owner:
+          $ref: "#/components/schemas/Owner"
+        StorageClass:
+          $ref: "#/components/schemas/StorageClass"
+        PartNumberMarker:
+          type: integer
+        NextPartNumberMarker:
+          type: integer
+        MaxParts:
+          type: integer
+        IsTruncated:
+          type: boolean
+        Part:
+          type: array
+          items:
+            $ref: "#/components/schemas/PartEntry"
+          xml:
+            wrapped: false
+        EncodingType:
+          type: string
+      required:
+        - Bucket
+        - Key
+        - UploadId
+        - Initiator
+        - Owner
+        - StorageClass
+        - PartNumberMarker
+        - NextPartNumberMarker
+        - MaxParts
+        - IsTruncated
+
+    PartEntry:
+      type: object
+      xml:
+        name: Part
+      properties:
+        PartNumber:
+          type: integer
+        LastModified:
+          type: string
+          format: date-time
+        ETag:
+          type: string
+        Size:
+          type: integer
+          format: int64
+        ChecksumCRC32:
+          type: string
+        ChecksumCRC32C:
+          type: string
+        ChecksumSHA1:
+          type: string
+        ChecksumSHA256:
+          type: string
+      required: [PartNumber, LastModified, ETag, Size]
