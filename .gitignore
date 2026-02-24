@@ -1,0 +1,55 @@
+# Data
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.uv/
+*.egg-info/
+dist/
+build/
+
+# Go
+golang/bleepstore
+golang/vendor/
+
+# Rust
+rust/target/
+
+# Zig
+zig/zig-out/
+zig/zig-cache/
+zig/.zig-cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+tests/e2e/__pycache__/
+tests/performance/__pycache__/
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Config (user-specific)
+bleepstore.yaml
+
+# Claude Code
+.claude/
+
+# Logs
+logs/
+*.log

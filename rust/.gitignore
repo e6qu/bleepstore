@@ -1,0 +1,8 @@
+# Rust-specific
+target/
+
+# Logs
+logs/
+
+# Data (runtime)
+data/

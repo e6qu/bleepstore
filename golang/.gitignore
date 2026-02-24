@@ -1,0 +1,9 @@
+# Go-specific
+bleepstore
+vendor/
+
+# Logs
+logs/
+
+# Data (runtime)
+data/

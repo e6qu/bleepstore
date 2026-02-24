@@ -1,0 +1,17 @@
+# Python-specific
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Logs
+logs/
+
+# Data (runtime)
+data/

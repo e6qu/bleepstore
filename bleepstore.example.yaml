@@ -1,0 +1,60 @@
+# BleepStore Configuration Example
+#
+# Copy this file to bleepstore.yaml and modify as needed.
+# All implementations (Python, Go, Rust, Zig) use this same format.
+
+server:
+  host: "0.0.0.0"
+  port: 9000
+  region: "us-east-1"
+  # admin_port: 9001         # Separate port for admin API (optional)
+  # admin_token: "secret"    # Bearer token for admin API access
+
+auth:
+  # Default credentials for development. Change in production!
+  access_key: "bleepstore"
+  secret_key: "bleepstore-secret"
+
+metadata:
+  engine: "sqlite"             # "sqlite" (embedded mode) or "raft" (cluster mode)
+  sqlite:
+    path: "./data/metadata.db"
+
+storage:
+  backend: "local"             # "local", "aws", "gcp", "azure"
+
+  local:
+    root_dir: "./data/objects"
+
+  # aws:
+  #   bucket: "my-backing-bucket"
+  #   region: "us-east-1"
+  #   prefix: "bleepstore/"
+  #   # Uses standard AWS credential chain (env vars, ~/.aws/credentials, IAM role)
+
+  # gcp:
+  #   bucket: "my-backing-bucket"
+  #   project: "my-project"
+  #   prefix: "bleepstore/"
+  #   # Uses Application Default Credentials
+
+  # azure:
+  #   container: "my-container"
+  #   account: "my-account"
+  #   prefix: "bleepstore/"
+  #   # Uses DefaultAzureCredential chain
+
+# Cluster configuration (only used when metadata.engine = "raft")
+# cluster:
+#   node_id: "node-1"
+#   bind_addr: "0.0.0.0:9001"
+#   advertise_addr: "10.0.1.1:9001"
+#   data_dir: "./data/raft"
+#   peers:
+#     - id: "node-2"
+#       addr: "10.0.1.2:9001"
+#     - id: "node-3"
+#       addr: "10.0.1.3:9001"
+#   election_timeout_ms: 1000
+#   heartbeat_interval_ms: 150
+#   snapshot_interval: 10000

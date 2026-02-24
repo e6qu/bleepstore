@@ -1,0 +1,272 @@
+//! Configuration loading and types for BleepStore.
+//!
+//! Configuration is read from a YAML file and deserialized into the
+//! [`Config`] struct.  Each subsection governs a different part of the
+//! system: networking, authentication, metadata persistence, object
+//! storage, and cluster coordination.
+
+use serde::Deserialize;
+use std::path::Path;
+
+/// Top-level configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Config {
+    /// HTTP server settings.
+    #[serde(default)]
+    pub server: ServerConfig,
+
+    /// Authentication / authorization settings.
+    #[serde(default)]
+    pub auth: AuthConfig,
+
+    /// Metadata store settings.
+    #[serde(default)]
+    pub metadata: MetadataConfig,
+
+    /// Object storage backend settings.
+    #[serde(default)]
+    pub storage: StorageConfig,
+
+    /// Cluster / replication settings.
+    #[serde(default)]
+    pub cluster: ClusterConfig,
+}
+
+/// HTTP listener configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ServerConfig {
+    /// Bind host address.
+    #[serde(default = "default_host")]
+    pub host: String,
+
+    /// Bind port.
+    #[serde(default = "default_port")]
+    pub port: u16,
+
+    /// AWS region to present (e.g. `us-east-1`).
+    #[serde(default = "default_region")]
+    pub region: String,
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            host: default_host(),
+            port: default_port(),
+            region: default_region(),
+        }
+    }
+}
+
+/// Authentication settings.
+///
+/// Field names match `bleepstore.example.yaml`:
+/// `auth.access_key` and `auth.secret_key`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AuthConfig {
+    /// Access key (maps to `access_key` in YAML, also accepts `access_key_id`).
+    #[serde(alias = "access_key_id", default = "default_access_key")]
+    pub access_key: String,
+
+    /// Secret access key (maps to `secret_key` in YAML, also accepts `secret_access_key`).
+    #[serde(alias = "secret_access_key", default = "default_secret_key")]
+    pub secret_key: String,
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            access_key: default_access_key(),
+            secret_key: default_secret_key(),
+        }
+    }
+}
+
+/// Metadata store configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct MetadataConfig {
+    /// Backend type: `sqlite` or `raft`.
+    #[serde(default = "default_metadata_engine")]
+    pub engine: String,
+
+    /// SQLite-specific configuration.
+    #[serde(default)]
+    pub sqlite: SqliteConfig,
+}
+
+impl Default for MetadataConfig {
+    fn default() -> Self {
+        Self {
+            engine: default_metadata_engine(),
+            sqlite: SqliteConfig::default(),
+        }
+    }
+}
+
+/// SQLite-specific metadata configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SqliteConfig {
+    /// Path to the SQLite database file.
+    #[serde(default = "default_metadata_path")]
+    pub path: String,
+}
+
+impl Default for SqliteConfig {
+    fn default() -> Self {
+        Self {
+            path: default_metadata_path(),
+        }
+    }
+}
+
+/// Object storage backend configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct StorageConfig {
+    /// Backend type: `local`, `aws`, `gcp`, `azure`.
+    #[serde(default = "default_storage_backend")]
+    pub backend: String,
+
+    /// Local storage configuration.
+    #[serde(default)]
+    pub local: LocalStorageConfig,
+
+    /// AWS S3 gateway configuration.
+    #[serde(default)]
+    pub aws: Option<AwsStorageConfig>,
+
+    /// GCP Cloud Storage gateway configuration.
+    #[serde(default)]
+    pub gcp: Option<GcpStorageConfig>,
+
+    /// Azure Blob Storage gateway configuration.
+    #[serde(default)]
+    pub azure: Option<AzureStorageConfig>,
+}
+
+impl Default for StorageConfig {
+    fn default() -> Self {
+        Self {
+            backend: default_storage_backend(),
+            local: LocalStorageConfig::default(),
+            aws: None,
+            gcp: None,
+            azure: None,
+        }
+    }
+}
+
+/// Local filesystem storage configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LocalStorageConfig {
+    /// Root directory for stored objects.
+    #[serde(default = "default_storage_root")]
+    pub root_dir: String,
+}
+
+impl Default for LocalStorageConfig {
+    fn default() -> Self {
+        Self {
+            root_dir: default_storage_root(),
+        }
+    }
+}
+
+/// AWS S3 gateway configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AwsStorageConfig {
+    /// Backing S3 bucket name.
+    pub bucket: String,
+    /// AWS region.
+    #[serde(default = "default_region")]
+    pub region: String,
+    /// Key prefix in the backing bucket.
+    #[serde(default)]
+    pub prefix: String,
+}
+
+/// GCP Cloud Storage gateway configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct GcpStorageConfig {
+    /// Backing GCS bucket name.
+    pub bucket: String,
+    /// GCP project ID.
+    #[serde(default)]
+    pub project: String,
+    /// Key prefix in the backing bucket.
+    #[serde(default)]
+    pub prefix: String,
+}
+
+/// Azure Blob Storage gateway configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AzureStorageConfig {
+    /// Backing Azure container name.
+    pub container: String,
+    /// Azure storage account name.
+    pub account: String,
+    /// Key prefix in the backing container.
+    #[serde(default)]
+    pub prefix: String,
+}
+
+/// Cluster / replication configuration.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ClusterConfig {
+    /// Whether clustering is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// This node's unique identifier.
+    pub node_id: Option<String>,
+
+    /// List of peer addresses for Raft consensus.
+    #[serde(default)]
+    pub peers: Vec<String>,
+}
+
+// -- Defaults ----------------------------------------------------------------
+
+fn default_host() -> String {
+    "0.0.0.0".to_string()
+}
+
+fn default_port() -> u16 {
+    9012
+}
+
+fn default_region() -> String {
+    "us-east-1".to_string()
+}
+
+fn default_access_key() -> String {
+    "bleepstore".to_string()
+}
+
+fn default_secret_key() -> String {
+    "bleepstore-secret".to_string()
+}
+
+fn default_metadata_engine() -> String {
+    "sqlite".to_string()
+}
+
+fn default_metadata_path() -> String {
+    "./data/metadata.db".to_string()
+}
+
+fn default_storage_backend() -> String {
+    "local".to_string()
+}
+
+fn default_storage_root() -> String {
+    "./data/objects".to_string()
+}
+
+// -- Loader ------------------------------------------------------------------
+
+/// Load and parse configuration from a YAML file at `path`.
+pub fn load_config<P: AsRef<Path>>(path: P) -> anyhow::Result<Config> {
+    let contents = std::fs::read_to_string(path.as_ref())?;
+    let config: Config = serde_yaml::from_str(&contents)?;
+    Ok(config)
+}

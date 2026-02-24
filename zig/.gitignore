@@ -1,0 +1,10 @@
+# Zig-specific
+zig-out/
+zig-cache/
+.zig-cache/
+
+# Logs
+logs/
+
+# Data (runtime)
+data/
