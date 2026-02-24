@@ -424,9 +424,7 @@ class SQLiteMetadataStore:
         placeholders = ",".join("?" for _ in keys)
 
         # 1. Find which keys exist (single SELECT)
-        sql_select = (
-            f"SELECT key FROM objects WHERE bucket = ? AND key IN ({placeholders})"
-        )
+        sql_select = f"SELECT key FROM objects WHERE bucket = ? AND key IN ({placeholders})"
         async with self._db.execute(sql_select, (bucket, *keys)) as cursor:
             rows = await cursor.fetchall()
         deleted = [row["key"] for row in rows]
@@ -434,9 +432,7 @@ class SQLiteMetadataStore:
         if deleted:
             # 2. Delete them all (single DELETE)
             del_placeholders = ",".join("?" for _ in deleted)
-            sql_delete = (
-                f"DELETE FROM objects WHERE bucket = ? AND key IN ({del_placeholders})"
-            )
+            sql_delete = f"DELETE FROM objects WHERE bucket = ? AND key IN ({del_placeholders})"
             await self._db.execute(sql_delete, (bucket, *deleted))
             await self._db.commit()
 

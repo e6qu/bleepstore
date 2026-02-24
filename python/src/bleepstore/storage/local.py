@@ -134,7 +134,10 @@ class LocalStorageBackend:
         return md5
 
     async def put_stream(
-        self, bucket: str, key: str, stream: AsyncIterator[bytes],
+        self,
+        bucket: str,
+        key: str,
+        stream: AsyncIterator[bytes],
         content_length: int | None = None,
     ) -> tuple[str, int]:
         """Stream-write an object from an async iterator.
@@ -180,8 +183,13 @@ class LocalStorageBackend:
         return md5.hexdigest(), total
 
     async def put_part_stream(
-        self, bucket: str, key: str, upload_id: str, part_number: int,
-        stream: AsyncIterator[bytes], content_length: int | None = None,
+        self,
+        bucket: str,
+        key: str,
+        upload_id: str,
+        part_number: int,
+        stream: AsyncIterator[bytes],
+        content_length: int | None = None,
     ) -> tuple[str, int]:
         """Stream-write a multipart part from an async iterator.
 
@@ -483,7 +491,10 @@ class LocalStorageBackend:
             if exc.errno == errno.ENOSPC:
                 logger.error(
                     "Disk full copying %s/%s -> %s/%s",
-                    src_bucket, src_key, dst_bucket, dst_key,
+                    src_bucket,
+                    src_key,
+                    dst_bucket,
+                    dst_key,
                 )
             raise
 

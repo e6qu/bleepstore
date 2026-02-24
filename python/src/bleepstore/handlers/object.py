@@ -402,6 +402,7 @@ class ObjectHandler:
             try:
                 if int(content_length_hdr) > max_size:
                     from bleepstore.errors import EntityTooLarge
+
                     raise EntityTooLarge()
             except ValueError:
                 pass
@@ -419,7 +420,10 @@ class ObjectHandler:
             # Stream the body directly to storage
             cl_int = int(content_length_hdr) if content_length_hdr else None
             md5_hex, size = await self.storage.put_stream(
-                bucket, key, request.stream(), content_length=cl_int,
+                bucket,
+                key,
+                request.stream(),
+                content_length=cl_int,
             )
 
         # Quote the ETag: S3 ETags are always quoted

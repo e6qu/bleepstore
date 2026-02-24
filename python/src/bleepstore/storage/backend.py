@@ -33,7 +33,10 @@ class StorageBackend(Protocol):
         ...
 
     async def put_stream(
-        self, bucket: str, key: str, stream: AsyncIterator[bytes],
+        self,
+        bucket: str,
+        key: str,
+        stream: AsyncIterator[bytes],
         content_length: int | None = None,
     ) -> tuple[str, int]:
         """Stream-write an object, return (md5_hex, bytes_written).
@@ -50,8 +53,13 @@ class StorageBackend(Protocol):
         ...
 
     async def put_part_stream(
-        self, bucket: str, key: str, upload_id: str, part_number: int,
-        stream: AsyncIterator[bytes], content_length: int | None = None,
+        self,
+        bucket: str,
+        key: str,
+        upload_id: str,
+        part_number: int,
+        stream: AsyncIterator[bytes],
+        content_length: int | None = None,
     ) -> tuple[str, int]:
         """Stream-write a multipart part, return (md5_hex, bytes_written).
 

@@ -224,7 +224,11 @@ class MultipartHandler:
             content_length = request.headers.get("content-length")
             cl_int = int(content_length) if content_length else None
             md5_hex, size = await self.storage.put_part_stream(
-                bucket, key, upload_id, part_number, request.stream(),
+                bucket,
+                key,
+                upload_id,
+                part_number,
+                request.stream(),
                 content_length=cl_int,
             )
 

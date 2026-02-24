@@ -111,7 +111,10 @@ class AWSGatewayBackend:
         return md5
 
     async def put_stream(
-        self, bucket: str, key: str, stream: AsyncIterator[bytes],
+        self,
+        bucket: str,
+        key: str,
+        stream: AsyncIterator[bytes],
         content_length: int | None = None,
     ) -> tuple[str, int]:
         """Stream-write: collect stream and delegate to put()."""
@@ -123,8 +126,13 @@ class AWSGatewayBackend:
         return md5_hex, len(data)
 
     async def put_part_stream(
-        self, bucket: str, key: str, upload_id: str, part_number: int,
-        stream: AsyncIterator[bytes], content_length: int | None = None,
+        self,
+        bucket: str,
+        key: str,
+        upload_id: str,
+        part_number: int,
+        stream: AsyncIterator[bytes],
+        content_length: int | None = None,
     ) -> tuple[str, int]:
         """Stream-write part: collect stream and delegate to put_part()."""
         chunks = []
