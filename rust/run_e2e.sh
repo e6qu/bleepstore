@@ -47,7 +47,7 @@ SERVER_PID=$!
 # Cleanup on exit
 cleanup() {
     echo "Stopping server (PID $SERVER_PID)..."
-    kill $SERVER_PID 2>/dev/null || true
+    kill -9 $SERVER_PID 2>/dev/null || true
     wait $SERVER_PID 2>/dev/null || true
 }
 trap cleanup EXIT

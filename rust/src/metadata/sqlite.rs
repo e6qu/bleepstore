@@ -214,10 +214,7 @@ fn format_timestamp(secs: u64, millis: u32) -> String {
 
     let (year, month, day) = days_to_ymd(days);
 
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
-        year, month, day, hours, minutes, seconds, millis
-    )
+    format!("{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}.{millis:03}Z")
 }
 
 /// Convert days since Unix epoch to (year, month, day).
@@ -497,7 +494,7 @@ impl MetadataStore for SqliteMetadataStore {
             };
 
             // Build the like pattern from the prefix.
-            let like_pattern = format!("{}%", prefix);
+            let like_pattern = format!("{prefix}%");
 
             // Fetch one extra row to determine if truncated.
             let fetch_limit = max_keys as i64 + 1;
@@ -964,7 +961,7 @@ impl MetadataStore for SqliteMetadataStore {
         let upload_id_marker = upload_id_marker.to_string();
         Box::pin(async move {
             let conn = self.conn.lock().expect("mutex poisoned");
-            let like_pattern = format!("{}%", prefix);
+            let like_pattern = format!("{prefix}%");
             let fetch_limit = max_uploads as i64 + 1;
 
             // Build the query with key+upload_id marker support.
@@ -1159,7 +1156,7 @@ mod tests {
             bucket: bucket.to_string(),
             key: key.to_string(),
             size,
-            etag: format!("\"etag-{}\"", key),
+            etag: format!("\"etag-{key}\""),
             content_type: "application/octet-stream".to_string(),
             content_encoding: None,
             content_language: None,
@@ -1644,7 +1641,7 @@ mod tests {
                     PartRecord {
                         part_number: i,
                         size: 5_000_000,
-                        etag: format!("\"etag{}\"", i),
+                        etag: format!("\"etag{i}\""),
                         last_modified: "2026-02-23T00:00:00.000Z".to_string(),
                     },
                 )
@@ -1786,7 +1783,7 @@ mod tests {
                     PartRecord {
                         part_number: i,
                         size: 1000,
-                        etag: format!("\"e{}\"", i),
+                        etag: format!("\"e{i}\""),
                         last_modified: "2026-02-23T00:00:00.000Z".to_string(),
                     },
                 )

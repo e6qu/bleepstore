@@ -10,7 +10,7 @@ pub struct RaftNode {
     /// Addresses of peer nodes.
     pub peers: Vec<String>,
     /// Whether the node is currently running.
-    running: bool,
+    _running: bool,
 }
 
 impl RaftNode {
@@ -19,7 +19,7 @@ impl RaftNode {
         Self {
             node_id,
             peers,
-            running: false,
+            _running: false,
         }
     }
 

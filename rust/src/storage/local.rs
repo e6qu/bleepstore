@@ -49,7 +49,7 @@ impl LocalBackend {
         // component is not ".." after joining.
         for component in std::path::Path::new(storage_key).components() {
             if let std::path::Component::ParentDir = component {
-                anyhow::bail!("Path traversal detected in storage key: {}", storage_key);
+                anyhow::bail!("Path traversal detected in storage key: {storage_key}");
             }
         }
         // Additional safety: if path somehow resolves outside root, reject.
@@ -57,7 +57,7 @@ impl LocalBackend {
         if path.exists() {
             let canonical_path = path.canonicalize()?;
             if !canonical_path.starts_with(&canonical_root) {
-                anyhow::bail!("Path traversal detected in storage key: {}", storage_key);
+                anyhow::bail!("Path traversal detected in storage key: {storage_key}");
             }
         }
         Ok(path)
@@ -66,7 +66,7 @@ impl LocalBackend {
     /// Generate a temp file path under .tmp/ for atomic writes.
     fn temp_path(&self) -> PathBuf {
         let id = uuid::Uuid::new_v4();
-        self.root.join(".tmp").join(format!("tmp-{}", id))
+        self.root.join(".tmp").join(format!("tmp-{id}"))
     }
 }
 
@@ -121,7 +121,7 @@ impl StorageBackend for LocalBackend {
             let path = self.resolve(&storage_key)?;
 
             if !path.exists() {
-                anyhow::bail!("Object not found at storage key: {}", storage_key);
+                anyhow::bail!("Object not found at storage key: {storage_key}");
             }
 
             let data = std::fs::read(&path)?;
@@ -173,15 +173,12 @@ impl StorageBackend for LocalBackend {
         dst_bucket: &str,
         dst_key: &str,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + Send + '_>> {
-        let src_storage_key = format!("{}/{}", bucket, src_key);
-        let dst_storage_key = format!("{}/{}", dst_bucket, dst_key);
+        let src_storage_key = format!("{bucket}/{src_key}");
+        let dst_storage_key = format!("{dst_bucket}/{dst_key}");
         Box::pin(async move {
             let src_path = self.resolve(&src_storage_key)?;
             if !src_path.exists() {
-                anyhow::bail!(
-                    "Source object not found at storage key: {}",
-                    src_storage_key
-                );
+                anyhow::bail!("Source object not found at storage key: {src_storage_key}");
             }
 
             let dst_path = self.resolve(&dst_storage_key)?;
@@ -266,7 +263,7 @@ impl StorageBackend for LocalBackend {
         let parts = parts.to_vec();
         Box::pin(async move {
             // Final object path: {root}/{bucket}/{key}
-            let final_storage_key = format!("{}/{}", bucket, key);
+            let final_storage_key = format!("{bucket}/{key}");
             let final_path = self.resolve(&final_storage_key)?;
 
             // Ensure parent directory exists.
@@ -294,7 +291,7 @@ impl StorageBackend for LocalBackend {
                     .join(&upload_id)
                     .join(part_number.to_string());
                 let part_data = std::fs::read(&part_path)
-                    .map_err(|e| anyhow::anyhow!("Failed to read part {}: {}", part_number, e))?;
+                    .map_err(|e| anyhow::anyhow!("Failed to read part {part_number}: {e}"))?;
 
                 total_size += part_data.len() as u64;
 

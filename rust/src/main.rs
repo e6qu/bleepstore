@@ -126,7 +126,7 @@ async fn main() -> anyhow::Result<()> {
             );
                 Arc::new(backend)
             }
-            "local" | _ => {
+            _ => {
                 let storage_root = &config.storage.local.root_dir;
                 let local_backend = bleepstore::storage::local::LocalBackend::new(storage_root)?;
                 info!("Local storage backend initialized at {}", storage_root);

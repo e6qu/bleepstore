@@ -89,7 +89,7 @@ impl AwsGatewayBackend {
 
     /// Map an AWS SDK error to an anyhow error with context.
     fn map_sdk_error(context: &str, err: impl std::fmt::Display) -> anyhow::Error {
-        anyhow::anyhow!("AWS S3 {}: {}", context, err)
+        anyhow::anyhow!("AWS S3 {context}: {err}")
     }
 }
 
@@ -106,7 +106,7 @@ impl StorageBackend for AwsGatewayBackend {
             // Compute MD5 locally for consistent ETag
             // (AWS may return different ETag with server-side encryption).
             let md5_hex = Self::compute_md5(&data);
-            let etag = format!("\"{}\"", md5_hex);
+            let etag = format!("\"{md5_hex}\"");
 
             debug!("AWS put_object: bucket={} key={}", self.bucket, s3_key);
 
@@ -143,7 +143,7 @@ impl StorageBackend for AwsGatewayBackend {
                 .map_err(|e| {
                     let service_err = e.into_service_error();
                     if service_err.is_no_such_key() {
-                        anyhow::anyhow!("Object not found at storage key: {}", storage_key)
+                        anyhow::anyhow!("Object not found at storage key: {storage_key}")
                     } else {
                         Self::map_sdk_error("get_object", service_err)
                     }
@@ -229,8 +229,8 @@ impl StorageBackend for AwsGatewayBackend {
         dst_bucket: &str,
         dst_key: &str,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + Send + '_>> {
-        let src_storage_key = format!("{}/{}", bucket, src_key);
-        let dst_storage_key = format!("{}/{}", dst_bucket, dst_key);
+        let src_storage_key = format!("{bucket}/{src_key}");
+        let dst_storage_key = format!("{dst_bucket}/{dst_key}");
         Box::pin(async move {
             let src_s3_key = self.s3_key(&src_storage_key);
             let dst_s3_key = self.s3_key(&dst_storage_key);
@@ -267,7 +267,7 @@ impl StorageBackend for AwsGatewayBackend {
             if etag.starts_with('"') {
                 Ok(etag)
             } else {
-                Ok(format!("\"{}\"", etag))
+                Ok(format!("\"{etag}\""))
             }
         })
     }
@@ -285,7 +285,7 @@ impl StorageBackend for AwsGatewayBackend {
 
             // Compute MD5 locally for consistent ETag.
             let md5_hex = Self::compute_md5(&data);
-            let etag = format!("\"{}\"", md5_hex);
+            let etag = format!("\"{md5_hex}\"");
 
             debug!(
                 "AWS put_part: bucket={} key={} (upload={} part={})",
@@ -318,7 +318,7 @@ impl StorageBackend for AwsGatewayBackend {
         let upload_id = upload_id.to_string();
         let parts = parts.to_vec();
         Box::pin(async move {
-            let final_key = self.s3_key(&format!("{}/{}", bucket, key));
+            let final_key = self.s3_key(&format!("{bucket}/{key}"));
 
             debug!(
                 "AWS assemble_parts: bucket={} key={} upload_id={} parts={}",
@@ -359,7 +359,7 @@ impl StorageBackend for AwsGatewayBackend {
                         .unwrap_or("")
                         .trim_matches('"')
                         .to_string();
-                    return Ok(format!("\"{}-1\"", etag));
+                    return Ok(format!("\"{etag}-1\""));
                 }
 
                 let mut composite_hasher = Md5::new();
@@ -667,7 +667,7 @@ impl AwsGatewayBackend {
             if aws_etag.starts_with('"') {
                 Ok(aws_etag)
             } else {
-                Ok(format!("\"{}\"", aws_etag))
+                Ok(format!("\"{aws_etag}\""))
             }
         }
     }
@@ -687,7 +687,7 @@ mod tests {
         let prefix = "bleepstore/";
         let storage_key = "my-bucket/my-key.txt";
         let expected = "bleepstore/my-bucket/my-key.txt";
-        assert_eq!(format!("{}{}", prefix, storage_key), expected);
+        assert_eq!(format!("{prefix}{storage_key}"), expected);
     }
 
     #[test]
@@ -695,7 +695,7 @@ mod tests {
         let prefix = "";
         let storage_key = "my-bucket/my-key.txt";
         let expected = "my-bucket/my-key.txt";
-        assert_eq!(format!("{}{}", prefix, storage_key), expected);
+        assert_eq!(format!("{prefix}{storage_key}"), expected);
     }
 
     #[test]
@@ -705,7 +705,7 @@ mod tests {
         let part_number: u32 = 5;
         let expected = "bleepstore/.parts/abc-123/5";
         assert_eq!(
-            format!("{}.parts/{}/{}", prefix, upload_id, part_number),
+            format!("{prefix}.parts/{upload_id}/{part_number}"),
             expected
         );
     }
@@ -773,7 +773,7 @@ mod tests {
         let prefix = "data/";
         let storage_key = "mybucket/path/to/deep/object.txt";
         let expected = "data/mybucket/path/to/deep/object.txt";
-        assert_eq!(format!("{}{}", prefix, storage_key), expected);
+        assert_eq!(format!("{prefix}{storage_key}"), expected);
     }
 
     #[test]
@@ -781,6 +781,6 @@ mod tests {
         let prefix = "bleepstore/";
         let storage_key = "mybucket/key with spaces.txt";
         let expected = "bleepstore/mybucket/key with spaces.txt";
-        assert_eq!(format!("{}{}", prefix, storage_key), expected);
+        assert_eq!(format!("{prefix}{storage_key}"), expected);
     }
 }

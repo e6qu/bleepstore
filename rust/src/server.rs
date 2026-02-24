@@ -205,7 +205,7 @@ async fn auth_middleware(
                 .metadata
                 .get_credential(&parsed.access_key_id)
                 .await
-                .map_err(|e| S3Error::InternalError(e))?;
+                .map_err(S3Error::InternalError)?;
 
             let credential = match credential {
                 Some(c) => c,
@@ -234,7 +234,7 @@ async fn auth_middleware(
             }
 
             // Validate credential date matches x-amz-date date portion.
-            if !amz_date.is_empty() && amz_date.len() >= 8 && parsed.date_stamp != &amz_date[..8] {
+            if !amz_date.is_empty() && amz_date.len() >= 8 && parsed.date_stamp != amz_date[..8] {
                 return Err(S3Error::AccessDenied {
                     message: "Credential date does not match x-amz-date".to_string(),
                 });
@@ -291,7 +291,7 @@ async fn auth_middleware(
                 .metadata
                 .get_credential(&parsed.access_key_id)
                 .await
-                .map_err(|e| S3Error::InternalError(e))?;
+                .map_err(S3Error::InternalError)?;
 
             let credential = match credential {
                 Some(c) => c,
@@ -418,7 +418,7 @@ async fn handle_get_bucket(
         crate::handlers::bucket::get_bucket_acl(state, &bucket).await
     } else if query.contains_key("uploads") {
         crate::handlers::multipart::list_multipart_uploads(state, &bucket, &query).await
-    } else if query.get("list-type").map_or(false, |v| v == "2") {
+    } else if query.get("list-type").is_some_and(|v| v == "2") {
         crate::handlers::object::list_objects_v2(state, &bucket, &query).await
     } else {
         // Default: ListObjectsV1 (no list-type parameter).

@@ -1,5 +1,5 @@
 # Go-specific
-bleepstore
+/bleepstore
 vendor/
 
 # Logs

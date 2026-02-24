@@ -31,10 +31,7 @@ fn now_iso8601() -> String {
 
     let (year, month, day) = days_to_ymd(days);
 
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
-        year, month, day, hours, minutes, seconds, millis
-    )
+    format!("{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}.{millis:03}Z")
 }
 
 /// Convert days since Unix epoch to (year, month, day).
@@ -125,7 +122,7 @@ fn canned_acl_to_json(canned: &str, owner_id: &str, display_name: &str) -> Resul
         }
         _ => {
             return Err(S3Error::InvalidArgument {
-                message: format!("Invalid canned ACL: {}", canned),
+                message: format!("Invalid canned ACL: {canned}"),
             });
         }
     }
@@ -284,12 +281,9 @@ pub async fn upload_part(
         })?;
 
     // Validate part number range (1-10000).
-    if part_number < 1 || part_number > 10000 {
+    if !(1..=10000).contains(&part_number) {
         return Err(S3Error::InvalidArgument {
-            message: format!(
-                "Part number must be between 1 and 10000, got {}",
-                part_number
-            ),
+            message: format!("Part number must be between 1 and 10000, got {part_number}"),
         });
     }
 
@@ -360,12 +354,9 @@ pub async fn upload_part_copy(
             message: "Missing or invalid partNumber parameter".to_string(),
         })?;
 
-    if part_number < 1 || part_number > 10000 {
+    if !(1..=10000).contains(&part_number) {
         return Err(S3Error::InvalidArgument {
-            message: format!(
-                "Part number must be between 1 and 10000, got {}",
-                part_number
-            ),
+            message: format!("Part number must be between 1 and 10000, got {part_number}"),
         });
     }
 
@@ -398,7 +389,7 @@ pub async fn upload_part_copy(
         source_path
             .split_once('/')
             .ok_or_else(|| S3Error::InvalidArgument {
-                message: format!("Invalid x-amz-copy-source: {}", copy_source),
+                message: format!("Invalid x-amz-copy-source: {copy_source}"),
             })?;
 
     // Check source bucket exists.
@@ -418,7 +409,7 @@ pub async fn upload_part_copy(
         })?;
 
     // Read source object data from storage.
-    let src_storage_key = format!("{}/{}", src_bucket, src_key);
+    let src_storage_key = format!("{src_bucket}/{src_key}");
     let stored = state.storage.get(&src_storage_key).await?;
     let full_data = stored.data;
 
@@ -475,8 +466,7 @@ pub async fn upload_part_copy(
 
     // Return XML response with CopyPartResult.
     let xml = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><CopyPartResult><ETag>{}</ETag><LastModified>{}</LastModified></CopyPartResult>",
-        etag, now
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><CopyPartResult><ETag>{etag}</ETag><LastModified>{now}</LastModified></CopyPartResult>"
     );
 
     Ok((
@@ -637,9 +627,7 @@ pub async fn complete_multipart_upload(
 
     for (i, (part_number, requested_etag)) in requested_parts.iter().enumerate() {
         let stored = stored_map.get(part_number).ok_or_else(|| S3Error::InvalidPart {
-            message: format!(
-                "One or more of the specified parts could not be found. The part may not have been uploaded, or the specified entity tag may not match the part's entity tag."
-            ),
+            message: "One or more of the specified parts could not be found. The part may not have been uploaded, or the specified entity tag may not match the part's entity tag.".to_string(),
         })?;
 
         // Normalize ETags for comparison: strip quotes if present.
@@ -648,9 +636,7 @@ pub async fn complete_multipart_upload(
 
         if norm_requested != norm_stored {
             return Err(S3Error::InvalidPart {
-                message: format!(
-                    "One or more of the specified parts could not be found. The part may not have been uploaded, or the specified entity tag may not match the part's entity tag."
-                ),
+                message: "One or more of the specified parts could not be found. The part may not have been uploaded, or the specified entity tag may not match the part's entity tag.".to_string(),
             });
         }
 
@@ -701,7 +687,7 @@ pub async fn complete_multipart_upload(
     let _ = state.storage.delete_parts(bucket, upload_id).await;
 
     // Build the Location URL.
-    let location = format!("/{}/{}", bucket, key);
+    let location = format!("/{bucket}/{key}");
 
     // Return CompleteMultipartUploadResult XML.
     let xml = crate::xml::render_complete_multipart_upload_result(
