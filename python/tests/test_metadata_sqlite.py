@@ -15,6 +15,7 @@ from bleepstore.metadata.sqlite import SQLiteMetadataStore
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 async def store(tmp_path):
     """Create a fresh SQLiteMetadataStore for each test."""
@@ -28,13 +29,16 @@ async def store(tmp_path):
 @pytest.fixture
 async def store_with_bucket(store):
     """A store with a pre-created bucket named 'test-bucket'."""
-    await store.create_bucket("test-bucket", "us-east-1", owner_id="owner1", owner_display="Owner One")
+    await store.create_bucket(
+        "test-bucket", "us-east-1", owner_id="owner1", owner_display="Owner One"
+    )
     return store
 
 
 # ---------------------------------------------------------------------------
 # Schema idempotency
 # ---------------------------------------------------------------------------
+
 
 class TestSchemaIdempotency:
     """Test that init_db can be called multiple times without error."""
@@ -77,6 +81,7 @@ class TestSchemaIdempotency:
 # ---------------------------------------------------------------------------
 # Bucket CRUD
 # ---------------------------------------------------------------------------
+
 
 class TestBucketCRUD:
     """Tests for bucket create, read, list, and delete operations."""
@@ -165,6 +170,7 @@ class TestBucketCRUD:
     async def test_create_duplicate_bucket_raises(self, store_with_bucket):
         """Creating a bucket with the same name raises IntegrityError."""
         import aiosqlite
+
         with pytest.raises(aiosqlite.IntegrityError):
             await store_with_bucket.create_bucket("test-bucket", "us-west-2")
 
@@ -172,6 +178,7 @@ class TestBucketCRUD:
 # ---------------------------------------------------------------------------
 # Object CRUD
 # ---------------------------------------------------------------------------
+
 
 class TestObjectCRUD:
     """Tests for object create, read, update, and delete operations."""
@@ -235,7 +242,9 @@ class TestObjectCRUD:
         await store_with_bucket.put_object("test-bucket", "a", 1, '"a"', "text/plain")
         await store_with_bucket.put_object("test-bucket", "b", 2, '"b"', "text/plain")
         await store_with_bucket.put_object("test-bucket", "c", 3, '"c"', "text/plain")
-        deleted = await store_with_bucket.delete_objects_meta("test-bucket", ["a", "c", "nonexistent"])
+        deleted = await store_with_bucket.delete_objects_meta(
+            "test-bucket", ["a", "c", "nonexistent"]
+        )
         assert sorted(deleted) == ["a", "c"]
         # b should still exist
         assert await store_with_bucket.object_exists("test-bucket", "b") is True
@@ -298,6 +307,7 @@ class TestObjectCRUD:
 # ---------------------------------------------------------------------------
 # List objects with prefix/delimiter/pagination
 # ---------------------------------------------------------------------------
+
 
 class TestListObjects:
     """Tests for listing objects with prefix, delimiter, and pagination."""
@@ -412,9 +422,7 @@ class TestListObjects:
         page1 = await store_with_bucket.list_objects("test-bucket", max_keys=3)
         marker = page1["next_marker"]
 
-        page2 = await store_with_bucket.list_objects(
-            "test-bucket", max_keys=3, marker=marker
-        )
+        page2 = await store_with_bucket.list_objects("test-bucket", max_keys=3, marker=marker)
         assert len(page2["contents"]) == 3
         # All keys in page2 should be after the marker
         for c in page2["contents"]:
@@ -451,6 +459,7 @@ class TestListObjects:
 # ---------------------------------------------------------------------------
 # Multipart upload lifecycle
 # ---------------------------------------------------------------------------
+
 
 class TestMultipartLifecycle:
     """Tests for multipart upload create, part upload, complete, and abort."""
@@ -527,7 +536,9 @@ class TestMultipartLifecycle:
     async def test_complete_multipart_upload(self, store_with_bucket):
         """Completing a multipart upload creates the object and removes the upload."""
         await store_with_bucket.create_multipart_upload(
-            "test-bucket", "key", "upload-005",
+            "test-bucket",
+            "key",
+            "upload-005",
             content_type="application/pdf",
             user_metadata='{"x-amz-meta-doc": "yes"}',
             owner_id="o1",
@@ -553,9 +564,7 @@ class TestMultipartLifecycle:
         assert obj["content_type"] == "application/pdf"
 
         # Upload should be gone
-        upload = await store_with_bucket.get_multipart_upload(
-            "test-bucket", "key", "upload-005"
-        )
+        upload = await store_with_bucket.get_multipart_upload("test-bucket", "key", "upload-005")
         assert upload is None
 
         # Parts should be gone
@@ -573,9 +582,7 @@ class TestMultipartLifecycle:
         await store_with_bucket.abort_multipart_upload("test-bucket", "key", "upload-006")
 
         # Upload should be gone
-        upload = await store_with_bucket.get_multipart_upload(
-            "test-bucket", "key", "upload-006"
-        )
+        upload = await store_with_bucket.get_multipart_upload("test-bucket", "key", "upload-006")
         assert upload is None
 
         # Parts should be gone
@@ -597,17 +604,13 @@ class TestMultipartLifecycle:
         assert page1["next_part_number_marker"] == 2
 
         # Page 2: parts 3-4
-        page2 = await store_with_bucket.list_parts(
-            "upload-007", part_number_marker=2, max_parts=2
-        )
+        page2 = await store_with_bucket.list_parts("upload-007", part_number_marker=2, max_parts=2)
         assert len(page2["parts"]) == 2
         assert page2["parts"][0]["part_number"] == 3
         assert page2["is_truncated"] is True
 
         # Page 3: part 5 (last)
-        page3 = await store_with_bucket.list_parts(
-            "upload-007", part_number_marker=4, max_parts=2
-        )
+        page3 = await store_with_bucket.list_parts("upload-007", part_number_marker=4, max_parts=2)
         assert len(page3["parts"]) == 1
         assert page3["is_truncated"] is False
 
@@ -635,9 +638,7 @@ class TestMultipartLifecycle:
         await store_with_bucket.create_multipart_upload(
             "test-bucket", "images/c.jpg", "u3", owner_id="o1"
         )
-        result = await store_with_bucket.list_multipart_uploads(
-            "test-bucket", prefix="docs/"
-        )
+        result = await store_with_bucket.list_multipart_uploads("test-bucket", prefix="docs/")
         assert len(result["uploads"]) == 2
         keys = [u["key"] for u in result["uploads"]]
         assert all(k.startswith("docs/") for k in keys)
@@ -695,6 +696,7 @@ class TestMultipartLifecycle:
 # ---------------------------------------------------------------------------
 # Credential operations
 # ---------------------------------------------------------------------------
+
 
 class TestCredentials:
     """Tests for credential CRUD operations."""
@@ -757,6 +759,7 @@ class TestCredentials:
 # Edge cases
 # ---------------------------------------------------------------------------
 
+
 class TestEdgeCases:
     """Edge case and boundary tests."""
 
@@ -801,7 +804,11 @@ class TestEdgeCases:
         """JSON user metadata survives a put/get round-trip."""
         meta = {"x-amz-meta-key1": "value1", "x-amz-meta-key2": "value2"}
         await store_with_bucket.put_object(
-            "test-bucket", "meta-test", 1, '"e"', "text/plain",
+            "test-bucket",
+            "meta-test",
+            1,
+            '"e"',
+            "text/plain",
             user_metadata=json.dumps(meta),
         )
         obj = await store_with_bucket.get_object("test-bucket", "meta-test")
@@ -831,7 +838,11 @@ class TestEdgeCases:
             ],
         }
         await store_with_bucket.put_object(
-            "test-bucket", "acl-test", 1, '"e"', "text/plain",
+            "test-bucket",
+            "acl-test",
+            1,
+            '"e"',
+            "text/plain",
             acl=json.dumps(acl),
         )
         obj = await store_with_bucket.get_object("test-bucket", "acl-test")

@@ -367,9 +367,7 @@ class TestListObjectsV2:
         await _put_object(adv_client, "list-prefix-bucket", "images/b.jpg", b"img2")
         await _put_object(adv_client, "list-prefix-bucket", "docs/readme.md", b"doc")
 
-        resp = await adv_client.get(
-            "/list-prefix-bucket?list-type=2&prefix=images/"
-        )
+        resp = await adv_client.get("/list-prefix-bucket?list-type=2&prefix=images/")
         assert resp.status_code == 200
 
         root = ET.fromstring(resp.text)
@@ -388,9 +386,7 @@ class TestListObjectsV2:
         await _put_object(adv_client, "list-delim-bucket", "videos/clip.mp4", b"clip")
         await _put_object(adv_client, "list-delim-bucket", "readme.txt", b"readme")
 
-        resp = await adv_client.get(
-            "/list-delim-bucket?list-type=2&delimiter=/"
-        )
+        resp = await adv_client.get("/list-delim-bucket?list-type=2&delimiter=/")
         assert resp.status_code == 200
 
         root = ET.fromstring(resp.text)
@@ -411,13 +407,9 @@ class TestListObjectsV2:
         """ListObjectsV2 with max-keys limits results."""
         await _create_bucket(adv_client, "list-maxkeys-bucket")
         for i in range(5):
-            await _put_object(
-                adv_client, "list-maxkeys-bucket", f"obj{i}.txt", b"data"
-            )
+            await _put_object(adv_client, "list-maxkeys-bucket", f"obj{i}.txt", b"data")
 
-        resp = await adv_client.get(
-            "/list-maxkeys-bucket?list-type=2&max-keys=2"
-        )
+        resp = await adv_client.get("/list-maxkeys-bucket?list-type=2&max-keys=2")
         assert resp.status_code == 200
 
         root = ET.fromstring(resp.text)
@@ -431,14 +423,10 @@ class TestListObjectsV2:
         """ListObjectsV2 pagination with continuation-token."""
         await _create_bucket(adv_client, "list-page-bucket")
         for i in range(5):
-            await _put_object(
-                adv_client, "list-page-bucket", f"key{i:02d}.txt", b"data"
-            )
+            await _put_object(adv_client, "list-page-bucket", f"key{i:02d}.txt", b"data")
 
         # Page 1
-        resp1 = await adv_client.get(
-            "/list-page-bucket?list-type=2&max-keys=2"
-        )
+        resp1 = await adv_client.get("/list-page-bucket?list-type=2&max-keys=2")
         root1 = ET.fromstring(resp1.text)
         ns = "{http://s3.amazonaws.com/doc/2006-03-01/}"
         assert root1.find(f"{ns}IsTruncated").text == "true"
@@ -470,9 +458,7 @@ class TestListObjectsV2:
         await _put_object(adv_client, "list-start-bucket", "b.txt", b"bbb")
         await _put_object(adv_client, "list-start-bucket", "c.txt", b"ccc")
 
-        resp = await adv_client.get(
-            "/list-start-bucket?list-type=2&start-after=a.txt"
-        )
+        resp = await adv_client.get("/list-start-bucket?list-type=2&start-after=a.txt")
         assert resp.status_code == 200
 
         root = ET.fromstring(resp.text)
@@ -526,9 +512,7 @@ class TestListObjectsV1:
         await _put_object(adv_client, "list-v1-marker-bucket", "b.txt", b"b")
         await _put_object(adv_client, "list-v1-marker-bucket", "c.txt", b"c")
 
-        resp = await adv_client.get(
-            "/list-v1-marker-bucket?marker=a.txt"
-        )
+        resp = await adv_client.get("/list-v1-marker-bucket?marker=a.txt")
         assert resp.status_code == 200
 
         root = ET.fromstring(resp.text)
@@ -543,9 +527,7 @@ class TestListObjectsV1:
         """ListObjectsV1 includes Marker element in response."""
         await _create_bucket(adv_client, "list-v1-mkr-xml-bucket")
 
-        resp = await adv_client.get(
-            "/list-v1-mkr-xml-bucket?marker=some-key"
-        )
+        resp = await adv_client.get("/list-v1-mkr-xml-bucket?marker=some-key")
         assert resp.status_code == 200
 
         root = ET.fromstring(resp.text)
@@ -561,9 +543,7 @@ class TestListObjectsV1:
         await _put_object(adv_client, "list-v1-delim-bucket", "dir2/b.txt", b"b")
         await _put_object(adv_client, "list-v1-delim-bucket", "root.txt", b"r")
 
-        resp = await adv_client.get(
-            "/list-v1-delim-bucket?delimiter=/"
-        )
+        resp = await adv_client.get("/list-v1-delim-bucket?delimiter=/")
         assert resp.status_code == 200
 
         root = ET.fromstring(resp.text)
@@ -582,14 +562,10 @@ class TestListObjectsV1:
         """ListObjectsV1 with max-keys returns truncated results with NextMarker."""
         await _create_bucket(adv_client, "list-v1-page-bucket")
         for i in range(4):
-            await _put_object(
-                adv_client, "list-v1-page-bucket", f"key{i:02d}.txt", b"data"
-            )
+            await _put_object(adv_client, "list-v1-page-bucket", f"key{i:02d}.txt", b"data")
 
         # Page 1
-        resp1 = await adv_client.get(
-            "/list-v1-page-bucket?max-keys=2"
-        )
+        resp1 = await adv_client.get("/list-v1-page-bucket?max-keys=2")
         root1 = ET.fromstring(resp1.text)
         ns = "{http://s3.amazonaws.com/doc/2006-03-01/}"
         assert root1.find(f"{ns}IsTruncated").text == "true"
@@ -601,9 +577,7 @@ class TestListObjectsV1:
         assert next_marker.text is not None
 
         # Page 2
-        resp2 = await adv_client.get(
-            f"/list-v1-page-bucket?max-keys=2&marker={next_marker.text}"
-        )
+        resp2 = await adv_client.get(f"/list-v1-page-bucket?max-keys=2&marker={next_marker.text}")
         root2 = ET.fromstring(resp2.text)
         contents2 = root2.findall(f"{ns}Contents")
         assert len(contents2) == 2
@@ -909,9 +883,7 @@ class TestObjectAcl:
         grants = acl_list.findall(f"{ns}Grant")
         assert len(grants) >= 1
 
-        permissions = [
-            g.find(f"{ns}Permission").text for g in grants
-        ]
+        permissions = [g.find(f"{ns}Permission").text for g in grants]
         assert "FULL_CONTROL" in permissions
 
     async def test_put_object_acl_canned(self, adv_client):
@@ -936,9 +908,7 @@ class TestObjectAcl:
         grants = acl_list.findall(f"{ns}Grant")
         assert len(grants) == 2  # FULL_CONTROL + READ
 
-        permissions = [
-            g.find(f"{ns}Permission").text for g in grants
-        ]
+        permissions = [g.find(f"{ns}Permission").text for g in grants]
         assert "FULL_CONTROL" in permissions
         assert "READ" in permissions
 

@@ -39,6 +39,7 @@ from bleepstore.storage.local import LocalStorageBackend
 
 # ---- Test fixtures ---------------------------------------------------------
 
+
 @pytest.fixture
 async def metadata():
     """Create a fresh in-memory metadata store with seeded credentials."""
@@ -62,6 +63,7 @@ def authenticator(metadata):
 
 
 # ---- Helper functions for test signing -------------------------------------
+
 
 def _sign_request(
     method: str,
@@ -195,6 +197,7 @@ def _now_timestamp() -> str:
 # ---- Auth-enabled client fixture -------------------------------------------
 # Uses the session-scoped app but temporarily enables auth and swaps metadata.
 
+
 @pytest.fixture
 async def auth_client(app, tmp_path):
     """Create a client with auth enabled using the session-scoped app.
@@ -247,6 +250,7 @@ async def auth_client(app, tmp_path):
 
 
 # ---- Signing key derivation tests ------------------------------------------
+
 
 class TestDeriveSigningKey:
     """Test signing key derivation (HMAC-SHA256 chain)."""
@@ -304,6 +308,7 @@ class TestDeriveSigningKey:
 
 
 # ---- URI encoding tests ----------------------------------------------------
+
 
 class TestUriEncode:
     """Test S3-compatible URI encoding."""
@@ -367,6 +372,7 @@ class TestUriEncodePath:
 
 # ---- Canonical query string tests ------------------------------------------
 
+
 class TestCanonicalQueryString:
     """Test canonical query string construction."""
 
@@ -408,6 +414,7 @@ class TestCanonicalQueryString:
 
 # ---- Header value trimming tests -------------------------------------------
 
+
 class TestTrimHeaderValue:
     """Test header value trimming for canonical headers."""
 
@@ -426,6 +433,7 @@ class TestTrimHeaderValue:
 
 # ---- Parse authorization header tests --------------------------------------
 
+
 class TestParseAuthorizationHeader:
     """Test Authorization header parsing."""
 
@@ -440,23 +448,29 @@ class TestParseAuthorizationHeader:
         result = authenticator._parse_authorization_header(header)
         assert result["credential"] == "AKID/20260222/us-east-1/s3/aws4_request"
         assert result["signed_headers"] == "host;x-amz-date"
-        assert result["signature"] == "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        assert (
+            result["signature"]
+            == "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        )
 
     def test_invalid_header_raises(self, authenticator):
         """Invalid Authorization header raises AccessDenied."""
         from bleepstore.errors import AccessDenied
+
         with pytest.raises(AccessDenied):
             authenticator._parse_authorization_header("BadHeader")
 
     def test_missing_signature_raises(self, authenticator):
         """Missing signature in header raises AccessDenied."""
         from bleepstore.errors import AccessDenied
+
         header = "AWS4-HMAC-SHA256 Credential=AKID/20260222/us-east-1/s3/aws4_request, SignedHeaders=host"
         with pytest.raises(AccessDenied):
             authenticator._parse_authorization_header(header)
 
 
 # ---- Build canonical request tests -----------------------------------------
+
 
 class TestBuildCanonicalRequest:
     """Test canonical request construction."""
@@ -472,16 +486,16 @@ class TestBuildCanonicalRequest:
             payload_hash=UNSIGNED_PAYLOAD,
         )
         lines = result.split("\n")
-        assert lines[0] == "GET"                              # method
-        assert lines[1] == "/test-bucket"                      # canonical URI
-        assert lines[2] == ""                                  # empty query string
+        assert lines[0] == "GET"  # method
+        assert lines[1] == "/test-bucket"  # canonical URI
+        assert lines[2] == ""  # empty query string
         # Canonical headers: each header line has trailing \n, which becomes
         # two entries after split (the value line and an empty string)
-        assert lines[3] == "host:localhost:9010"               # first header value
-        assert lines[4] == "x-amz-date:20260222T120000Z"      # second header value
-        assert lines[5] == ""                                  # trailing \n from headers
-        assert lines[6] == "host;x-amz-date"                  # signed headers
-        assert lines[7] == UNSIGNED_PAYLOAD                    # payload hash
+        assert lines[3] == "host:localhost:9010"  # first header value
+        assert lines[4] == "x-amz-date:20260222T120000Z"  # second header value
+        assert lines[5] == ""  # trailing \n from headers
+        assert lines[6] == "host;x-amz-date"  # signed headers
+        assert lines[7] == UNSIGNED_PAYLOAD  # payload hash
 
     def test_put_with_body(self, authenticator):
         """PUT request with body hash."""
@@ -539,6 +553,7 @@ class TestBuildCanonicalRequest:
 
 # ---- String to sign tests --------------------------------------------------
 
+
 class TestBuildStringToSign:
     """Test string-to-sign construction."""
 
@@ -571,6 +586,7 @@ class TestBuildStringToSign:
 
 # ---- Compute signature tests -----------------------------------------------
 
+
 class TestComputeSignature:
     """Test final signature computation."""
 
@@ -597,6 +613,7 @@ class TestComputeSignature:
 
 
 # ---- Full header-based auth verification tests (integration) ---------------
+
 
 class TestHeaderAuthIntegration:
     """Integration tests for header-based SigV4 authentication."""
@@ -766,6 +783,7 @@ class TestHeaderAuthIntegration:
 
 
 # ---- Presigned URL tests ---------------------------------------------------
+
 
 class TestPresignedUrlIntegration:
     """Integration tests for presigned URL authentication."""
@@ -940,6 +958,7 @@ class TestPresignedUrlIntegration:
 
 # ---- Auth disabled tests ---------------------------------------------------
 
+
 class TestAuthDisabled:
     """Test that auth can be disabled via config."""
 
@@ -952,25 +971,18 @@ class TestAuthDisabled:
 
 # ---- Signing key cache tests -----------------------------------------------
 
+
 class TestSigningKeyCache:
     """Test that signing keys are cached."""
 
     def test_cache_returns_same_key(self, authenticator):
         """Cached signing key is returned on subsequent calls."""
-        key1 = authenticator._derive_signing_key(
-            "secret", "20260222", "us-east-1", "s3", "access1"
-        )
-        key2 = authenticator._derive_signing_key(
-            "secret", "20260222", "us-east-1", "s3", "access1"
-        )
+        key1 = authenticator._derive_signing_key("secret", "20260222", "us-east-1", "s3", "access1")
+        key2 = authenticator._derive_signing_key("secret", "20260222", "us-east-1", "s3", "access1")
         assert key1 is key2  # Same object from cache
 
     def test_cache_different_date(self, authenticator):
         """Different dates produce different cached keys."""
-        key1 = authenticator._derive_signing_key(
-            "secret", "20260222", "us-east-1", "s3", "access1"
-        )
-        key2 = authenticator._derive_signing_key(
-            "secret", "20260223", "us-east-1", "s3", "access1"
-        )
+        key1 = authenticator._derive_signing_key("secret", "20260222", "us-east-1", "s3", "access1")
+        key2 = authenticator._derive_signing_key("secret", "20260223", "us-east-1", "s3", "access1")
         assert key1 != key2

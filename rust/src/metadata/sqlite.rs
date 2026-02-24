@@ -156,11 +156,9 @@ impl SqliteMetadataStore {
 
         // Record schema version if not already present.
         let existing: Option<i64> = conn
-            .query_row(
-                "SELECT MAX(version) FROM schema_version",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                row.get(0)
+            })
             .optional()?
             .flatten();
 
@@ -177,11 +175,7 @@ impl SqliteMetadataStore {
 
     /// Seed the default credential from config on startup (crash-only: every
     /// startup is recovery). This is idempotent.
-    pub fn seed_credential(
-        &self,
-        access_key: &str,
-        secret_key: &str,
-    ) -> anyhow::Result<()> {
+    pub fn seed_credential(&self, access_key: &str, secret_key: &str) -> anyhow::Result<()> {
         let conn = self.conn.lock().expect("mutex poisoned");
         let now = chrono_now();
         conn.execute(
@@ -553,10 +547,8 @@ impl MetadataStore for SqliteMetadataStore {
             if delimiter.is_empty() {
                 // No delimiter: simple pagination.
                 let is_truncated = all_objects.len() > max_keys as usize;
-                let objects: Vec<ObjectRecord> = all_objects
-                    .into_iter()
-                    .take(max_keys as usize)
-                    .collect();
+                let objects: Vec<ObjectRecord> =
+                    all_objects.into_iter().take(max_keys as usize).collect();
                 let next_token = if is_truncated {
                     objects.last().map(|o| o.key.clone())
                 } else {
@@ -733,9 +725,8 @@ impl MetadataStore for SqliteMetadataStore {
     fn get_multipart_upload(
         &self,
         upload_id: &str,
-    ) -> Pin<
-        Box<dyn Future<Output = anyhow::Result<Option<MultipartUploadRecord>>> + Send + '_>,
-    > {
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Option<MultipartUploadRecord>>> + Send + '_>>
+    {
         let upload_id = upload_id.to_string();
         Box::pin(async move {
             let conn = self.conn.lock().expect("mutex poisoned");
@@ -813,9 +804,8 @@ impl MetadataStore for SqliteMetadataStore {
                  ORDER BY part_number
                  LIMIT ?3",
             )?;
-            let rows = stmt.query_map(
-                params![upload_id, part_number_marker, fetch_limit],
-                |row| {
+            let rows =
+                stmt.query_map(params![upload_id, part_number_marker, fetch_limit], |row| {
                     let size: i64 = row.get(1)?;
                     Ok(PartRecord {
                         part_number: row.get(0)?,
@@ -823,8 +813,7 @@ impl MetadataStore for SqliteMetadataStore {
                         etag: row.get(2)?,
                         last_modified: row.get(3)?,
                     })
-                },
-            )?;
+                })?;
             let mut parts = Vec::new();
             for row in rows {
                 parts.push(row?);
@@ -1036,10 +1025,8 @@ impl MetadataStore for SqliteMetadataStore {
 
             let mut uploads = Vec::new();
             if key_marker.is_empty() {
-                let rows = stmt.query_map(
-                    params![bucket, like_pattern, fetch_limit],
-                    map_upload_row,
-                )?;
+                let rows =
+                    stmt.query_map(params![bucket, like_pattern, fetch_limit], map_upload_row)?;
                 for row in rows {
                     uploads.push(row?);
                 }
@@ -1053,7 +1040,13 @@ impl MetadataStore for SqliteMetadataStore {
                 }
             } else {
                 let rows = stmt.query_map(
-                    params![bucket, like_pattern, fetch_limit, key_marker, upload_id_marker],
+                    params![
+                        bucket,
+                        like_pattern,
+                        fetch_limit,
+                        key_marker,
+                        upload_id_marker
+                    ],
                     map_upload_row,
                 )?;
                 for row in rows {
@@ -1244,10 +1237,16 @@ mod tests {
     #[tokio::test]
     async fn test_update_bucket_acl() {
         let store = test_store();
-        store.create_bucket(make_bucket("acl-bucket")).await.unwrap();
+        store
+            .create_bucket(make_bucket("acl-bucket"))
+            .await
+            .unwrap();
 
         let new_acl = r#"{"owner":{"id":"test","display_name":"test"},"grants":[]}"#;
-        store.update_bucket_acl("acl-bucket", new_acl).await.unwrap();
+        store
+            .update_bucket_acl("acl-bucket", new_acl)
+            .await
+            .unwrap();
 
         let b = store.get_bucket("acl-bucket").await.unwrap().unwrap();
         assert_eq!(b.acl, new_acl);
@@ -1269,7 +1268,8 @@ mod tests {
 
         let mut obj = make_object("mybucket", "hello.txt", 5);
         obj.content_type = "text/plain".to_string();
-        obj.user_metadata.insert("x-amz-meta-author".to_string(), "tester".to_string());
+        obj.user_metadata
+            .insert("x-amz-meta-author".to_string(), "tester".to_string());
 
         store.put_object(obj).await.unwrap();
 
@@ -1288,7 +1288,10 @@ mod tests {
         store.create_bucket(make_bucket("mybucket")).await.unwrap();
         assert!(!store.object_exists("mybucket", "key").await.unwrap());
 
-        store.put_object(make_object("mybucket", "key", 10)).await.unwrap();
+        store
+            .put_object(make_object("mybucket", "key", 10))
+            .await
+            .unwrap();
         assert!(store.object_exists("mybucket", "key").await.unwrap());
     }
 
@@ -1296,7 +1299,10 @@ mod tests {
     async fn test_delete_object() {
         let store = test_store();
         store.create_bucket(make_bucket("mybucket")).await.unwrap();
-        store.put_object(make_object("mybucket", "key", 10)).await.unwrap();
+        store
+            .put_object(make_object("mybucket", "key", 10))
+            .await
+            .unwrap();
 
         store.delete_object("mybucket", "key").await.unwrap();
         assert!(!store.object_exists("mybucket", "key").await.unwrap());
@@ -1306,9 +1312,18 @@ mod tests {
     async fn test_delete_objects_batch() {
         let store = test_store();
         store.create_bucket(make_bucket("mybucket")).await.unwrap();
-        store.put_object(make_object("mybucket", "a", 1)).await.unwrap();
-        store.put_object(make_object("mybucket", "b", 2)).await.unwrap();
-        store.put_object(make_object("mybucket", "c", 3)).await.unwrap();
+        store
+            .put_object(make_object("mybucket", "a", 1))
+            .await
+            .unwrap();
+        store
+            .put_object(make_object("mybucket", "b", 2))
+            .await
+            .unwrap();
+        store
+            .put_object(make_object("mybucket", "c", 3))
+            .await
+            .unwrap();
 
         let deleted = store
             .delete_objects("mybucket", &["a".to_string(), "b".to_string()])
@@ -1326,8 +1341,14 @@ mod tests {
         store.create_bucket(make_bucket("mybucket")).await.unwrap();
         assert_eq!(store.count_objects("mybucket").await.unwrap(), 0);
 
-        store.put_object(make_object("mybucket", "a", 1)).await.unwrap();
-        store.put_object(make_object("mybucket", "b", 2)).await.unwrap();
+        store
+            .put_object(make_object("mybucket", "a", 1))
+            .await
+            .unwrap();
+        store
+            .put_object(make_object("mybucket", "b", 2))
+            .await
+            .unwrap();
         assert_eq!(store.count_objects("mybucket").await.unwrap(), 2);
     }
 
@@ -1335,10 +1356,16 @@ mod tests {
     async fn test_update_object_acl() {
         let store = test_store();
         store.create_bucket(make_bucket("mybucket")).await.unwrap();
-        store.put_object(make_object("mybucket", "key", 10)).await.unwrap();
+        store
+            .put_object(make_object("mybucket", "key", 10))
+            .await
+            .unwrap();
 
         let new_acl = r#"{"owner":{"id":"o","display_name":"o"},"grants":[]}"#;
-        store.update_object_acl("mybucket", "key", new_acl).await.unwrap();
+        store
+            .update_object_acl("mybucket", "key", new_acl)
+            .await
+            .unwrap();
 
         let obj = store.get_object("mybucket", "key").await.unwrap().unwrap();
         assert_eq!(obj.acl, new_acl);
@@ -1348,10 +1375,16 @@ mod tests {
     async fn test_put_object_upsert() {
         let store = test_store();
         store.create_bucket(make_bucket("mybucket")).await.unwrap();
-        store.put_object(make_object("mybucket", "key", 10)).await.unwrap();
+        store
+            .put_object(make_object("mybucket", "key", 10))
+            .await
+            .unwrap();
 
         // Overwrite with a bigger object.
-        store.put_object(make_object("mybucket", "key", 20)).await.unwrap();
+        store
+            .put_object(make_object("mybucket", "key", 20))
+            .await
+            .unwrap();
 
         let obj = store.get_object("mybucket", "key").await.unwrap().unwrap();
         assert_eq!(obj.size, 20);
@@ -1363,9 +1396,18 @@ mod tests {
     async fn test_list_objects_basic() {
         let store = test_store();
         store.create_bucket(make_bucket("mybucket")).await.unwrap();
-        store.put_object(make_object("mybucket", "a.txt", 1)).await.unwrap();
-        store.put_object(make_object("mybucket", "b.txt", 2)).await.unwrap();
-        store.put_object(make_object("mybucket", "c.txt", 3)).await.unwrap();
+        store
+            .put_object(make_object("mybucket", "a.txt", 1))
+            .await
+            .unwrap();
+        store
+            .put_object(make_object("mybucket", "b.txt", 2))
+            .await
+            .unwrap();
+        store
+            .put_object(make_object("mybucket", "c.txt", 3))
+            .await
+            .unwrap();
 
         let result = store
             .list_objects("mybucket", "", "", 1000, "", None)
@@ -1380,9 +1422,18 @@ mod tests {
     async fn test_list_objects_with_prefix() {
         let store = test_store();
         store.create_bucket(make_bucket("mybucket")).await.unwrap();
-        store.put_object(make_object("mybucket", "docs/a.txt", 1)).await.unwrap();
-        store.put_object(make_object("mybucket", "docs/b.txt", 2)).await.unwrap();
-        store.put_object(make_object("mybucket", "images/c.png", 3)).await.unwrap();
+        store
+            .put_object(make_object("mybucket", "docs/a.txt", 1))
+            .await
+            .unwrap();
+        store
+            .put_object(make_object("mybucket", "docs/b.txt", 2))
+            .await
+            .unwrap();
+        store
+            .put_object(make_object("mybucket", "images/c.png", 3))
+            .await
+            .unwrap();
 
         let result = store
             .list_objects("mybucket", "docs/", "", 1000, "", None)
@@ -1396,10 +1447,22 @@ mod tests {
     async fn test_list_objects_with_delimiter() {
         let store = test_store();
         store.create_bucket(make_bucket("mybucket")).await.unwrap();
-        store.put_object(make_object("mybucket", "docs/a.txt", 1)).await.unwrap();
-        store.put_object(make_object("mybucket", "docs/b.txt", 2)).await.unwrap();
-        store.put_object(make_object("mybucket", "images/c.png", 3)).await.unwrap();
-        store.put_object(make_object("mybucket", "root.txt", 4)).await.unwrap();
+        store
+            .put_object(make_object("mybucket", "docs/a.txt", 1))
+            .await
+            .unwrap();
+        store
+            .put_object(make_object("mybucket", "docs/b.txt", 2))
+            .await
+            .unwrap();
+        store
+            .put_object(make_object("mybucket", "images/c.png", 3))
+            .await
+            .unwrap();
+        store
+            .put_object(make_object("mybucket", "root.txt", 4))
+            .await
+            .unwrap();
 
         let result = store
             .list_objects("mybucket", "", "/", 1000, "", None)
@@ -1418,9 +1481,18 @@ mod tests {
     async fn test_list_objects_pagination() {
         let store = test_store();
         store.create_bucket(make_bucket("mybucket")).await.unwrap();
-        store.put_object(make_object("mybucket", "a", 1)).await.unwrap();
-        store.put_object(make_object("mybucket", "b", 2)).await.unwrap();
-        store.put_object(make_object("mybucket", "c", 3)).await.unwrap();
+        store
+            .put_object(make_object("mybucket", "a", 1))
+            .await
+            .unwrap();
+        store
+            .put_object(make_object("mybucket", "b", 2))
+            .await
+            .unwrap();
+        store
+            .put_object(make_object("mybucket", "c", 3))
+            .await
+            .unwrap();
 
         // Page 1: max_keys=2
         let result = store
@@ -1464,9 +1536,18 @@ mod tests {
     async fn test_list_objects_start_after() {
         let store = test_store();
         store.create_bucket(make_bucket("mybucket")).await.unwrap();
-        store.put_object(make_object("mybucket", "a", 1)).await.unwrap();
-        store.put_object(make_object("mybucket", "b", 2)).await.unwrap();
-        store.put_object(make_object("mybucket", "c", 3)).await.unwrap();
+        store
+            .put_object(make_object("mybucket", "a", 1))
+            .await
+            .unwrap();
+        store
+            .put_object(make_object("mybucket", "b", 2))
+            .await
+            .unwrap();
+        store
+            .put_object(make_object("mybucket", "c", 3))
+            .await
+            .unwrap();
 
         let result = store
             .list_objects("mybucket", "", "", 1000, "a", None)
@@ -1844,7 +1925,11 @@ mod tests {
 
         store.put_object(obj).await.unwrap();
 
-        let fetched = store.get_object("mybucket", "with-opts.txt").await.unwrap().unwrap();
+        let fetched = store
+            .get_object("mybucket", "with-opts.txt")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(fetched.content_encoding.as_deref(), Some("gzip"));
         assert_eq!(fetched.content_language.as_deref(), Some("en-US"));
         assert_eq!(fetched.content_disposition.as_deref(), Some("attachment"));

@@ -41,7 +41,10 @@ impl LocalBackend {
         // Canonicalize the root for comparison. The target path may not exist
         // yet, so we canonicalize the root and check the joined path starts
         // with it.
-        let canonical_root = self.root.canonicalize().unwrap_or_else(|_| self.root.clone());
+        let canonical_root = self
+            .root
+            .canonicalize()
+            .unwrap_or_else(|_| self.root.clone());
         // We can't canonicalize a non-existent path, so we check each
         // component is not ".." after joining.
         for component in std::path::Path::new(storage_key).components() {
@@ -175,7 +178,10 @@ impl StorageBackend for LocalBackend {
         Box::pin(async move {
             let src_path = self.resolve(&src_storage_key)?;
             if !src_path.exists() {
-                anyhow::bail!("Source object not found at storage key: {}", src_storage_key);
+                anyhow::bail!(
+                    "Source object not found at storage key: {}",
+                    src_storage_key
+                );
             }
 
             let dst_path = self.resolve(&dst_storage_key)?;
@@ -282,7 +288,11 @@ impl StorageBackend for LocalBackend {
 
             for (part_number, _etag) in &parts {
                 // Read part file.
-                let part_path = self.root.join(".multipart").join(&upload_id).join(part_number.to_string());
+                let part_path = self
+                    .root
+                    .join(".multipart")
+                    .join(&upload_id)
+                    .join(part_number.to_string());
                 let part_data = std::fs::read(&part_path)
                     .map_err(|e| anyhow::anyhow!("Failed to read part {}: {}", part_number, e))?;
 
@@ -379,7 +389,10 @@ mod tests {
         backend.create_bucket("test-bucket").await.unwrap();
 
         let data = Bytes::from("hello world");
-        let etag = backend.put("test-bucket/key.txt", data.clone()).await.unwrap();
+        let etag = backend
+            .put("test-bucket/key.txt", data.clone())
+            .await
+            .unwrap();
 
         // ETag should be quoted hex MD5.
         assert!(etag.starts_with('"'));
@@ -396,7 +409,10 @@ mod tests {
         backend.create_bucket("test-bucket").await.unwrap();
 
         let data = Bytes::new();
-        let etag = backend.put("test-bucket/empty.txt", data.clone()).await.unwrap();
+        let etag = backend
+            .put("test-bucket/empty.txt", data.clone())
+            .await
+            .unwrap();
         assert!(etag.starts_with('"'));
 
         let obj = backend.get("test-bucket/empty.txt").await.unwrap();
@@ -596,11 +612,7 @@ mod tests {
         assert!(etag.ends_with('"'));
 
         // Part file should exist on disk.
-        let part_path = backend
-            .root
-            .join(".multipart")
-            .join("upload-001")
-            .join("1");
+        let part_path = backend.root.join(".multipart").join("upload-001").join("1");
         assert!(part_path.exists());
 
         let stored = std::fs::read(&part_path).unwrap();
@@ -625,11 +637,7 @@ mod tests {
         assert_ne!(etag1, etag2);
 
         // Should contain v2.
-        let part_path = backend
-            .root
-            .join(".multipart")
-            .join("upload-001")
-            .join("1");
+        let part_path = backend.root.join(".multipart").join("upload-001").join("1");
         let stored = std::fs::read(&part_path).unwrap();
         assert_eq!(stored, b"v2");
     }
@@ -682,7 +690,10 @@ mod tests {
         assert!(part_dir.exists());
 
         // Delete all parts.
-        backend.delete_parts("test-bucket", "upload-001").await.unwrap();
+        backend
+            .delete_parts("test-bucket", "upload-001")
+            .await
+            .unwrap();
 
         // Directory should be gone.
         assert!(!part_dir.exists());

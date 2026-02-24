@@ -749,9 +749,9 @@ func TestIntegrationCopyObject(t *testing.T) {
 
 	// Copy with REPLACE metadata directive
 	resp = ts.doSignedWithHeaders(t, "PUT", "/"+bucket+"/replaced.txt", nil, map[string]string{
-		"X-Amz-Copy-Source":         "/" + bucket + "/original.txt",
-		"x-amz-metadata-directive":  "REPLACE",
-		"Content-Type":              "text/csv",
+		"X-Amz-Copy-Source":        "/" + bucket + "/original.txt",
+		"x-amz-metadata-directive": "REPLACE",
+		"Content-Type":             "text/csv",
 		"x-amz-meta-replaced":      "true",
 	})
 	if resp.StatusCode != 200 {
@@ -848,14 +848,14 @@ func TestIntegrationListObjectsV2WithPrefixDelimiter(t *testing.T) {
 
 	// Create test objects
 	objects := map[string][]byte{
-		"file1.txt":          []byte("f1"),
-		"file2.txt":          []byte("f2"),
-		"photos/cat.jpg":     []byte("cat"),
-		"photos/dog.jpg":     []byte("dog"),
-		"photos/2024/a.jpg":  []byte("a"),
-		"photos/2024/b.jpg":  []byte("b"),
-		"docs/readme.md":     []byte("readme"),
-		"docs/notes.md":      []byte("notes"),
+		"file1.txt":         []byte("f1"),
+		"file2.txt":         []byte("f2"),
+		"photos/cat.jpg":    []byte("cat"),
+		"photos/dog.jpg":    []byte("dog"),
+		"photos/2024/a.jpg": []byte("a"),
+		"photos/2024/b.jpg": []byte("b"),
+		"docs/readme.md":    []byte("readme"),
+		"docs/notes.md":     []byte("notes"),
 	}
 	for key, body := range objects {
 		ts.doSignedWithHeaders(t, "PUT", "/"+bucket+"/"+key, body, map[string]string{
@@ -977,7 +977,7 @@ func TestIntegrationObjectUserMetadata(t *testing.T) {
 
 	// Put object with user metadata
 	resp := ts.doSignedWithHeaders(t, "PUT", "/"+bucket+"/meta.txt", []byte("data"), map[string]string{
-		"Content-Type":        "text/plain",
+		"Content-Type":       "text/plain",
 		"x-amz-meta-author":  "tester",
 		"x-amz-meta-version": "1.0",
 	})
@@ -1239,7 +1239,7 @@ func TestIntegrationObjectACL(t *testing.T) {
 	// Put object with canned ACL
 	resp = ts.doSignedWithHeaders(t, "PUT", "/"+bucket+"/acl-on-put.txt", []byte("data"), map[string]string{
 		"Content-Type": "text/plain",
-		"x-amz-acl":   "public-read",
+		"x-amz-acl":    "public-read",
 	})
 	resp.Body.Close()
 

@@ -118,9 +118,7 @@ class StorageBackend(Protocol):
         """
         ...
 
-    async def delete_parts(
-        self, bucket: str, key: str, upload_id: str
-    ) -> None:
+    async def delete_parts(self, bucket: str, key: str, upload_id: str) -> None:
         """Delete all stored parts for a multipart upload.
 
         Args:

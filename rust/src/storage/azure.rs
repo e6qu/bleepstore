@@ -71,11 +71,7 @@ impl AzureGatewayBackend {
     ///   - `AZURE_STORAGE_KEY` (Shared Key auth, preferred)
     ///   - `AZURE_STORAGE_SAS_TOKEN` (SAS token auth, fallback)
     ///   - `AZURE_STORAGE_CONNECTION_STRING` (parsed for account key)
-    pub async fn new(
-        container: String,
-        account: String,
-        prefix: String,
-    ) -> anyhow::Result<Self> {
+    pub async fn new(container: String, account: String, prefix: String) -> anyhow::Result<Self> {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(300))
             .build()
@@ -105,9 +101,9 @@ impl AzureGatewayBackend {
     fn resolve_auth() -> anyhow::Result<AzureAuth> {
         // 1. Try AZURE_STORAGE_KEY
         if let Ok(key) = std::env::var("AZURE_STORAGE_KEY") {
-            let key_bytes = BASE64_STANDARD
-                .decode(&key)
-                .map_err(|e| anyhow::anyhow!("Invalid AZURE_STORAGE_KEY (not valid base64): {}", e))?;
+            let key_bytes = BASE64_STANDARD.decode(&key).map_err(|e| {
+                anyhow::anyhow!("Invalid AZURE_STORAGE_KEY (not valid base64): {}", e)
+            })?;
             return Ok(AzureAuth::SharedKey { key_bytes });
         }
 
@@ -240,10 +236,8 @@ impl AzureGatewayBackend {
         // Build canonicalized resource.
         // Azure Shared Key auth uses the un-encoded blob name in the
         // canonicalized resource (not the percent-encoded URL form).
-        let mut canonicalized_resource = format!(
-            "/{}/{}/{}",
-            self.account, self.container, blob_name
-        );
+        let mut canonicalized_resource =
+            format!("/{}/{}/{}", self.account, self.container, blob_name);
         // Append query parameters sorted by key.
         if !query_params.is_empty() {
             let mut sorted_params = query_params.to_vec();
@@ -256,11 +250,7 @@ impl AzureGatewayBackend {
         // Build string to sign.
         let string_to_sign = format!(
             "{}\n\n\n{}\n\n{}\n\n\n\n\n\n\n{}\n{}",
-            method,
-            content_length_str,
-            content_type,
-            canonicalized_headers,
-            canonicalized_resource
+            method, content_length_str, content_type, canonicalized_headers, canonicalized_resource
         );
 
         // HMAC-SHA256 sign.
@@ -311,9 +301,7 @@ impl AzureGatewayBackend {
         let date = Self::rfc1123_date();
         let content_type = "application/octet-stream";
 
-        let extra_headers = vec![
-            ("x-ms-blob-type".to_string(), "BlockBlob".to_string()),
-        ];
+        let extra_headers = vec![("x-ms-blob-type".to_string(), "BlockBlob".to_string())];
 
         let mut req = self
             .client
@@ -363,15 +351,7 @@ impl AzureGatewayBackend {
             .header("x-ms-version", AZURE_API_VERSION);
 
         if let AzureAuth::SharedKey { .. } = &self.auth {
-            let auth_header = self.sign_request(
-                "GET",
-                blob_name,
-                None,
-                "",
-                &date,
-                &[],
-                &[],
-            )?;
+            let auth_header = self.sign_request("GET", blob_name, None, "", &date, &[], &[])?;
             req = req.header("Authorization", auth_header);
         }
 
@@ -412,15 +392,7 @@ impl AzureGatewayBackend {
             .header("x-ms-version", AZURE_API_VERSION);
 
         if let AzureAuth::SharedKey { .. } = &self.auth {
-            let auth_header = self.sign_request(
-                "DELETE",
-                blob_name,
-                None,
-                "",
-                &date,
-                &[],
-                &[],
-            )?;
+            let auth_header = self.sign_request("DELETE", blob_name, None, "", &date, &[], &[])?;
             req = req.header("Authorization", auth_header);
         }
 
@@ -450,15 +422,7 @@ impl AzureGatewayBackend {
             .header("x-ms-version", AZURE_API_VERSION);
 
         if let AzureAuth::SharedKey { .. } = &self.auth {
-            let auth_header = self.sign_request(
-                "HEAD",
-                blob_name,
-                None,
-                "",
-                &date,
-                &[],
-                &[],
-            )?;
+            let auth_header = self.sign_request("HEAD", blob_name, None, "", &date, &[], &[])?;
             req = req.header("Authorization", auth_header);
         }
 
@@ -594,18 +558,12 @@ impl AzureGatewayBackend {
     /// Copy a blob using Azure server-side copy (Copy Blob).
     ///
     /// Uses the `x-ms-copy-source` header for an asynchronous server-side copy.
-    async fn azure_copy(
-        &self,
-        src_blob_name: &str,
-        dst_blob_name: &str,
-    ) -> anyhow::Result<()> {
+    async fn azure_copy(&self, src_blob_name: &str, dst_blob_name: &str) -> anyhow::Result<()> {
         let dst_url = self.blob_url(dst_blob_name);
         let src_url = self.blob_url(src_blob_name);
         let date = Self::rfc1123_date();
 
-        let extra_headers = vec![
-            ("x-ms-copy-source".to_string(), src_url.clone()),
-        ];
+        let extra_headers = vec![("x-ms-copy-source".to_string(), src_url.clone())];
 
         let mut req = self
             .client
@@ -635,10 +593,7 @@ impl AzureGatewayBackend {
         if !resp.status().is_success() {
             let status = resp.status();
             if Self::is_not_found(status) {
-                return Err(anyhow::anyhow!(
-                    "Source blob not found: {}",
-                    src_blob_name
-                ));
+                return Err(anyhow::anyhow!("Source blob not found: {}", src_blob_name));
             }
             let body = resp.text().await.unwrap_or_default();
             return Err(Self::map_azure_error("copy", status, &body));
@@ -671,10 +626,7 @@ impl StorageBackend for AzureGatewayBackend {
             let md5_hex = Self::compute_md5(&data);
             let etag = format!("\"{}\"", md5_hex);
 
-            debug!(
-                "Azure put: container={} blob={}",
-                self.container, blob_name
-            );
+            debug!("Azure put: container={} blob={}", self.container, blob_name);
 
             self.azure_upload(&blob_name, &data).await?;
 
@@ -690,10 +642,7 @@ impl StorageBackend for AzureGatewayBackend {
         Box::pin(async move {
             let blob_name = self.blob_name(&storage_key);
 
-            debug!(
-                "Azure get: container={} blob={}",
-                self.container, blob_name
-            );
+            debug!("Azure get: container={} blob={}", self.container, blob_name);
 
             let data = self.azure_download(&blob_name).await?;
 
@@ -757,10 +706,7 @@ impl StorageBackend for AzureGatewayBackend {
             let src_blob_name = self.blob_name(&src_storage_key);
             let dst_blob_name = self.blob_name(&dst_storage_key);
 
-            debug!(
-                "Azure copy: src={} dst={}",
-                src_blob_name, dst_blob_name
-            );
+            debug!("Azure copy: src={} dst={}", src_blob_name, dst_blob_name);
 
             // Use Azure server-side copy.
             self.azure_copy(&src_blob_name, &dst_blob_name).await?;
@@ -823,7 +769,10 @@ impl StorageBackend for AzureGatewayBackend {
 
             debug!(
                 "Azure assemble_parts: container={} blob={} upload_id={} parts={}",
-                self.container, final_blob_name, upload_id, parts.len()
+                self.container,
+                final_blob_name,
+                upload_id,
+                parts.len()
             );
 
             // Download all part data, then stage as blocks on the final blob
@@ -831,8 +780,7 @@ impl StorageBackend for AzureGatewayBackend {
             let mut block_ids: Vec<String> = Vec::new();
 
             for (part_number, _etag) in &parts {
-                let part_blob_name =
-                    format!("{}.parts/{}/{}", self.prefix, upload_id, part_number);
+                let part_blob_name = format!("{}.parts/{}/{}", self.prefix, upload_id, part_number);
                 let bid = Self::block_id(&upload_id, *part_number);
 
                 // Download part data.
@@ -994,11 +942,7 @@ impl AzureGatewayBackend {
 
             if let AzureAuth::SharedKey { .. } = &self.auth {
                 // For container-level operations, the blob_name is empty.
-                let auth_header = self.sign_request_container(
-                    "GET",
-                    &date,
-                    &query_params,
-                )?;
+                let auth_header = self.sign_request_container("GET", &date, &query_params)?;
                 req = req.header("Authorization", auth_header);
             }
 
@@ -1073,16 +1017,10 @@ impl AzureGatewayBackend {
             }
         };
 
-        let ms_headers = format!(
-            "x-ms-date:{}\nx-ms-version:{}",
-            date, AZURE_API_VERSION
-        );
+        let ms_headers = format!("x-ms-date:{}\nx-ms-version:{}", date, AZURE_API_VERSION);
 
         // For container-level operations, canonicalized resource is /{account}/{container}.
-        let mut canonicalized_resource = format!(
-            "/{}/{}",
-            self.account, self.container
-        );
+        let mut canonicalized_resource = format!("/{}/{}", self.account, self.container);
 
         // Append sorted query parameters.
         if !query_params.is_empty() {
@@ -1210,7 +1148,11 @@ mod tests {
 
         let mut hasher = Md5::new();
         hasher.update(&combined);
-        let result = format!("\"{}-{}\"", hex::encode(hasher.finalize()), part_etags.len());
+        let result = format!(
+            "\"{}-{}\"",
+            hex::encode(hasher.finalize()),
+            part_etags.len()
+        );
 
         assert!(result.starts_with('"'));
         assert!(result.ends_with("-2\""));
@@ -1256,8 +1198,8 @@ mod tests {
     fn test_blob_url_encoding() {
         // Verify that '/' is preserved but spaces are encoded.
         let name = "prefix/bucket/key with spaces.txt";
-        let encoded = percent_encoding::utf8_percent_encode(name, &AZURE_BLOB_ENCODE_SET)
-            .to_string();
+        let encoded =
+            percent_encoding::utf8_percent_encode(name, &AZURE_BLOB_ENCODE_SET).to_string();
         assert!(encoded.contains('/'));
         assert!(encoded.contains("%20"));
         assert!(!encoded.contains(' '));
@@ -1266,8 +1208,8 @@ mod tests {
     #[test]
     fn test_blob_url_simple_name() {
         let name = "simple-blob";
-        let encoded = percent_encoding::utf8_percent_encode(name, &AZURE_BLOB_ENCODE_SET)
-            .to_string();
+        let encoded =
+            percent_encoding::utf8_percent_encode(name, &AZURE_BLOB_ENCODE_SET).to_string();
         assert_eq!(encoded, "simple-blob");
     }
 

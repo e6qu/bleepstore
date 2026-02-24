@@ -236,9 +236,7 @@ class BucketHandler:
             headers={"x-amz-bucket-region": region},
         )
 
-    async def get_bucket_location(
-        self, request: Request, bucket: str
-    ) -> Response:
+    async def get_bucket_location(self, request: Request, bucket: str) -> Response:
         """Return the region where the bucket resides.
 
         Implements: GET /{bucket}?location
@@ -261,9 +259,7 @@ class BucketHandler:
         xml = render_location_constraint(region)
         return xml_response(xml, status=200)
 
-    async def get_bucket_acl(
-        self, request: Request, bucket: str
-    ) -> Response:
+    async def get_bucket_acl(self, request: Request, bucket: str) -> Response:
         """Return the access control list for a bucket.
 
         Implements: GET /{bucket}?acl
@@ -295,9 +291,7 @@ class BucketHandler:
         xml = render_acl_xml(acl)
         return xml_response(xml, status=200)
 
-    async def put_bucket_acl(
-        self, request: Request, bucket: str
-    ) -> Response:
+    async def put_bucket_acl(self, request: Request, bucket: str) -> Response:
         """Set the access control list for a bucket.
 
         Implements: PUT /{bucket}?acl
@@ -407,48 +401,42 @@ def _parse_acl_xml(
     grants = []
     acl_elem = _find_elem(root, f"{ns}AccessControlList", "AccessControlList")
     if acl_elem is not None:
-        for grant_elem in (
-            acl_elem.findall(f"{ns}Grant") + acl_elem.findall("Grant")
-        ):
-            grantee_elem = _find_elem(
-                grant_elem, f"{ns}Grantee", "Grantee"
-            )
-            perm_elem = _find_elem(
-                grant_elem, f"{ns}Permission", "Permission"
-            )
+        for grant_elem in acl_elem.findall(f"{ns}Grant") + acl_elem.findall("Grant"):
+            grantee_elem = _find_elem(grant_elem, f"{ns}Grantee", "Grantee")
+            perm_elem = _find_elem(grant_elem, f"{ns}Permission", "Permission")
             if grantee_elem is None or perm_elem is None:
                 continue
 
             permission = perm_elem.text or ""
 
             # Determine grantee type from xsi:type attribute
-            xsi_type = grantee_elem.get(
-                "{http://www.w3.org/2001/XMLSchema-instance}type", ""
-            )
+            xsi_type = grantee_elem.get("{http://www.w3.org/2001/XMLSchema-instance}type", "")
 
             if xsi_type == "Group" or grantee_elem.find(f"{ns}URI") is not None:
                 uri_elem = _find_elem(grantee_elem, f"{ns}URI", "URI")
                 uri = uri_elem.text if uri_elem is not None else ""
-                grants.append({
-                    "grantee": {"type": "Group", "uri": uri},
-                    "permission": permission,
-                })
+                grants.append(
+                    {
+                        "grantee": {"type": "Group", "uri": uri},
+                        "permission": permission,
+                    }
+                )
             else:
                 # CanonicalUser
                 g_id_elem = _find_elem(grantee_elem, f"{ns}ID", "ID")
-                g_dn_elem = _find_elem(
-                    grantee_elem, f"{ns}DisplayName", "DisplayName"
-                )
+                g_dn_elem = _find_elem(grantee_elem, f"{ns}DisplayName", "DisplayName")
                 g_id = g_id_elem.text if g_id_elem is not None else ""
                 g_dn = g_dn_elem.text if g_dn_elem is not None else ""
-                grants.append({
-                    "grantee": {
-                        "type": "CanonicalUser",
-                        "id": g_id,
-                        "display_name": g_dn,
-                    },
-                    "permission": permission,
-                })
+                grants.append(
+                    {
+                        "grantee": {
+                            "type": "CanonicalUser",
+                            "id": g_id,
+                            "display_name": g_dn,
+                        },
+                        "permission": permission,
+                    }
+                )
 
     return {
         "owner": {"id": owner_id, "display_name": owner_display},

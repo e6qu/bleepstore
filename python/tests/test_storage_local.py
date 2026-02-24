@@ -167,9 +167,7 @@ class TestGetStream:
         await storage.put("test-bucket", "range.txt", data)
 
         chunks = []
-        async for chunk in storage.get_stream(
-            "test-bucket", "range.txt", offset=3, length=4
-        ):
+        async for chunk in storage.get_stream("test-bucket", "range.txt", offset=3, length=4):
             chunks.append(chunk)
 
         result = b"".join(chunks)

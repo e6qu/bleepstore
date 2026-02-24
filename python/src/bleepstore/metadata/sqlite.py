@@ -201,9 +201,7 @@ class SQLiteMetadataStore:
             True if the bucket exists, False otherwise.
         """
         assert self._db is not None
-        async with self._db.execute(
-            "SELECT 1 FROM buckets WHERE name = ?", (bucket,)
-        ) as cursor:
+        async with self._db.execute("SELECT 1 FROM buckets WHERE name = ?", (bucket,)) as cursor:
             row = await cursor.fetchone()
             return row is not None
 
@@ -271,9 +269,7 @@ class SQLiteMetadataStore:
             acl: New JSON-serialized ACL string.
         """
         assert self._db is not None
-        await self._db.execute(
-            "UPDATE buckets SET acl = ? WHERE name = ?", (acl, bucket)
-        )
+        await self._db.execute("UPDATE buckets SET acl = ? WHERE name = ?", (acl, bucket))
         await self._db.commit()
 
     # -- Object operations -----------------------------------------------------
@@ -321,9 +317,20 @@ class SQLiteMetadataStore:
                 storage_class, acl, user_metadata, last_modified)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                bucket, key, size, etag, content_type, content_encoding,
-                content_language, content_disposition, cache_control, expires,
-                storage_class, acl, user_metadata, _now_iso(),
+                bucket,
+                key,
+                size,
+                etag,
+                content_type,
+                content_encoding,
+                content_language,
+                content_disposition,
+                cache_control,
+                expires,
+                storage_class,
+                acl,
+                user_metadata,
+                _now_iso(),
             ),
         )
         await self._db.commit()
@@ -377,9 +384,7 @@ class SQLiteMetadataStore:
             key: The object key.
         """
         assert self._db is not None
-        await self._db.execute(
-            "DELETE FROM objects WHERE bucket = ? AND key = ?", (bucket, key)
-        )
+        await self._db.execute("DELETE FROM objects WHERE bucket = ? AND key = ?", (bucket, key))
         await self._db.commit()
 
     async def delete_objects_meta(self, bucket: str, keys: list[str]) -> list[str]:
@@ -506,7 +511,7 @@ class SQLiteMetadataStore:
 
             if delimiter:
                 # Check if this key should be grouped into a CommonPrefix
-                suffix = row_key[len(prefix):]
+                suffix = row_key[len(prefix) :]
                 delim_pos = suffix.find(delimiter)
                 if delim_pos >= 0:
                     cp = prefix + suffix[: delim_pos + len(delimiter)]
@@ -544,18 +549,14 @@ class SQLiteMetadataStore:
                     last_key = common_prefixes[-1]
 
                 if last_key:
-                    check_sql_parts = [
-                        "SELECT 1 FROM objects WHERE bucket = ? AND key > ?"
-                    ]
+                    check_sql_parts = ["SELECT 1 FROM objects WHERE bucket = ? AND key > ?"]
                     check_params: list[Any] = [bucket, last_key]
                     if prefix:
                         check_sql_parts.append("AND key LIKE ? || '%'")
                         check_params.append(prefix)
                     check_sql_parts.append("LIMIT 1")
                     check_sql = " ".join(check_sql_parts)
-                    async with self._db.execute(
-                        check_sql, tuple(check_params)
-                    ) as cursor:
+                    async with self._db.execute(check_sql, tuple(check_params)) as cursor:
                         is_truncated = (await cursor.fetchone()) is not None
                 else:
                     is_truncated = False
@@ -630,9 +631,20 @@ class SQLiteMetadataStore:
                 storage_class, acl, user_metadata, owner_id, owner_display, initiated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                upload_id, bucket, key, content_type, content_encoding,
-                content_language, content_disposition, cache_control, expires,
-                storage_class, acl, user_metadata, owner_id, owner_display,
+                upload_id,
+                bucket,
+                key,
+                content_type,
+                content_encoding,
+                content_language,
+                content_disposition,
+                cache_control,
+                expires,
+                storage_class,
+                acl,
+                user_metadata,
+                owner_id,
+                owner_display,
                 _now_iso(),
             ),
         )
@@ -718,15 +730,24 @@ class SQLiteMetadataStore:
                     storage_class, acl, user_metadata, last_modified)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    bucket, key, size, etag, content_type, content_encoding,
-                    content_language, content_disposition, cache_control, expires,
-                    storage_class, acl, user_metadata, now,
+                    bucket,
+                    key,
+                    size,
+                    etag,
+                    content_type,
+                    content_encoding,
+                    content_language,
+                    content_disposition,
+                    cache_control,
+                    expires,
+                    storage_class,
+                    acl,
+                    user_metadata,
+                    now,
                 ),
             )
             # Delete parts for this upload
-            await self._db.execute(
-                "DELETE FROM multipart_parts WHERE upload_id = ?", (upload_id,)
-            )
+            await self._db.execute("DELETE FROM multipart_parts WHERE upload_id = ?", (upload_id,))
             # Delete the upload record
             await self._db.execute(
                 "DELETE FROM multipart_uploads WHERE upload_id = ?", (upload_id,)
@@ -736,9 +757,7 @@ class SQLiteMetadataStore:
             await self._db.execute("ROLLBACK")
             raise
 
-    async def abort_multipart_upload(
-        self, bucket: str, key: str, upload_id: str
-    ) -> None:
+    async def abort_multipart_upload(self, bucket: str, key: str, upload_id: str) -> None:
         """Abort a multipart upload and remove its part records.
 
         Deletes both the upload record and all associated part records.
@@ -751,12 +770,8 @@ class SQLiteMetadataStore:
             upload_id: The upload identifier.
         """
         assert self._db is not None
-        await self._db.execute(
-            "DELETE FROM multipart_parts WHERE upload_id = ?", (upload_id,)
-        )
-        await self._db.execute(
-            "DELETE FROM multipart_uploads WHERE upload_id = ?", (upload_id,)
-        )
+        await self._db.execute("DELETE FROM multipart_parts WHERE upload_id = ?", (upload_id,))
+        await self._db.execute("DELETE FROM multipart_uploads WHERE upload_id = ?", (upload_id,))
         await self._db.commit()
 
     async def put_part(
@@ -786,9 +801,7 @@ class SQLiteMetadataStore:
         )
         await self._db.commit()
 
-    async def get_parts_for_completion(
-        self, upload_id: str
-    ) -> list[dict[str, Any]]:
+    async def get_parts_for_completion(self, upload_id: str) -> list[dict[str, Any]]:
         """Get all parts for a multipart upload, ordered by part number.
 
         Args:
@@ -883,9 +896,7 @@ class SQLiteMetadataStore:
 
         if key_marker:
             if upload_id_marker:
-                sql_parts.append(
-                    "AND (key > ? OR (key = ? AND upload_id > ?))"
-                )
+                sql_parts.append("AND (key > ? OR (key = ? AND upload_id > ?))")
                 params.extend([key_marker, key_marker, upload_id_marker])
             else:
                 sql_parts.append("AND key > ?")
@@ -908,7 +919,7 @@ class SQLiteMetadataStore:
             row_key: str = row["key"]
 
             if delimiter:
-                suffix = row_key[len(prefix):]
+                suffix = row_key[len(prefix) :]
                 delim_pos = suffix.find(delimiter)
                 if delim_pos >= 0:
                     cp = prefix + suffix[: delim_pos + len(delimiter)]

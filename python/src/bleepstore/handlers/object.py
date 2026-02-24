@@ -111,7 +111,7 @@ def parse_range_header(header: str, total: int) -> tuple[int, int] | None:
     if not header or not header.startswith("bytes="):
         return None
 
-    range_spec = header[len("bytes="):]
+    range_spec = header[len("bytes=") :]
 
     # Handle multiple ranges -- we only support a single range
     if "," in range_spec:
@@ -158,6 +158,7 @@ def parse_range_header(header: str, total: int) -> tuple[int, int] | None:
 # ---------------------------------------------------------------------------
 # Conditional request evaluation
 # ---------------------------------------------------------------------------
+
 
 def _strip_etag_quotes(etag: str) -> str:
     """Strip surrounding double quotes and optional W/ prefix from an ETag.
@@ -244,9 +245,7 @@ def evaluate_conditionals(
     if if_match is not None:
         # If-Match can be "*" (any) or a list of ETags
         if if_match.strip() != "*":
-            match_tags = [
-                _strip_etag_quotes(t) for t in if_match.split(",")
-            ]
+            match_tags = [_strip_etag_quotes(t) for t in if_match.split(",")]
             if obj_etag not in match_tags:
                 return 412
 
@@ -264,19 +263,13 @@ def evaluate_conditionals(
     if if_none_match is not None:
         if if_none_match.strip() == "*":
             return 304 if is_get_or_head else 412
-        none_match_tags = [
-            _strip_etag_quotes(t) for t in if_none_match.split(",")
-        ]
+        none_match_tags = [_strip_etag_quotes(t) for t in if_none_match.split(",")]
         if obj_etag in none_match_tags:
             return 304 if is_get_or_head else 412
 
     # 4. If-Modified-Since: only for GET/HEAD, only if If-None-Match is absent
     if_modified_since = request.headers.get("if-modified-since")
-    if (
-        if_modified_since is not None
-        and if_none_match is None
-        and is_get_or_head
-    ):
+    if if_modified_since is not None and if_none_match is None and is_get_or_head:
         ims_date = _parse_http_date(if_modified_since)
         if ims_date is not None and obj_mtime is not None:
             if obj_mtime <= ims_date:
@@ -344,7 +337,7 @@ class ObjectHandler:
         for name, value in request.headers.items():
             lower_name = name.lower()
             if lower_name.startswith("x-amz-meta-"):
-                meta_key = lower_name[len("x-amz-meta-"):]
+                meta_key = lower_name[len("x-amz-meta-") :]
                 meta[meta_key] = value
         return meta
 
@@ -404,6 +397,7 @@ class ObjectHandler:
                 acl_json = acl_to_json(acl)
             except ValueError:
                 from bleepstore.errors import InvalidArgument
+
                 raise InvalidArgument(f"Invalid canned ACL: {canned_acl}")
 
         # Write data to storage (atomic: temp-fsync-rename)
@@ -491,7 +485,9 @@ class ObjectHandler:
                 headers["Content-Length"] = str(content_length)
 
                 return StreamingResponse(
-                    content=self.storage.get_stream(bucket, key, offset=start, length=content_length),
+                    content=self.storage.get_stream(
+                        bucket, key, offset=start, length=content_length
+                    ),
                     status_code=206,
                     headers=headers,
                     media_type=obj_meta.get("content_type", "application/octet-stream"),
@@ -577,7 +573,9 @@ class ObjectHandler:
             await self.storage.delete(bucket, key)
         except Exception:
             logger.warning(
-                "Failed to delete object from storage: %s/%s", bucket, key,
+                "Failed to delete object from storage: %s/%s",
+                bucket,
+                key,
                 exc_info=True,
             )
 
@@ -642,9 +640,7 @@ class ObjectHandler:
 
     # -- List, Copy & Batch Delete (Stage 5a) ----------------------------------
 
-    async def copy_object(
-        self, request: Request, bucket: str, key: str
-    ) -> Response:
+    async def copy_object(self, request: Request, bucket: str, key: str) -> Response:
         """Copy an object within or across buckets.
 
         Triggered by PUT with x-amz-copy-source header. Parses the source
@@ -676,7 +672,7 @@ class ObjectHandler:
             raise MalformedXML("Invalid x-amz-copy-source header")
 
         src_bucket = copy_source[:slash_pos]
-        src_key = copy_source[slash_pos + 1:]
+        src_key = copy_source[slash_pos + 1 :]
 
         if not src_bucket or not src_key:
             raise MalformedXML("Invalid x-amz-copy-source header")
@@ -697,37 +693,27 @@ class ObjectHandler:
         validate_object_key(key)
 
         # Copy the data in storage
-        md5_hex = await self.storage.copy_object(
-            src_bucket, src_key, bucket, key
-        )
+        md5_hex = await self.storage.copy_object(src_bucket, src_key, bucket, key)
 
         # Quote the ETag
         etag = f'"{md5_hex}"'
 
         # Determine metadata directive
-        directive = request.headers.get(
-            "x-amz-metadata-directive", "COPY"
-        ).upper()
+        directive = request.headers.get("x-amz-metadata-directive", "COPY").upper()
 
         if directive == "REPLACE":
             # Use metadata from this request
-            content_type = request.headers.get(
-                "content-type", "application/octet-stream"
-            )
+            content_type = request.headers.get("content-type", "application/octet-stream")
             content_encoding = request.headers.get("content-encoding")
             content_language = request.headers.get("content-language")
             content_disposition = request.headers.get("content-disposition")
             cache_control = request.headers.get("cache-control")
             expires = request.headers.get("expires")
             user_metadata = self._extract_user_metadata(request)
-            user_metadata_json = (
-                json.dumps(user_metadata) if user_metadata else "{}"
-            )
+            user_metadata_json = json.dumps(user_metadata) if user_metadata else "{}"
         else:
             # COPY: use source object metadata
-            content_type = src_meta.get(
-                "content_type", "application/octet-stream"
-            )
+            content_type = src_meta.get("content_type", "application/octet-stream")
             content_encoding = src_meta.get("content_encoding")
             content_language = src_meta.get("content_language")
             content_disposition = src_meta.get("content_disposition")
@@ -760,9 +746,7 @@ class ObjectHandler:
         body = render_copy_object_result(etag, last_modified)
         return xml_response(body, status=200)
 
-    async def delete_objects(
-        self, request: Request, bucket: str
-    ) -> Response:
+    async def delete_objects(self, request: Request, bucket: str) -> Response:
         """Delete multiple objects from a bucket (batch delete).
 
         Implements: POST /{bucket}?delete
@@ -880,9 +864,7 @@ class ObjectHandler:
         else:
             return await self.list_objects_v1(request, bucket)
 
-    async def list_objects_v2(
-        self, request: Request, bucket: str
-    ) -> Response:
+    async def list_objects_v2(self, request: Request, bucket: str) -> Response:
         """List objects in a bucket using the v2 API.
 
         Implements: GET /{bucket}?list-type=2
@@ -932,9 +914,7 @@ class ObjectHandler:
         )
         return xml_response(body, status=200)
 
-    async def list_objects_v1(
-        self, request: Request, bucket: str
-    ) -> Response:
+    async def list_objects_v1(self, request: Request, bucket: str) -> Response:
         """List objects in a bucket using the v1 API.
 
         Implements: GET /{bucket}
@@ -981,9 +961,7 @@ class ObjectHandler:
 
     # -- Object ACLs (Stage 5b) -----------------------------------------------
 
-    async def get_object_acl(
-        self, request: Request, bucket: str, key: str
-    ) -> Response:
+    async def get_object_acl(self, request: Request, bucket: str, key: str) -> Response:
         """Return the access control list for an object.
 
         Implements: GET /{bucket}/{key}?acl
@@ -1021,9 +999,7 @@ class ObjectHandler:
         xml_body = render_acl_xml(acl)
         return xml_response(xml_body, status=200)
 
-    async def put_object_acl(
-        self, request: Request, bucket: str, key: str
-    ) -> Response:
+    async def put_object_acl(self, request: Request, bucket: str, key: str) -> Response:
         """Set the access control list for an object.
 
         Implements: PUT /{bucket}/{key}?acl
@@ -1059,6 +1035,7 @@ class ObjectHandler:
                 acl = parse_canned_acl(canned_acl, owner_id, owner_display)
             except ValueError:
                 from bleepstore.errors import InvalidArgument
+
                 raise InvalidArgument(f"Invalid canned ACL: {canned_acl}")
             acl_json = acl_to_json(acl)
             await self.metadata.update_object_acl(bucket, key, acl_json)
@@ -1087,9 +1064,8 @@ class ObjectHandler:
 # ACL XML parsing helper (reused from bucket handler pattern)
 # ---------------------------------------------------------------------------
 
-def _find_elem(
-    parent: ET.Element, ns_name: str, bare_name: str
-) -> ET.Element | None:
+
+def _find_elem(parent: ET.Element, ns_name: str, bare_name: str) -> ET.Element | None:
     """Find a child element, trying namespaced name first, then bare name."""
     elem = parent.find(ns_name)
     if elem is not None:
@@ -1121,46 +1097,40 @@ def _parse_acl_xml(
     grants = []
     acl_elem = _find_elem(root, f"{ns}AccessControlList", "AccessControlList")
     if acl_elem is not None:
-        for grant_elem in (
-            acl_elem.findall(f"{ns}Grant") + acl_elem.findall("Grant")
-        ):
-            grantee_elem = _find_elem(
-                grant_elem, f"{ns}Grantee", "Grantee"
-            )
-            perm_elem = _find_elem(
-                grant_elem, f"{ns}Permission", "Permission"
-            )
+        for grant_elem in acl_elem.findall(f"{ns}Grant") + acl_elem.findall("Grant"):
+            grantee_elem = _find_elem(grant_elem, f"{ns}Grantee", "Grantee")
+            perm_elem = _find_elem(grant_elem, f"{ns}Permission", "Permission")
             if grantee_elem is None or perm_elem is None:
                 continue
 
             permission = perm_elem.text or ""
 
-            xsi_type = grantee_elem.get(
-                "{http://www.w3.org/2001/XMLSchema-instance}type", ""
-            )
+            xsi_type = grantee_elem.get("{http://www.w3.org/2001/XMLSchema-instance}type", "")
 
             if xsi_type == "Group" or grantee_elem.find(f"{ns}URI") is not None:
                 uri_elem = _find_elem(grantee_elem, f"{ns}URI", "URI")
                 uri = uri_elem.text if uri_elem is not None else ""
-                grants.append({
-                    "grantee": {"type": "Group", "uri": uri},
-                    "permission": permission,
-                })
+                grants.append(
+                    {
+                        "grantee": {"type": "Group", "uri": uri},
+                        "permission": permission,
+                    }
+                )
             else:
                 g_id_elem = _find_elem(grantee_elem, f"{ns}ID", "ID")
-                g_dn_elem = _find_elem(
-                    grantee_elem, f"{ns}DisplayName", "DisplayName"
-                )
+                g_dn_elem = _find_elem(grantee_elem, f"{ns}DisplayName", "DisplayName")
                 g_id = g_id_elem.text if g_id_elem is not None else ""
                 g_dn = g_dn_elem.text if g_dn_elem is not None else ""
-                grants.append({
-                    "grantee": {
-                        "type": "CanonicalUser",
-                        "id": g_id,
-                        "display_name": g_dn,
-                    },
-                    "permission": permission,
-                })
+                grants.append(
+                    {
+                        "grantee": {
+                            "type": "CanonicalUser",
+                            "id": g_id,
+                            "display_name": g_dn,
+                        },
+                        "permission": permission,
+                    }
+                )
 
     return {
         "owner": {"id": owner_id, "display_name": owner_display},

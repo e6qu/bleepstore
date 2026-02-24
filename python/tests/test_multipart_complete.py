@@ -79,9 +79,7 @@ async def _create_bucket(client: AsyncClient, bucket: str = "test-bucket") -> No
     assert resp.status_code == 200
 
 
-async def _initiate_upload(
-    client: AsyncClient, bucket: str, key: str
-) -> str:
+async def _initiate_upload(client: AsyncClient, bucket: str, key: str) -> str:
     """Helper to initiate a multipart upload and return the upload ID."""
     resp = await client.post(f"/{bucket}/{key}?uploads")
     assert resp.status_code == 200
@@ -94,8 +92,12 @@ async def _initiate_upload(
 
 
 async def _upload_part(
-    client: AsyncClient, bucket: str, key: str,
-    upload_id: str, part_number: int, data: bytes,
+    client: AsyncClient,
+    bucket: str,
+    key: str,
+    upload_id: str,
+    part_number: int,
+    data: bytes,
 ) -> str:
     """Helper to upload a part and return the quoted ETag."""
     resp = await client.put(
@@ -115,7 +117,7 @@ def _build_complete_xml(parts: list[tuple[int, str]]) -> str:
     Returns:
         XML string for the request body.
     """
-    xml_parts = ['<CompleteMultipartUpload>']
+    xml_parts = ["<CompleteMultipartUpload>"]
     for pn, etag in parts:
         xml_parts.append(f"<Part><PartNumber>{pn}</PartNumber><ETag>{etag}</ETag></Part>")
     xml_parts.append("</CompleteMultipartUpload>")
@@ -419,7 +421,9 @@ class TestCompletedObject:
 class TestPartCleanup:
     """Tests that part files are cleaned up after completion."""
 
-    async def test_part_files_removed_after_completion(self, mp_client: AsyncClient, tmp_path) -> None:
+    async def test_part_files_removed_after_completion(
+        self, mp_client: AsyncClient, tmp_path
+    ) -> None:
         """Part files are deleted from disk after successful completion."""
         await _create_bucket(mp_client)
         upload_id = await _initiate_upload(mp_client, "test-bucket", "my-key")
@@ -465,9 +469,7 @@ class TestPartCleanup:
         assert len(uploads) == 0
 
         # Trying to list parts should fail
-        resp = await mp_client.get(
-            f"/test-bucket/my-key?uploadId={upload_id}"
-        )
+        resp = await mp_client.get(f"/test-bucket/my-key?uploadId={upload_id}")
         assert resp.status_code == 404
         assert "NoSuchUpload" in resp.text
 

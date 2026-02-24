@@ -48,18 +48,18 @@ func TestValidateBucketName(t *testing.T) {
 		{"bucket-with-many-hyphens-and-dots.and.more", false},
 
 		// Invalid names
-		{"ab", true},                                          // too short
-		{"UPPERCASE", true},                                   // uppercase
-		{"my_bucket", true},                                   // underscore
-		{"-start-with-hyphen", true},                          // starts with hyphen
-		{"end-with-hyphen-", true},                            // ends with hyphen
-		{"192.168.0.1", true},                                 // IP address
-		{"xn--test-bucket", true},                             // starts with xn--
-		{"my-bucket-s3alias", true},                           // ends with -s3alias
-		{"my-bucket--ol-s3", true},                            // ends with --ol-s3
-		{"my..bucket", true},                                  // consecutive periods
-		{"", true},                                            // empty
-		{strings.Repeat("a", 64), true},                       // too long (64 chars)
+		{"ab", true},                    // too short
+		{"UPPERCASE", true},             // uppercase
+		{"my_bucket", true},             // underscore
+		{"-start-with-hyphen", true},    // starts with hyphen
+		{"end-with-hyphen-", true},      // ends with hyphen
+		{"192.168.0.1", true},           // IP address
+		{"xn--test-bucket", true},       // starts with xn--
+		{"my-bucket-s3alias", true},     // ends with -s3alias
+		{"my-bucket--ol-s3", true},      // ends with --ol-s3
+		{"my..bucket", true},            // consecutive periods
+		{"", true},                      // empty
+		{strings.Repeat("a", 64), true}, // too long (64 chars)
 	}
 
 	for _, tt := range tests {
@@ -377,9 +377,9 @@ func TestPutBucketAclCanned(t *testing.T) {
 
 func TestParseCannedACL(t *testing.T) {
 	tests := []struct {
-		cannedACL   string
-		wantGrants  int
-		wantPerms   []string
+		cannedACL  string
+		wantGrants int
+		wantPerms  []string
 	}{
 		{"private", 1, []string{"FULL_CONTROL"}},
 		{"public-read", 2, []string{"FULL_CONTROL", "READ"}},

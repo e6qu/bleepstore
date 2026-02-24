@@ -53,8 +53,8 @@ impl AwsGatewayBackend {
 
         let sdk_config = config_loader.load().await;
 
-        let s3_config_builder = aws_sdk_s3::config::Builder::from(&sdk_config)
-            .force_path_style(true);
+        let s3_config_builder =
+            aws_sdk_s3::config::Builder::from(&sdk_config).force_path_style(true);
 
         let client = Client::from_conf(s3_config_builder.build());
 
@@ -346,11 +346,10 @@ impl StorageBackend for AwsGatewayBackend {
                 // For single part, compute composite ETag as md5(part_md5_binary)-1
                 let part_etag = &parts[0].1;
                 let etag_hex = part_etag.trim_matches('"');
-                let part_md5_bytes = hex::decode(etag_hex)
-                    .unwrap_or_else(|_| {
-                        // Fallback: use the ETag from the copy response.
-                        Vec::new()
-                    });
+                let part_md5_bytes = hex::decode(etag_hex).unwrap_or_else(|_| {
+                    // Fallback: use the ETag from the copy response.
+                    Vec::new()
+                });
 
                 if part_md5_bytes.is_empty() {
                     // Use copy response ETag
@@ -422,10 +421,7 @@ impl StorageBackend for AwsGatewayBackend {
         Box::pin(async move {
             let prefix = format!("{}.parts/{}/", self.prefix, upload_id);
 
-            debug!(
-                "AWS delete_parts: bucket={} prefix={}",
-                self.bucket, prefix
-            );
+            debug!("AWS delete_parts: bucket={} prefix={}", self.bucket, prefix);
 
             // List and delete all part objects under the prefix.
             let mut continuation_token: Option<String> = None;
@@ -576,10 +572,7 @@ impl AwsGatewayBackend {
                 }
                 Err(e) => {
                     let service_err = e.into_service_error();
-                    let error_code = service_err
-                        .meta()
-                        .code()
-                        .unwrap_or("");
+                    let error_code = service_err.meta().code().unwrap_or("");
 
                     if error_code == "EntityTooSmall" {
                         // Fallback: download the part data and re-upload.
@@ -611,9 +604,9 @@ impl AwsGatewayBackend {
                             .key(final_key)
                             .upload_id(aws_upload_id)
                             .part_number(aws_part_number)
-                            .body(aws_sdk_s3::primitives::ByteStream::from(
-                                Bytes::from(body_bytes.to_vec()),
-                            ))
+                            .body(aws_sdk_s3::primitives::ByteStream::from(Bytes::from(
+                                body_bytes.to_vec(),
+                            )))
                             .send()
                             .await
                             .map_err(|e| Self::map_sdk_error("upload_part (fallback)", e))?;
@@ -760,7 +753,11 @@ mod tests {
 
         let mut hasher = Md5::new();
         hasher.update(&combined);
-        let result = format!("\"{}-{}\"", hex::encode(hasher.finalize()), part_etags.len());
+        let result = format!(
+            "\"{}-{}\"",
+            hex::encode(hasher.finalize()),
+            part_etags.len()
+        );
 
         assert!(result.starts_with('"'));
         assert!(result.ends_with("-2\""));

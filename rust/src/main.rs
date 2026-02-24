@@ -11,7 +11,11 @@ use tracing::info;
 
 /// Command-line arguments for the BleepStore server.
 #[derive(Parser, Debug)]
-#[command(name = "bleepstore", version, about = "S3-compatible object storage server")]
+#[command(
+    name = "bleepstore",
+    version,
+    about = "S3-compatible object storage server"
+)]
 struct Cli {
     /// Path to the YAML configuration file.
     #[arg(short, long, default_value = "bleepstore.example.yaml")]
@@ -55,83 +59,83 @@ async fn main() -> anyhow::Result<()> {
     if let Some(parent) = std::path::Path::new(metadata_path).parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let metadata_store =
-        bleepstore::metadata::sqlite::SqliteMetadataStore::new(metadata_path)?;
+    let metadata_store = bleepstore::metadata::sqlite::SqliteMetadataStore::new(metadata_path)?;
     info!("SQLite metadata store initialized at {}", metadata_path);
 
     // Seed default credentials from config (crash-only: idempotent on every startup).
     metadata_store.seed_credential(&config.auth.access_key, &config.auth.secret_key)?;
     info!("Default credentials seeded");
 
-    let metadata: Arc<dyn bleepstore::metadata::store::MetadataStore> =
-        Arc::new(metadata_store);
+    let metadata: Arc<dyn bleepstore::metadata::store::MetadataStore> = Arc::new(metadata_store);
 
     // Initialize storage backend based on config.
-    let storage: Arc<dyn bleepstore::storage::backend::StorageBackend> =
-        match config.storage.backend.as_str() {
-            "aws" => {
-                let aws_config = config.storage.aws.as_ref().ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "storage.backend is 'aws' but storage.aws config section is missing"
-                    )
-                })?;
-                let backend = bleepstore::storage::aws::AwsGatewayBackend::new(
-                    aws_config.bucket.clone(),
-                    aws_config.region.clone(),
-                    aws_config.prefix.clone(),
-                    None,
+    let storage: Arc<dyn bleepstore::storage::backend::StorageBackend> = match config
+        .storage
+        .backend
+        .as_str()
+    {
+        "aws" => {
+            let aws_config = config.storage.aws.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "storage.backend is 'aws' but storage.aws config section is missing"
                 )
-                .await?;
-                info!(
-                    "AWS gateway storage backend initialized: bucket={} region={} prefix='{}'",
-                    aws_config.bucket, aws_config.region, aws_config.prefix
-                );
-                Arc::new(backend)
-            }
-            "gcp" => {
-                let gcp_config = config.storage.gcp.as_ref().ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "storage.backend is 'gcp' but storage.gcp config section is missing"
-                    )
-                })?;
-                let backend = bleepstore::storage::gcp::GcpGatewayBackend::new(
-                    gcp_config.bucket.clone(),
-                    gcp_config.project.clone(),
-                    gcp_config.prefix.clone(),
+            })?;
+            let backend = bleepstore::storage::aws::AwsGatewayBackend::new(
+                aws_config.bucket.clone(),
+                aws_config.region.clone(),
+                aws_config.prefix.clone(),
+                None,
+            )
+            .await?;
+            info!(
+                "AWS gateway storage backend initialized: bucket={} region={} prefix='{}'",
+                aws_config.bucket, aws_config.region, aws_config.prefix
+            );
+            Arc::new(backend)
+        }
+        "gcp" => {
+            let gcp_config = config.storage.gcp.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "storage.backend is 'gcp' but storage.gcp config section is missing"
                 )
-                .await?;
-                info!(
-                    "GCP gateway storage backend initialized: bucket={} project={} prefix='{}'",
-                    gcp_config.bucket, gcp_config.project, gcp_config.prefix
-                );
-                Arc::new(backend)
-            }
-            "azure" => {
-                let azure_config = config.storage.azure.as_ref().ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "storage.backend is 'azure' but storage.azure config section is missing"
-                    )
-                })?;
-                let backend = bleepstore::storage::azure::AzureGatewayBackend::new(
-                    azure_config.container.clone(),
-                    azure_config.account.clone(),
-                    azure_config.prefix.clone(),
+            })?;
+            let backend = bleepstore::storage::gcp::GcpGatewayBackend::new(
+                gcp_config.bucket.clone(),
+                gcp_config.project.clone(),
+                gcp_config.prefix.clone(),
+            )
+            .await?;
+            info!(
+                "GCP gateway storage backend initialized: bucket={} project={} prefix='{}'",
+                gcp_config.bucket, gcp_config.project, gcp_config.prefix
+            );
+            Arc::new(backend)
+        }
+        "azure" => {
+            let azure_config = config.storage.azure.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "storage.backend is 'azure' but storage.azure config section is missing"
                 )
-                .await?;
-                info!(
-                    "Azure gateway storage backend initialized: container={} account={} prefix='{}'",
-                    azure_config.container, azure_config.account, azure_config.prefix
-                );
-                Arc::new(backend)
-            }
-            "local" | _ => {
-                let storage_root = &config.storage.local.root_dir;
-                let local_backend =
-                    bleepstore::storage::local::LocalBackend::new(storage_root)?;
-                info!("Local storage backend initialized at {}", storage_root);
-                Arc::new(local_backend)
-            }
-        };
+            })?;
+            let backend = bleepstore::storage::azure::AzureGatewayBackend::new(
+                azure_config.container.clone(),
+                azure_config.account.clone(),
+                azure_config.prefix.clone(),
+            )
+            .await?;
+            info!(
+                "Azure gateway storage backend initialized: container={} account={} prefix='{}'",
+                azure_config.container, azure_config.account, azure_config.prefix
+            );
+            Arc::new(backend)
+        }
+        "local" | _ => {
+            let storage_root = &config.storage.local.root_dir;
+            let local_backend = bleepstore::storage::local::LocalBackend::new(storage_root)?;
+            info!("Local storage backend initialized at {}", storage_root);
+            Arc::new(local_backend)
+        }
+    };
 
     // Build AppState.
     let state = Arc::new(bleepstore::AppState {

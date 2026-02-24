@@ -24,9 +24,7 @@ def _client_error(code: str, message: str = "error") -> ClientError:
 
 def _make_backend(bucket="test-bucket", region="us-east-1", prefix=""):
     """Create an AWSGatewayBackend with a mock client (skip init)."""
-    backend = AWSGatewayBackend(
-        bucket_name=bucket, region=region, prefix=prefix
-    )
+    backend = AWSGatewayBackend(bucket_name=bucket, region=region, prefix=prefix)
     backend._client = AsyncMock()
     backend._client_ctx = AsyncMock()
     return backend
@@ -69,9 +67,7 @@ class TestInit:
             mock_ctx.__aexit__ = AsyncMock(return_value=False)
             mock_session_cls.return_value.create_client.return_value = mock_ctx
 
-            backend = AWSGatewayBackend(
-                bucket_name="my-bucket", region="us-west-2"
-            )
+            backend = AWSGatewayBackend(bucket_name="my-bucket", region="us-west-2")
             await backend.init()
 
             mock_client.head_bucket.assert_awaited_once_with(Bucket="my-bucket")
@@ -81,9 +77,7 @@ class TestInit:
         """init() raises ValueError if the upstream bucket doesn't exist."""
         with patch("bleepstore.storage.aws.AioSession") as mock_session_cls:
             mock_client = AsyncMock()
-            mock_client.head_bucket = AsyncMock(
-                side_effect=_client_error("404", "Not Found")
-            )
+            mock_client.head_bucket = AsyncMock(side_effect=_client_error("404", "Not Found"))
             mock_ctx = AsyncMock()
             mock_ctx.__aenter__ = AsyncMock(return_value=mock_client)
             mock_ctx.__aexit__ = AsyncMock(return_value=False)
@@ -145,36 +139,28 @@ class TestGet:
         mock_body.read = AsyncMock(return_value=b"content")
         mock_body.__aenter__ = AsyncMock(return_value=mock_body)
         mock_body.__aexit__ = AsyncMock(return_value=False)
-        backend._client.get_object = AsyncMock(
-            return_value={"Body": mock_body}
-        )
+        backend._client.get_object = AsyncMock(return_value={"Body": mock_body})
 
         result = await backend.get("bucket", "key")
         assert result == b"content"
 
     async def test_get_not_found_raises_file_not_found(self):
         backend = _make_backend()
-        backend._client.get_object = AsyncMock(
-            side_effect=_client_error("NoSuchKey")
-        )
+        backend._client.get_object = AsyncMock(side_effect=_client_error("NoSuchKey"))
 
         with pytest.raises(FileNotFoundError, match="Object not found"):
             await backend.get("bucket", "key")
 
     async def test_get_404_raises_file_not_found(self):
         backend = _make_backend()
-        backend._client.get_object = AsyncMock(
-            side_effect=_client_error("404")
-        )
+        backend._client.get_object = AsyncMock(side_effect=_client_error("404"))
 
         with pytest.raises(FileNotFoundError):
             await backend.get("bucket", "key")
 
     async def test_get_other_error_propagates(self):
         backend = _make_backend()
-        backend._client.get_object = AsyncMock(
-            side_effect=_client_error("AccessDenied")
-        )
+        backend._client.get_object = AsyncMock(side_effect=_client_error("AccessDenied"))
 
         with pytest.raises(ClientError):
             await backend.get("bucket", "key")
@@ -190,9 +176,7 @@ class TestGetStream:
         mock_body.read = AsyncMock(side_effect=chunks)
         mock_body.__aenter__ = AsyncMock(return_value=mock_body)
         mock_body.__aexit__ = AsyncMock(return_value=False)
-        backend._client.get_object = AsyncMock(
-            return_value={"Body": mock_body}
-        )
+        backend._client.get_object = AsyncMock(return_value={"Body": mock_body})
 
         result = []
         async for chunk in backend.get_stream("b", "k"):
@@ -206,9 +190,7 @@ class TestGetStream:
         mock_body.read = AsyncMock(side_effect=[b"data", b""])
         mock_body.__aenter__ = AsyncMock(return_value=mock_body)
         mock_body.__aexit__ = AsyncMock(return_value=False)
-        backend._client.get_object = AsyncMock(
-            return_value={"Body": mock_body}
-        )
+        backend._client.get_object = AsyncMock(return_value={"Body": mock_body})
 
         result = []
         async for chunk in backend.get_stream("b", "k", offset=100):
@@ -223,9 +205,7 @@ class TestGetStream:
         mock_body.read = AsyncMock(side_effect=[b"data", b""])
         mock_body.__aenter__ = AsyncMock(return_value=mock_body)
         mock_body.__aexit__ = AsyncMock(return_value=False)
-        backend._client.get_object = AsyncMock(
-            return_value={"Body": mock_body}
-        )
+        backend._client.get_object = AsyncMock(return_value={"Body": mock_body})
 
         result = []
         async for chunk in backend.get_stream("b", "k", offset=10, length=50):
@@ -236,9 +216,7 @@ class TestGetStream:
 
     async def test_get_stream_not_found(self):
         backend = _make_backend()
-        backend._client.get_object = AsyncMock(
-            side_effect=_client_error("NoSuchKey")
-        )
+        backend._client.get_object = AsyncMock(side_effect=_client_error("NoSuchKey"))
 
         with pytest.raises(FileNotFoundError):
             async for _ in backend.get_stream("b", "k"):
@@ -266,23 +244,17 @@ class TestExists:
 
     async def test_exists_false_on_404(self):
         backend = _make_backend()
-        backend._client.head_object = AsyncMock(
-            side_effect=_client_error("404")
-        )
+        backend._client.head_object = AsyncMock(side_effect=_client_error("404"))
         assert await backend.exists("b", "k") is False
 
     async def test_exists_false_on_no_such_key(self):
         backend = _make_backend()
-        backend._client.head_object = AsyncMock(
-            side_effect=_client_error("NoSuchKey")
-        )
+        backend._client.head_object = AsyncMock(side_effect=_client_error("NoSuchKey"))
         assert await backend.exists("b", "k") is False
 
     async def test_exists_other_error_propagates(self):
         backend = _make_backend()
-        backend._client.head_object = AsyncMock(
-            side_effect=_client_error("AccessDenied")
-        )
+        backend._client.head_object = AsyncMock(side_effect=_client_error("AccessDenied"))
         with pytest.raises(ClientError):
             await backend.exists("b", "k")
 
@@ -293,9 +265,7 @@ class TestCopyObject:
     async def test_copy_object_server_side(self):
         backend = _make_backend()
         backend._client.copy_object = AsyncMock(
-            return_value={
-                "CopyObjectResult": {"ETag": '"abc123"'}
-            }
+            return_value={"CopyObjectResult": {"ETag": '"abc123"'}}
         )
 
         result = await backend.copy_object("src-b", "src-k", "dst-b", "dst-k")
@@ -332,9 +302,7 @@ class TestAssembleParts:
     async def test_single_part_uses_copy(self):
         backend = _make_backend()
         backend._client.copy_object = AsyncMock(
-            return_value={
-                "CopyObjectResult": {"ETag": '"singlemd5"'}
-            }
+            return_value={"CopyObjectResult": {"ETag": '"singlemd5"'}}
         )
 
         result = await backend.assemble_parts("b", "k", "uid", [1])
@@ -346,15 +314,11 @@ class TestAssembleParts:
 
     async def test_multi_part_uses_multipart_upload(self):
         backend = _make_backend()
-        backend._client.create_multipart_upload = AsyncMock(
-            return_value={"UploadId": "aws-uid"}
-        )
+        backend._client.create_multipart_upload = AsyncMock(return_value={"UploadId": "aws-uid"})
         backend._client.upload_part_copy = AsyncMock(
             return_value={"CopyPartResult": {"ETag": '"partmd5"'}}
         )
-        backend._client.complete_multipart_upload = AsyncMock(
-            return_value={"ETag": '"final-etag"'}
-        )
+        backend._client.complete_multipart_upload = AsyncMock(return_value={"ETag": '"final-etag"'})
 
         result = await backend.assemble_parts("b", "k", "uid", [1, 2, 3])
 
@@ -365,9 +329,7 @@ class TestAssembleParts:
     async def test_multi_part_entity_too_small_fallback(self):
         """When upload_part_copy fails with EntityTooSmall, falls back to download+reupload."""
         backend = _make_backend()
-        backend._client.create_multipart_upload = AsyncMock(
-            return_value={"UploadId": "aws-uid"}
-        )
+        backend._client.create_multipart_upload = AsyncMock(return_value={"UploadId": "aws-uid"})
 
         # upload_part_copy fails with EntityTooSmall for all parts
         def _make_body():
@@ -377,18 +339,10 @@ class TestAssembleParts:
             body.__aexit__ = AsyncMock(return_value=False)
             return body
 
-        backend._client.upload_part_copy = AsyncMock(
-            side_effect=_client_error("EntityTooSmall")
-        )
-        backend._client.get_object = AsyncMock(
-            side_effect=lambda **kw: {"Body": _make_body()}
-        )
-        backend._client.upload_part = AsyncMock(
-            return_value={"ETag": '"fallback-etag"'}
-        )
-        backend._client.complete_multipart_upload = AsyncMock(
-            return_value={"ETag": '"done"'}
-        )
+        backend._client.upload_part_copy = AsyncMock(side_effect=_client_error("EntityTooSmall"))
+        backend._client.get_object = AsyncMock(side_effect=lambda **kw: {"Body": _make_body()})
+        backend._client.upload_part = AsyncMock(return_value={"ETag": '"fallback-etag"'})
+        backend._client.complete_multipart_upload = AsyncMock(return_value={"ETag": '"done"'})
 
         # Must use 2+ parts to trigger the multipart code path
         result = await backend.assemble_parts("b", "k", "uid", [1, 2])
@@ -399,12 +353,8 @@ class TestAssembleParts:
     async def test_multi_part_aborts_on_failure(self):
         """Assembly aborts the AWS multipart upload on unexpected errors."""
         backend = _make_backend()
-        backend._client.create_multipart_upload = AsyncMock(
-            return_value={"UploadId": "aws-uid"}
-        )
-        backend._client.upload_part_copy = AsyncMock(
-            side_effect=_client_error("InternalError")
-        )
+        backend._client.create_multipart_upload = AsyncMock(return_value={"UploadId": "aws-uid"})
+        backend._client.upload_part_copy = AsyncMock(side_effect=_client_error("InternalError"))
         backend._client.abort_multipart_upload = AsyncMock()
 
         with pytest.raises(ClientError):
@@ -467,9 +417,7 @@ class TestServerFactory:
         """Factory raises ValueError when aws_bucket is not set."""
         from bleepstore.config import BleepStoreConfig, StorageConfig
 
-        config = BleepStoreConfig(
-            storage=StorageConfig(backend="aws", aws_bucket="")
-        )
+        config = BleepStoreConfig(storage=StorageConfig(backend="aws", aws_bucket=""))
         from bleepstore.server import _create_storage_backend
 
         with pytest.raises(ValueError, match="aws.bucket.*required"):

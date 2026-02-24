@@ -60,7 +60,10 @@ pub fn describe_metrics() {
     describe_counter!(S3_OPERATIONS_TOTAL, "Total S3 operations by type");
     describe_gauge!(OBJECTS_TOTAL, "Total objects across all buckets");
     describe_gauge!(BUCKETS_TOTAL, "Total buckets");
-    describe_counter!(BYTES_RECEIVED_TOTAL, "Total bytes received (request bodies)");
+    describe_counter!(
+        BYTES_RECEIVED_TOTAL,
+        "Total bytes received (request bodies)"
+    );
     describe_counter!(BYTES_SENT_TOTAL, "Total bytes sent (response bodies)");
 }
 

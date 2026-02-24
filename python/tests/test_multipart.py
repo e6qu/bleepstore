@@ -72,9 +72,7 @@ async def _create_bucket(client: AsyncClient, bucket: str = "test-bucket") -> No
     assert resp.status_code == 200
 
 
-async def _initiate_upload(
-    client: AsyncClient, bucket: str, key: str
-) -> str:
+async def _initiate_upload(client: AsyncClient, bucket: str, key: str) -> str:
     """Helper to initiate a multipart upload and return the upload ID."""
     resp = await client.post(f"/{bucket}/{key}?uploads")
     assert resp.status_code == 200
@@ -284,17 +282,13 @@ class TestAbortMultipartUpload:
         """AbortMultipartUpload returns 204 No Content."""
         await _create_bucket(mp_client)
         upload_id = await _initiate_upload(mp_client, "test-bucket", "my-key")
-        resp = await mp_client.delete(
-            f"/test-bucket/my-key?uploadId={upload_id}"
-        )
+        resp = await mp_client.delete(f"/test-bucket/my-key?uploadId={upload_id}")
         assert resp.status_code == 204
 
     async def test_nosuchupload(self, mp_client: AsyncClient) -> None:
         """Aborting a non-existent upload returns 404 NoSuchUpload."""
         await _create_bucket(mp_client)
-        resp = await mp_client.delete(
-            "/test-bucket/my-key?uploadId=fake-upload-id"
-        )
+        resp = await mp_client.delete("/test-bucket/my-key?uploadId=fake-upload-id")
         assert resp.status_code == 404
         assert "NoSuchUpload" in resp.text
 
@@ -314,9 +308,7 @@ class TestAbortMultipartUpload:
         assert parts_dir.exists()
 
         # Abort
-        resp = await mp_client.delete(
-            f"/test-bucket/my-key?uploadId={upload_id}"
-        )
+        resp = await mp_client.delete(f"/test-bucket/my-key?uploadId={upload_id}")
         assert resp.status_code == 204
 
         # Part directory should be cleaned up
@@ -335,22 +327,16 @@ class TestAbortMultipartUpload:
             )
 
         # Abort
-        await mp_client.delete(
-            f"/test-bucket/my-key?uploadId={upload_id}"
-        )
+        await mp_client.delete(f"/test-bucket/my-key?uploadId={upload_id}")
 
         # Trying to list parts should fail with NoSuchUpload
-        resp = await mp_client.get(
-            f"/test-bucket/my-key?uploadId={upload_id}"
-        )
+        resp = await mp_client.get(f"/test-bucket/my-key?uploadId={upload_id}")
         assert resp.status_code == 404
         assert "NoSuchUpload" in resp.text
 
     async def test_nosuchbucket(self, mp_client: AsyncClient) -> None:
         """Aborting an upload on a non-existent bucket returns 404."""
-        resp = await mp_client.delete(
-            "/no-such-bucket/my-key?uploadId=fake-id"
-        )
+        resp = await mp_client.delete("/no-such-bucket/my-key?uploadId=fake-id")
         assert resp.status_code == 404
 
 
@@ -366,9 +352,7 @@ class TestListParts:
         """ListParts returns 200 with ListPartsResult XML."""
         await _create_bucket(mp_client)
         upload_id = await _initiate_upload(mp_client, "test-bucket", "my-key")
-        resp = await mp_client.get(
-            f"/test-bucket/my-key?uploadId={upload_id}"
-        )
+        resp = await mp_client.get(f"/test-bucket/my-key?uploadId={upload_id}")
         assert resp.status_code == 200
         assert "application/xml" in resp.headers.get("content-type", "")
         assert "ListPartsResult" in resp.text
@@ -386,9 +370,7 @@ class TestListParts:
                 content=data,
             )
 
-        resp = await mp_client.get(
-            f"/test-bucket/my-key?uploadId={upload_id}"
-        )
+        resp = await mp_client.get(f"/test-bucket/my-key?uploadId={upload_id}")
         root = ET.fromstring(resp.text)
         ns = "{http://s3.amazonaws.com/doc/2006-03-01/}"
 
@@ -410,9 +392,7 @@ class TestListParts:
             content=data,
         )
 
-        resp = await mp_client.get(
-            f"/test-bucket/my-key?uploadId={upload_id}"
-        )
+        resp = await mp_client.get(f"/test-bucket/my-key?uploadId={upload_id}")
         root = ET.fromstring(resp.text)
         ns = "{http://s3.amazonaws.com/doc/2006-03-01/}"
 
@@ -431,9 +411,7 @@ class TestListParts:
     async def test_nosuchupload(self, mp_client: AsyncClient) -> None:
         """ListParts for non-existent upload returns 404 NoSuchUpload."""
         await _create_bucket(mp_client)
-        resp = await mp_client.get(
-            "/test-bucket/my-key?uploadId=fake-upload-id"
-        )
+        resp = await mp_client.get("/test-bucket/my-key?uploadId=fake-upload-id")
         assert resp.status_code == 404
         assert "NoSuchUpload" in resp.text
 
@@ -442,9 +420,7 @@ class TestListParts:
         await _create_bucket(mp_client)
         upload_id = await _initiate_upload(mp_client, "test-bucket", "my-key")
 
-        resp = await mp_client.get(
-            f"/test-bucket/my-key?uploadId={upload_id}"
-        )
+        resp = await mp_client.get(f"/test-bucket/my-key?uploadId={upload_id}")
         root = ET.fromstring(resp.text)
         ns = "{http://s3.amazonaws.com/doc/2006-03-01/}"
         assert root.find(f"{ns}Bucket").text == "test-bucket"
@@ -456,9 +432,7 @@ class TestListParts:
         await _create_bucket(mp_client)
         upload_id = await _initiate_upload(mp_client, "test-bucket", "my-key")
 
-        resp = await mp_client.get(
-            f"/test-bucket/my-key?uploadId={upload_id}"
-        )
+        resp = await mp_client.get(f"/test-bucket/my-key?uploadId={upload_id}")
         root = ET.fromstring(resp.text)
         ns = "{http://s3.amazonaws.com/doc/2006-03-01/}"
         parts_elems = root.findall(f"{ns}Part")
@@ -477,9 +451,7 @@ class TestListParts:
             )
 
         # Request only 2 parts
-        resp = await mp_client.get(
-            f"/test-bucket/my-key?uploadId={upload_id}&max-parts=2"
-        )
+        resp = await mp_client.get(f"/test-bucket/my-key?uploadId={upload_id}&max-parts=2")
         root = ET.fromstring(resp.text)
         ns = "{http://s3.amazonaws.com/doc/2006-03-01/}"
 
@@ -491,9 +463,7 @@ class TestListParts:
         """The ListParts XML has the S3 namespace."""
         await _create_bucket(mp_client)
         upload_id = await _initiate_upload(mp_client, "test-bucket", "my-key")
-        resp = await mp_client.get(
-            f"/test-bucket/my-key?uploadId={upload_id}"
-        )
+        resp = await mp_client.get(f"/test-bucket/my-key?uploadId={upload_id}")
         assert "http://s3.amazonaws.com/doc/2006-03-01/" in resp.text
 
 
@@ -564,9 +534,7 @@ class TestListMultipartUploads:
         upload_id = await _initiate_upload(mp_client, "test-bucket", "my-key")
 
         # Abort it
-        await mp_client.delete(
-            f"/test-bucket/my-key?uploadId={upload_id}"
-        )
+        await mp_client.delete(f"/test-bucket/my-key?uploadId={upload_id}")
 
         resp = await mp_client.get("/test-bucket?uploads")
         root = ET.fromstring(resp.text)
@@ -634,9 +602,7 @@ class TestMultipartLifecycle:
             etags.append(resp.headers["etag"])
 
         # List parts
-        resp = await mp_client.get(
-            f"/test-bucket/big-file.bin?uploadId={upload_id}"
-        )
+        resp = await mp_client.get(f"/test-bucket/big-file.bin?uploadId={upload_id}")
         assert resp.status_code == 200
         root = ET.fromstring(resp.text)
         ns = "{http://s3.amazonaws.com/doc/2006-03-01/}"
@@ -654,9 +620,7 @@ class TestMultipartLifecycle:
         assert len(uploads) == 1
 
         # Abort
-        resp = await mp_client.delete(
-            f"/test-bucket/big-file.bin?uploadId={upload_id}"
-        )
+        resp = await mp_client.delete(f"/test-bucket/big-file.bin?uploadId={upload_id}")
         assert resp.status_code == 204
 
         # Verify parts cleaned up from disk
@@ -695,9 +659,7 @@ class TestMultipartLifecycle:
         assert len(uploads) == 2
 
         # Abort one, the other should still be listed
-        await mp_client.delete(
-            f"/test-bucket/same-key?uploadId={id1}"
-        )
+        await mp_client.delete(f"/test-bucket/same-key?uploadId={id1}")
         resp = await mp_client.get("/test-bucket?uploads")
         root = ET.fromstring(resp.text)
         uploads = root.findall(f"{ns}Upload")

@@ -130,8 +130,7 @@ fn canned_acl_to_json(canned: &str, owner_id: &str, display_name: &str) -> Resul
         "authenticated-read" => {
             grants.push(AclGrant {
                 grantee: AclGrantee::Group {
-                    uri: "http://acs.amazonaws.com/groups/global/AuthenticatedUsers"
-                        .to_string(),
+                    uri: "http://acs.amazonaws.com/groups/global/AuthenticatedUsers".to_string(),
                 },
                 permission: "READ".to_string(),
             });
@@ -220,12 +219,7 @@ pub async fn list_buckets(state: Arc<AppState>) -> Result<Response, S3Error> {
 
     let body = xml::render_list_buckets_result(owner_id, owner_display, &bucket_refs);
 
-    Ok((
-        StatusCode::OK,
-        [("content-type", "application/xml")],
-        body,
-    )
-        .into_response())
+    Ok((StatusCode::OK, [("content-type", "application/xml")], body).into_response())
 }
 
 /// `PUT /{bucket}` -- Create a new bucket.
@@ -274,14 +268,11 @@ pub async fn create_bucket(
     if let Some(existing) = state.metadata.get_bucket(bucket).await? {
         // In us-east-1 (our default), if the bucket is owned by the same user,
         // return 200 (BucketAlreadyOwnedByYou treated as success).
-        if existing.owner_id == owner_id
-            && state.config.server.region == "us-east-1"
-        {
+        if existing.owner_id == owner_id && state.config.server.region == "us-east-1" {
             let mut response = (StatusCode::OK, "").into_response();
-            response.headers_mut().insert(
-                "location",
-                HeaderValue::from_str(&location).unwrap(),
-            );
+            response
+                .headers_mut()
+                .insert("location", HeaderValue::from_str(&location).unwrap());
             return Ok(response);
         } else {
             return Err(S3Error::BucketAlreadyOwnedByYou {
@@ -306,10 +297,9 @@ pub async fn create_bucket(
     state.storage.create_bucket(bucket).await?;
 
     let mut response = (StatusCode::OK, "").into_response();
-    response.headers_mut().insert(
-        "location",
-        HeaderValue::from_str(&location).unwrap(),
-    );
+    response
+        .headers_mut()
+        .insert("location", HeaderValue::from_str(&location).unwrap());
     Ok(response)
 }
 
@@ -326,10 +316,7 @@ pub async fn create_bucket(
         (status = 409, description = "Bucket not empty")
     )
 )]
-pub async fn delete_bucket(
-    state: Arc<AppState>,
-    bucket: &str,
-) -> Result<Response, S3Error> {
+pub async fn delete_bucket(state: Arc<AppState>, bucket: &str) -> Result<Response, S3Error> {
     // Check bucket exists.
     if !state.metadata.bucket_exists(bucket).await? {
         return Err(S3Error::NoSuchBucket {
@@ -366,17 +353,13 @@ pub async fn delete_bucket(
         (status = 404, description = "Bucket not found")
     )
 )]
-pub async fn head_bucket(
-    state: Arc<AppState>,
-    bucket: &str,
-) -> Result<Response, S3Error> {
+pub async fn head_bucket(state: Arc<AppState>, bucket: &str) -> Result<Response, S3Error> {
     if let Some(record) = state.metadata.get_bucket(bucket).await? {
         let mut response = StatusCode::OK.into_response();
         response.headers_mut().insert(
             "x-amz-bucket-region",
-            HeaderValue::from_str(&record.region).unwrap_or_else(|_| {
-                HeaderValue::from_static("us-east-1")
-            }),
+            HeaderValue::from_str(&record.region)
+                .unwrap_or_else(|_| HeaderValue::from_static("us-east-1")),
         );
         Ok(response)
     } else {
@@ -398,10 +381,7 @@ pub async fn head_bucket(
         (status = 404, description = "Bucket not found")
     )
 )]
-pub async fn get_bucket_location(
-    state: Arc<AppState>,
-    bucket: &str,
-) -> Result<Response, S3Error> {
+pub async fn get_bucket_location(state: Arc<AppState>, bucket: &str) -> Result<Response, S3Error> {
     let record = state
         .metadata
         .get_bucket(bucket)
@@ -412,12 +392,7 @@ pub async fn get_bucket_location(
 
     let body = xml::render_location_constraint(&record.region);
 
-    Ok((
-        StatusCode::OK,
-        [("content-type", "application/xml")],
-        body,
-    )
-        .into_response())
+    Ok((StatusCode::OK, [("content-type", "application/xml")], body).into_response())
 }
 
 /// `GET /{bucket}?acl` -- Return the access control list of a bucket.
@@ -432,10 +407,7 @@ pub async fn get_bucket_location(
         (status = 404, description = "Bucket not found")
     )
 )]
-pub async fn get_bucket_acl(
-    state: Arc<AppState>,
-    bucket: &str,
-) -> Result<Response, S3Error> {
+pub async fn get_bucket_acl(state: Arc<AppState>, bucket: &str) -> Result<Response, S3Error> {
     let record = state
         .metadata
         .get_bucket(bucket)
@@ -445,18 +417,12 @@ pub async fn get_bucket_acl(
         })?;
 
     // Parse ACL JSON. If parsing fails, return a default FULL_CONTROL ACL.
-    let acl: Acl = serde_json::from_str(&record.acl).unwrap_or_else(|_| {
-        Acl::full_control(&record.owner_id, &record.owner_display)
-    });
+    let acl: Acl = serde_json::from_str(&record.acl)
+        .unwrap_or_else(|_| Acl::full_control(&record.owner_id, &record.owner_display));
 
     let body = xml::render_access_control_policy(&acl);
 
-    Ok((
-        StatusCode::OK,
-        [("content-type", "application/xml")],
-        body,
-    )
-        .into_response())
+    Ok((StatusCode::OK, [("content-type", "application/xml")], body).into_response())
 }
 
 /// `PUT /{bucket}?acl` -- Set the access control list of a bucket.
@@ -655,7 +621,10 @@ mod tests {
 <CreateBucketConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
     <LocationConstraint>us-west-2</LocationConstraint>
 </CreateBucketConfiguration>"#;
-        assert_eq!(parse_location_constraint(xml), Some("us-west-2".to_string()));
+        assert_eq!(
+            parse_location_constraint(xml),
+            Some("us-west-2".to_string())
+        );
     }
 
     #[test]

@@ -614,7 +614,7 @@ func (h *MultipartHandler) ListMultipartUploads(w http.ResponseWriter, r *http.R
 		KeyMarker:      keyMarker,
 		UploadIDMarker: uploadIDMarker,
 		Prefix:         prefix,
-		Delimiter:       delimiter,
+		Delimiter:      delimiter,
 		MaxUploads:     maxUploads,
 	}
 

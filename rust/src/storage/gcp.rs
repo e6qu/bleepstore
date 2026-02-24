@@ -111,11 +111,7 @@ impl GcpGatewayBackend {
     ///
     /// Initializes the reqwest HTTP client. Credentials are resolved
     /// lazily on first API call via Application Default Credentials.
-    pub async fn new(
-        bucket: String,
-        project: String,
-        prefix: String,
-    ) -> anyhow::Result<Self> {
+    pub async fn new(bucket: String, project: String, prefix: String) -> anyhow::Result<Self> {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(300))
             .build()
@@ -222,13 +218,10 @@ impl GcpGatewayBackend {
     }
 
     /// Obtain an access token from a service account JSON key file.
-    async fn token_from_service_account(
-        &self,
-        creds_path: &str,
-    ) -> anyhow::Result<(String, u64)> {
-        let contents = tokio::fs::read_to_string(creds_path)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to read service account key {}: {}", creds_path, e))?;
+    async fn token_from_service_account(&self, creds_path: &str) -> anyhow::Result<(String, u64)> {
+        let contents = tokio::fs::read_to_string(creds_path).await.map_err(|e| {
+            anyhow::anyhow!("Failed to read service account key {}: {}", creds_path, e)
+        })?;
 
         let creds: serde_json::Value = serde_json::from_str(&contents)
             .map_err(|e| anyhow::anyhow!("Failed to parse service account key: {}", e))?;
@@ -279,10 +272,7 @@ impl GcpGatewayBackend {
     }
 
     /// Obtain an access token from application default credentials file.
-    async fn token_from_adc_file(
-        &self,
-        adc_path: &str,
-    ) -> anyhow::Result<(String, u64)> {
+    async fn token_from_adc_file(&self, adc_path: &str) -> anyhow::Result<(String, u64)> {
         let contents = tokio::fs::read_to_string(adc_path)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to read ADC file {}: {}", adc_path, e))?;
@@ -441,11 +431,7 @@ impl GcpGatewayBackend {
 
     /// URL-encode a GCS object name for use in API paths.
     fn url_encode_object_name(name: &str) -> String {
-        percent_encoding::utf8_percent_encode(
-            name,
-            percent_encoding::NON_ALPHANUMERIC,
-        )
-        .to_string()
+        percent_encoding::utf8_percent_encode(name, percent_encoding::NON_ALPHANUMERIC).to_string()
     }
 
     /// Map a GCS HTTP error to an anyhow error with context.
@@ -534,7 +520,9 @@ impl GcpGatewayBackend {
             return Err(Self::map_gcs_error("download", status, &body));
         }
 
-        let body = resp.bytes().await
+        let body = resp
+            .bytes()
+            .await
             .map_err(|e| anyhow::anyhow!("GCS download body read failed: {}", e))?;
 
         Ok(body)
@@ -602,11 +590,7 @@ impl GcpGatewayBackend {
     }
 
     /// Copy an object within GCS using the rewrite API.
-    async fn gcs_copy(
-        &self,
-        src_object: &str,
-        dst_object: &str,
-    ) -> anyhow::Result<()> {
+    async fn gcs_copy(&self, src_object: &str, dst_object: &str) -> anyhow::Result<()> {
         let auth = self.auth_headers().await?;
         let encoded_src = Self::url_encode_object_name(src_object);
         let encoded_dst = Self::url_encode_object_name(dst_object);
@@ -630,17 +614,15 @@ impl GcpGatewayBackend {
             // Empty JSON body required for rewrite.
             req = req.header(CONTENT_TYPE, "application/json").body("{}");
 
-            let resp = req.send().await.map_err(|e| {
-                anyhow::anyhow!("GCS rewrite request failed: {}", e)
-            })?;
+            let resp = req
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("GCS rewrite request failed: {}", e))?;
 
             if !resp.status().is_success() {
                 let status = resp.status();
                 if Self::is_not_found(status) {
-                    return Err(anyhow::anyhow!(
-                        "Source object not found: {}",
-                        src_object
-                    ));
+                    return Err(anyhow::anyhow!("Source object not found: {}", src_object));
                 }
                 let body = resp.text().await.unwrap_or_default();
                 return Err(Self::map_gcs_error("rewrite", status, &body));
@@ -684,9 +666,7 @@ impl GcpGatewayBackend {
         let compose_req = ComposeRequest {
             source_objects: source_names
                 .iter()
-                .map(|name| ComposeSourceObject {
-                    name: name.clone(),
-                })
+                .map(|name| ComposeSourceObject { name: name.clone() })
                 .collect(),
             destination: ComposeDestination {
                 content_type: "application/octet-stream".to_string(),
@@ -719,10 +699,7 @@ impl GcpGatewayBackend {
         let mut page_token: Option<String> = None;
 
         loop {
-            let url = format!(
-                "{}/storage/v1/b/{}/o",
-                GCS_API_BASE, encoded_bucket
-            );
+            let url = format!("{}/storage/v1/b/{}/o", GCS_API_BASE, encoded_bucket);
 
             let mut req = self
                 .client
@@ -793,7 +770,9 @@ impl GcpGatewayBackend {
 
                 let intermediate_name = format!(
                     "{}.__compose_tmp_{}_{}",
-                    final_name, generation, batch_idx * MAX_COMPOSE_SOURCES
+                    final_name,
+                    generation,
+                    batch_idx * MAX_COMPOSE_SOURCES
                 );
 
                 self.gcs_compose(&chunk.to_vec(), &intermediate_name)
@@ -903,10 +882,7 @@ impl StorageBackend for GcpGatewayBackend {
             let src_gcs_name = self.gcs_name(&src_storage_key);
             let dst_gcs_name = self.gcs_name(&dst_storage_key);
 
-            debug!(
-                "GCS copy: src={} dst={}",
-                src_gcs_name, dst_gcs_name
-            );
+            debug!("GCS copy: src={} dst={}", src_gcs_name, dst_gcs_name);
 
             // Use GCS server-side copy (rewrite API).
             self.gcs_copy(&src_gcs_name, &dst_gcs_name).await?;
@@ -963,7 +939,10 @@ impl StorageBackend for GcpGatewayBackend {
 
             debug!(
                 "GCS assemble_parts: bucket={} name={} upload_id={} parts={}",
-                self.bucket, final_name, upload_id, parts.len()
+                self.bucket,
+                final_name,
+                upload_id,
+                parts.len()
             );
 
             let source_names: Vec<String> = parts
@@ -976,9 +955,7 @@ impl StorageBackend for GcpGatewayBackend {
                 self.gcs_compose(&source_names, &final_name).await?;
             } else {
                 // Chain compose in batches of 32.
-                let intermediates = self
-                    .chain_compose(&source_names, &final_name)
-                    .await?;
+                let intermediates = self.chain_compose(&source_names, &final_name).await?;
 
                 // Clean up intermediate composite objects.
                 for name in &intermediates {
@@ -1026,10 +1003,7 @@ impl StorageBackend for GcpGatewayBackend {
         Box::pin(async move {
             let prefix = format!("{}.parts/{}/", self.prefix, upload_id);
 
-            debug!(
-                "GCS delete_parts: bucket={} prefix={}",
-                self.bucket, prefix
-            );
+            debug!("GCS delete_parts: bucket={} prefix={}", self.bucket, prefix);
 
             // List all part objects under the prefix.
             let object_names = self.gcs_list_objects(&prefix).await?;
@@ -1158,7 +1132,11 @@ mod tests {
 
         let mut hasher = Md5::new();
         hasher.update(&combined);
-        let result = format!("\"{}-{}\"", hex::encode(hasher.finalize()), part_etags.len());
+        let result = format!(
+            "\"{}-{}\"",
+            hex::encode(hasher.finalize()),
+            part_etags.len()
+        );
 
         assert!(result.starts_with('"'));
         assert!(result.ends_with("-2\""));
@@ -1230,8 +1208,7 @@ mod tests {
         // Round 1: 3 batches (32, 32, 1) -> 3 intermediates (2 composed, 1 passthrough)
         // Round 2: 3 <= 32, final compose
         let num_sources = 65;
-        let num_batches_round1 =
-            (num_sources + MAX_COMPOSE_SOURCES - 1) / MAX_COMPOSE_SOURCES;
+        let num_batches_round1 = (num_sources + MAX_COMPOSE_SOURCES - 1) / MAX_COMPOSE_SOURCES;
         assert_eq!(num_batches_round1, 3);
         // After round 1 we have 3 sources, which is <= 32, so final compose
         assert!(num_batches_round1 <= MAX_COMPOSE_SOURCES);

@@ -29,9 +29,7 @@ def _other_error(status: int = 403, message: str = "Forbidden") -> Exception:
 
 def _make_backend(bucket="test-bucket", project="test-project", prefix=""):
     """Create a GCPGatewayBackend with a mock client (skip init)."""
-    backend = GCPGatewayBackend(
-        bucket_name=bucket, project=project, prefix=prefix
-    )
+    backend = GCPGatewayBackend(bucket_name=bucket, project=project, prefix=prefix)
     backend._client = AsyncMock()
     return backend
 
@@ -83,9 +81,7 @@ class TestInit:
         """init() raises ValueError if the upstream bucket doesn't exist."""
         with patch("bleepstore.storage.gcp.Storage") as mock_storage_cls:
             mock_client = AsyncMock()
-            mock_client.list_objects = AsyncMock(
-                side_effect=_not_found_error("Bucket not found")
-            )
+            mock_client.list_objects = AsyncMock(side_effect=_not_found_error("Bucket not found"))
             mock_storage_cls.return_value = mock_client
 
             backend = GCPGatewayBackend(bucket_name="no-such-bucket")
@@ -120,16 +116,12 @@ class TestPut:
         result = await backend.put("bucket", "key", data)
 
         assert result == expected_md5
-        backend._client.upload.assert_awaited_once_with(
-            "test-bucket", "bucket/key", data
-        )
+        backend._client.upload.assert_awaited_once_with("test-bucket", "bucket/key", data)
 
     async def test_put_with_prefix(self):
         backend = _make_backend(prefix="pfx/")
         await backend.put("b", "k", b"data")
-        backend._client.upload.assert_awaited_once_with(
-            "test-bucket", "pfx/b/k", b"data"
-        )
+        backend._client.upload.assert_awaited_once_with("test-bucket", "pfx/b/k", b"data")
 
     async def test_put_empty_data(self):
         backend = _make_backend()
@@ -205,9 +197,7 @@ class TestGetStream:
 
     async def test_get_stream_not_found(self):
         backend = _make_backend()
-        backend._client.download_stream = AsyncMock(
-            side_effect=_not_found_error()
-        )
+        backend._client.download_stream = AsyncMock(side_effect=_not_found_error())
 
         with pytest.raises(FileNotFoundError):
             async for _ in backend.get_stream("b", "k"):
@@ -220,9 +210,7 @@ class TestDelete:
     async def test_delete_calls_delete(self):
         backend = _make_backend()
         await backend.delete("bucket", "key")
-        backend._client.delete.assert_awaited_once_with(
-            "test-bucket", "bucket/key"
-        )
+        backend._client.delete.assert_awaited_once_with("test-bucket", "bucket/key")
 
     async def test_delete_idempotent_on_404(self):
         """delete() silently ignores 404 errors (idempotent)."""
@@ -436,11 +424,7 @@ class TestDeleteParts:
     async def test_delete_parts_ignores_404(self):
         """delete_parts silently ignores 404 on individual part deletes."""
         backend = _make_backend()
-        backend._client.list_objects = AsyncMock(
-            return_value={
-                "items": [{"name": ".parts/uid/1"}]
-            }
-        )
+        backend._client.list_objects = AsyncMock(return_value={"items": [{"name": ".parts/uid/1"}]})
         backend._client.delete = AsyncMock(side_effect=_not_found_error())
 
         await backend.delete_parts("b", "k", "uid")  # Should not raise
@@ -470,9 +454,7 @@ class TestServerFactory:
         from bleepstore.config import BleepStoreConfig, StorageConfig
         from bleepstore.server import _create_storage_backend
 
-        config = BleepStoreConfig(
-            storage=StorageConfig(backend="gcp", gcp_bucket="")
-        )
+        config = BleepStoreConfig(storage=StorageConfig(backend="gcp", gcp_bucket=""))
 
         with pytest.raises(ValueError, match="gcp.bucket.*required"):
             _create_storage_backend(config)

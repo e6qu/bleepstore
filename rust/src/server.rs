@@ -124,10 +124,7 @@ pub fn app(state: Arc<AppState>) -> Router {
 /// - `x-amz-request-id`: 16-character uppercase hex string
 /// - `Date`: RFC 7231 formatted timestamp
 /// - `Server`: `BleepStore`
-async fn common_headers_middleware(
-    req: Request<axum::body::Body>,
-    next: Next,
-) -> Response {
+async fn common_headers_middleware(req: Request<axum::body::Body>, next: Next) -> Response {
     let mut response = next.run(req).await;
     let headers = response.headers_mut();
 
@@ -191,9 +188,7 @@ async fn auth_middleware(
         Ok(t) => t,
         Err(msg) => {
             warn!("Auth detection error: {}", msg);
-            return Err(S3Error::AccessDenied {
-                message: msg,
-            });
+            return Err(S3Error::AccessDenied { message: msg });
         }
     };
 
@@ -232,7 +227,9 @@ async fn auth_middleware(
                     parsed.access_key_id, amz_date
                 );
                 return Err(S3Error::AccessDenied {
-                    message: "The difference between the request time and the server's time is too large".to_string(),
+                    message:
+                        "The difference between the request time and the server's time is too large"
+                            .to_string(),
                 });
             }
 
@@ -282,10 +279,7 @@ async fn auth_middleware(
             );
 
             if !valid {
-                debug!(
-                    "Signature mismatch for access key {}",
-                    parsed.access_key_id
-                );
+                debug!("Signature mismatch for access key {}", parsed.access_key_id);
                 return Err(S3Error::SignatureDoesNotMatch);
             }
 
@@ -309,7 +303,10 @@ async fn auth_middleware(
 
             // Check presigned URL expiration.
             if !auth::check_presigned_expiration(&parsed.amz_date, parsed.expires) {
-                warn!("Presigned URL expired for access key {}", parsed.access_key_id);
+                warn!(
+                    "Presigned URL expired for access key {}",
+                    parsed.access_key_id
+                );
                 return Err(S3Error::AccessDenied {
                     message: "Request has expired".to_string(),
                 });
@@ -396,9 +393,7 @@ fn parse_query(raw: Option<String>) -> HashMap<String, String> {
 // -- Service-level dispatch --------------------------------------------------
 
 /// `GET /` -- ListBuckets
-async fn handle_get_service(
-    State(state): State<Arc<AppState>>,
-) -> Result<Response, S3Error> {
+async fn handle_get_service(State(state): State<Arc<AppState>>) -> Result<Response, S3Error> {
     crate::handlers::bucket::list_buckets(state).await
 }
 
@@ -526,7 +521,8 @@ async fn handle_put_object(
     } else if query.contains_key("partNumber") && query.contains_key("uploadId") {
         // Check for UploadPartCopy (copy-source header + part params)
         if headers.contains_key("x-amz-copy-source") {
-            crate::handlers::multipart::upload_part_copy(state, &bucket, &key, &query, &headers).await
+            crate::handlers::multipart::upload_part_copy(state, &bucket, &key, &query, &headers)
+                .await
         } else {
             crate::handlers::multipart::upload_part(state, &bucket, &key, &query, &body).await
         }
@@ -579,7 +575,8 @@ async fn handle_post_object(
     if query.contains_key("uploads") {
         crate::handlers::multipart::create_multipart_upload(state, &bucket, &key, &headers).await
     } else if query.contains_key("uploadId") {
-        crate::handlers::multipart::complete_multipart_upload(state, &bucket, &key, &query, &body).await
+        crate::handlers::multipart::complete_multipart_upload(state, &bucket, &key, &query, &body)
+            .await
     } else {
         Err(S3Error::NotImplemented)
     }

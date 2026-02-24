@@ -103,7 +103,9 @@ class SigV4Authenticator:
         if has_auth_header:
             return await self._verify_header_auth(request)
 
-        raise AccessDenied("Missing authentication: no Authorization header or presigned URL parameters.")
+        raise AccessDenied(
+            "Missing authentication: no Authorization header or presigned URL parameters."
+        )
 
     async def _verify_header_auth(self, request: Request) -> dict[str, str]:
         """Verify header-based SigV4 authentication.
@@ -478,14 +480,14 @@ class SigV4Authenticator:
         # Re-encode
         encoded = []
         for name, value in params:
-            encoded.append(f"{_uri_encode(name, encode_slash=True)}={_uri_encode(value, encode_slash=True)}")
+            encoded.append(
+                f"{_uri_encode(name, encode_slash=True)}={_uri_encode(value, encode_slash=True)}"
+            )
         return "&".join(encoded)
 
     # -- String to sign --------------------------------------------------------
 
-    def _build_string_to_sign(
-        self, timestamp: str, scope: str, canonical_request: str
-    ) -> str:
+    def _build_string_to_sign(self, timestamp: str, scope: str, canonical_request: str) -> str:
         """Build the string to sign.
 
         Args:
@@ -550,9 +552,7 @@ class SigV4Authenticator:
         Returns:
             64-character lowercase hex string.
         """
-        return hmac.new(
-            signing_key, string_to_sign.encode("utf-8"), hashlib.sha256
-        ).hexdigest()
+        return hmac.new(signing_key, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
 
     # -- Clock skew check ------------------------------------------------------
 
@@ -581,6 +581,7 @@ class SigV4Authenticator:
 # ---------------------------------------------------------------------------
 # Module-level utility functions
 # ---------------------------------------------------------------------------
+
 
 def derive_signing_key(secret_key: str, date: str, region: str, service: str) -> bytes:
     """Derive the SigV4 signing key via the HMAC-SHA256 chain.

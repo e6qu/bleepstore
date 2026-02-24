@@ -1070,12 +1070,12 @@ func TestParseCopySource(t *testing.T) {
 
 func TestParseRange(t *testing.T) {
 	tests := []struct {
-		name       string
-		header     string
-		size       int64
-		wantStart  int64
-		wantEnd    int64
-		wantErr    bool
+		name      string
+		header    string
+		size      int64
+		wantStart int64
+		wantEnd   int64
+		wantErr   bool
 	}{
 		{"first 5 bytes", "bytes=0-4", 100, 0, 4, false},
 		{"from byte 5 to end", "bytes=5-", 100, 5, 99, false},
@@ -1410,92 +1410,92 @@ func TestCheckConditionalHeaders(t *testing.T) {
 	lastModified := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
 
 	tests := []struct {
-		name       string
-		method     string
-		headers    map[string]string
-		wantCode   int
-		wantSkip   bool
+		name     string
+		method   string
+		headers  map[string]string
+		wantCode int
+		wantSkip bool
 	}{
 		{
-			name:   "no conditional headers",
-			method: "GET",
+			name:     "no conditional headers",
+			method:   "GET",
 			wantCode: 0,
 			wantSkip: false,
 		},
 		{
-			name:   "If-Match match",
-			method: "GET",
-			headers: map[string]string{"If-Match": `"abc123"`},
+			name:     "If-Match match",
+			method:   "GET",
+			headers:  map[string]string{"If-Match": `"abc123"`},
 			wantCode: 0,
 			wantSkip: false,
 		},
 		{
-			name:   "If-Match mismatch",
-			method: "GET",
-			headers: map[string]string{"If-Match": `"wrong"`},
+			name:     "If-Match mismatch",
+			method:   "GET",
+			headers:  map[string]string{"If-Match": `"wrong"`},
 			wantCode: 412,
 			wantSkip: true,
 		},
 		{
-			name:   "If-Match wildcard",
-			method: "GET",
-			headers: map[string]string{"If-Match": `*`},
+			name:     "If-Match wildcard",
+			method:   "GET",
+			headers:  map[string]string{"If-Match": `*`},
 			wantCode: 0,
 			wantSkip: false,
 		},
 		{
-			name:   "If-None-Match match GET",
-			method: "GET",
-			headers: map[string]string{"If-None-Match": `"abc123"`},
+			name:     "If-None-Match match GET",
+			method:   "GET",
+			headers:  map[string]string{"If-None-Match": `"abc123"`},
 			wantCode: 304,
 			wantSkip: true,
 		},
 		{
-			name:   "If-None-Match match HEAD",
-			method: "HEAD",
-			headers: map[string]string{"If-None-Match": `"abc123"`},
+			name:     "If-None-Match match HEAD",
+			method:   "HEAD",
+			headers:  map[string]string{"If-None-Match": `"abc123"`},
 			wantCode: 304,
 			wantSkip: true,
 		},
 		{
-			name:   "If-None-Match match PUT",
-			method: "PUT",
-			headers: map[string]string{"If-None-Match": `"abc123"`},
+			name:     "If-None-Match match PUT",
+			method:   "PUT",
+			headers:  map[string]string{"If-None-Match": `"abc123"`},
 			wantCode: 412,
 			wantSkip: true,
 		},
 		{
-			name:   "If-None-Match no match",
-			method: "GET",
-			headers: map[string]string{"If-None-Match": `"different"`},
+			name:     "If-None-Match no match",
+			method:   "GET",
+			headers:  map[string]string{"If-None-Match": `"different"`},
 			wantCode: 0,
 			wantSkip: false,
 		},
 		{
-			name:   "If-Modified-Since not modified",
-			method: "GET",
-			headers: map[string]string{"If-Modified-Since": "Fri, 16 Jan 2026 12:00:00 GMT"},
+			name:     "If-Modified-Since not modified",
+			method:   "GET",
+			headers:  map[string]string{"If-Modified-Since": "Fri, 16 Jan 2026 12:00:00 GMT"},
 			wantCode: 304,
 			wantSkip: true,
 		},
 		{
-			name:   "If-Modified-Since modified",
-			method: "GET",
-			headers: map[string]string{"If-Modified-Since": "Wed, 14 Jan 2026 12:00:00 GMT"},
+			name:     "If-Modified-Since modified",
+			method:   "GET",
+			headers:  map[string]string{"If-Modified-Since": "Wed, 14 Jan 2026 12:00:00 GMT"},
 			wantCode: 0,
 			wantSkip: false,
 		},
 		{
-			name:   "If-Unmodified-Since not modified",
-			method: "GET",
-			headers: map[string]string{"If-Unmodified-Since": "Fri, 16 Jan 2026 12:00:00 GMT"},
+			name:     "If-Unmodified-Since not modified",
+			method:   "GET",
+			headers:  map[string]string{"If-Unmodified-Since": "Fri, 16 Jan 2026 12:00:00 GMT"},
 			wantCode: 0,
 			wantSkip: false,
 		},
 		{
-			name:   "If-Unmodified-Since modified",
-			method: "GET",
-			headers: map[string]string{"If-Unmodified-Since": "Wed, 14 Jan 2026 12:00:00 GMT"},
+			name:     "If-Unmodified-Since modified",
+			method:   "GET",
+			headers:  map[string]string{"If-Unmodified-Since": "Wed, 14 Jan 2026 12:00:00 GMT"},
 			wantCode: 412,
 			wantSkip: true,
 		},
@@ -1513,8 +1513,8 @@ func TestCheckConditionalHeaders(t *testing.T) {
 			name:   "If-None-Match takes priority over If-Modified-Since",
 			method: "GET",
 			headers: map[string]string{
-				"If-None-Match":      `"different"`,
-				"If-Modified-Since":  "Fri, 16 Jan 2026 12:00:00 GMT",
+				"If-None-Match":     `"different"`,
+				"If-Modified-Since": "Fri, 16 Jan 2026 12:00:00 GMT",
 			},
 			wantCode: 0,
 			wantSkip: false,

@@ -10,11 +10,11 @@ import (
 
 // skipPaths is the set of paths that do not require authentication.
 var skipPaths = map[string]bool{
-	"/health":      true,
-	"/metrics":     true,
-	"/docs":        true,
-	"/docs/":       true,
-	"/openapi":     true,
+	"/health":       true,
+	"/metrics":      true,
+	"/docs":         true,
+	"/docs/":        true,
+	"/openapi":      true,
 	"/openapi.json": true,
 }
 

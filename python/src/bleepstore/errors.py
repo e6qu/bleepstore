@@ -35,6 +35,7 @@ class S3Error(Exception):
 
 # -- Common pre-defined errors ------------------------------------------------
 
+
 class AccessDenied(S3Error):
     """Access denied error."""
 
@@ -131,7 +132,9 @@ class InvalidBucketName(S3Error):
 class InvalidPart(S3Error):
     """One or more of the specified parts could not be found."""
 
-    def __init__(self, message: str = "One or more of the specified parts could not be found.") -> None:
+    def __init__(
+        self, message: str = "One or more of the specified parts could not be found."
+    ) -> None:
         super().__init__(code="InvalidPart", message=message, http_status=400)
 
 
@@ -152,42 +155,56 @@ class InvalidRange(S3Error):
 class EntityTooLarge(S3Error):
     """The proposed upload exceeds the maximum allowed object size."""
 
-    def __init__(self, message: str = "Your proposed upload exceeds the maximum allowed object size.") -> None:
+    def __init__(
+        self, message: str = "Your proposed upload exceeds the maximum allowed object size."
+    ) -> None:
         super().__init__(code="EntityTooLarge", message=message, http_status=400)
 
 
 class EntityTooSmall(S3Error):
     """The proposed upload is smaller than the minimum allowed object size."""
 
-    def __init__(self, message: str = "Your proposed upload is smaller than the minimum allowed object size.") -> None:
+    def __init__(
+        self, message: str = "Your proposed upload is smaller than the minimum allowed object size."
+    ) -> None:
         super().__init__(code="EntityTooSmall", message=message, http_status=400)
 
 
 class SignatureDoesNotMatch(S3Error):
     """The request signature does not match."""
 
-    def __init__(self, message: str = "The request signature we calculated does not match the signature you provided.") -> None:
+    def __init__(
+        self,
+        message: str = "The request signature we calculated does not match the signature you provided.",
+    ) -> None:
         super().__init__(code="SignatureDoesNotMatch", message=message, http_status=403)
 
 
 class MalformedXML(S3Error):
     """The XML provided was not well-formed or did not validate."""
 
-    def __init__(self, message: str = "The XML you provided was not well-formed or did not validate against our published schema.") -> None:
+    def __init__(
+        self,
+        message: str = "The XML you provided was not well-formed or did not validate against our published schema.",
+    ) -> None:
         super().__init__(code="MalformedXML", message=message, http_status=400)
 
 
 class MethodNotAllowed(S3Error):
     """The specified method is not allowed against this resource."""
 
-    def __init__(self, message: str = "The specified method is not allowed against this resource.") -> None:
+    def __init__(
+        self, message: str = "The specified method is not allowed against this resource."
+    ) -> None:
         super().__init__(code="MethodNotAllowed", message=message, http_status=405)
 
 
 class PreconditionFailed(S3Error):
     """At least one of the preconditions did not hold."""
 
-    def __init__(self, message: str = "At least one of the pre-conditions you specified did not hold.") -> None:
+    def __init__(
+        self, message: str = "At least one of the pre-conditions you specified did not hold."
+    ) -> None:
         super().__init__(code="PreconditionFailed", message=message, http_status=412)
 
 
@@ -227,21 +244,29 @@ class BucketAlreadyOwnedByYou(S3Error):
 class InvalidAccessKeyId(S3Error):
     """The AWS access key Id you provided does not exist in our records."""
 
-    def __init__(self, message: str = "The AWS access key Id you provided does not exist in our records.") -> None:
+    def __init__(
+        self, message: str = "The AWS access key Id you provided does not exist in our records."
+    ) -> None:
         super().__init__(code="InvalidAccessKeyId", message=message, http_status=403)
 
 
 class AuthorizationQueryParametersError(S3Error):
     """Error with authorization query parameters (presigned URLs)."""
 
-    def __init__(self, message: str = "Query-string authentication requires the X-Amz-Algorithm, X-Amz-Credential, X-Amz-Signature, X-Amz-Date, X-Amz-SignedHeaders, and X-Amz-Expires parameters.") -> None:
+    def __init__(
+        self,
+        message: str = "Query-string authentication requires the X-Amz-Algorithm, X-Amz-Credential, X-Amz-Signature, X-Amz-Date, X-Amz-SignedHeaders, and X-Amz-Expires parameters.",
+    ) -> None:
         super().__init__(code="AuthorizationQueryParametersError", message=message, http_status=400)
 
 
 class RequestTimeTooSkewed(S3Error):
     """The difference between the request time and the server's time is too large."""
 
-    def __init__(self, message: str = "The difference between the request time and the current time is too large.") -> None:
+    def __init__(
+        self,
+        message: str = "The difference between the request time and the current time is too large.",
+    ) -> None:
         super().__init__(code="RequestTimeTooSkewed", message=message, http_status=403)
 
 
@@ -255,5 +280,7 @@ class ExpiredPresignedUrl(S3Error):
 class NotImplementedS3Error(S3Error):
     """The requested functionality is not implemented."""
 
-    def __init__(self, message: str = "A header you provided implies functionality that is not implemented.") -> None:
+    def __init__(
+        self, message: str = "A header you provided implies functionality that is not implemented."
+    ) -> None:
         super().__init__(code="NotImplemented", message=message, http_status=501)

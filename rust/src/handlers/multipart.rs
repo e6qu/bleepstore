@@ -7,7 +7,9 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 
 use crate::errors::S3Error;
-use crate::metadata::store::{Acl, AclGrant, AclGrantee, AclOwner, MultipartUploadRecord, PartRecord};
+use crate::metadata::store::{
+    Acl, AclGrant, AclGrantee, AclOwner, MultipartUploadRecord, PartRecord,
+};
 use crate::AppState;
 
 // -- Helper functions ---------------------------------------------------------
@@ -80,11 +82,7 @@ fn default_acl_json(owner_id: &str, display_name: &str) -> String {
 }
 
 /// Build ACL JSON from a canned ACL header value.
-fn canned_acl_to_json(
-    canned: &str,
-    owner_id: &str,
-    display_name: &str,
-) -> Result<String, S3Error> {
+fn canned_acl_to_json(canned: &str, owner_id: &str, display_name: &str) -> Result<String, S3Error> {
     let mut grants = vec![AclGrant {
         grantee: AclGrantee::CanonicalUser {
             id: owner_id.to_string(),
@@ -288,7 +286,10 @@ pub async fn upload_part(
     // Validate part number range (1-10000).
     if part_number < 1 || part_number > 10000 {
         return Err(S3Error::InvalidArgument {
-            message: format!("Part number must be between 1 and 10000, got {}", part_number),
+            message: format!(
+                "Part number must be between 1 and 10000, got {}",
+                part_number
+            ),
         });
     }
 
@@ -337,7 +338,6 @@ pub async fn upload_part(
     Ok(response)
 }
 
-
 /// `PUT /{bucket}/{key}?partNumber={n}&uploadId={id}` with `x-amz-copy-source` -- Copy a part from an existing object.
 pub async fn upload_part_copy(
     state: Arc<AppState>,
@@ -362,7 +362,10 @@ pub async fn upload_part_copy(
 
     if part_number < 1 || part_number > 10000 {
         return Err(S3Error::InvalidArgument {
-            message: format!("Part number must be between 1 and 10000, got {}", part_number),
+            message: format!(
+                "Part number must be between 1 and 10000, got {}",
+                part_number
+            ),
         });
     }
 
@@ -388,15 +391,15 @@ pub async fn upload_part_copy(
             message: "Missing x-amz-copy-source header".to_string(),
         })?;
 
-    let decoded_source =
-        percent_encoding::percent_decode_str(copy_source).decode_utf8_lossy();
+    let decoded_source = percent_encoding::percent_decode_str(copy_source).decode_utf8_lossy();
     let source_path = decoded_source.trim_start_matches('/');
 
-    let (src_bucket, src_key) = source_path
-        .split_once('/')
-        .ok_or_else(|| S3Error::InvalidArgument {
-            message: format!("Invalid x-amz-copy-source: {}", copy_source),
-        })?;
+    let (src_bucket, src_key) =
+        source_path
+            .split_once('/')
+            .ok_or_else(|| S3Error::InvalidArgument {
+                message: format!("Invalid x-amz-copy-source: {}", copy_source),
+            })?;
 
     // Check source bucket exists.
     if !state.metadata.bucket_exists(src_bucket).await? {
@@ -625,10 +628,8 @@ pub async fn complete_multipart_upload(
     let stored_parts = state.metadata.get_parts_for_completion(upload_id).await?;
 
     // Build a map of stored parts for quick lookup: part_number -> PartRecord.
-    let stored_map: HashMap<u32, &crate::metadata::store::PartRecord> = stored_parts
-        .iter()
-        .map(|p| (p.part_number, p))
-        .collect();
+    let stored_map: HashMap<u32, &crate::metadata::store::PartRecord> =
+        stored_parts.iter().map(|p| (p.part_number, p)).collect();
 
     // Validate each requested part: must exist and ETag must match.
     let mut validated_parts: Vec<(u32, String)> = Vec::new();

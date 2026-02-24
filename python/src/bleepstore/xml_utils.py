@@ -125,9 +125,7 @@ def render_location_constraint(region: str) -> str:
     """
     parts = ['<?xml version="1.0" encoding="UTF-8"?>']
     if region == "us-east-1" or not region:
-        parts.append(
-            '<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/"/>'
-        )
+        parts.append('<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/"/>')
     else:
         parts.append(
             f'<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
@@ -188,9 +186,7 @@ def render_list_objects_v2(
         parts.append(f"<StartAfter>{_escape_xml(start_after)}</StartAfter>")
 
     if continuation_token:
-        parts.append(
-            f"<ContinuationToken>{_escape_xml(continuation_token)}</ContinuationToken>"
-        )
+        parts.append(f"<ContinuationToken>{_escape_xml(continuation_token)}</ContinuationToken>")
 
     parts.append(f"<KeyCount>{key_count}</KeyCount>")
     parts.append(f"<IsTruncated>{str(is_truncated).lower()}</IsTruncated>")
@@ -203,9 +199,7 @@ def render_list_objects_v2(
     for obj in contents:
         parts.append("<Contents>")
         parts.append(f"<Key>{_escape_xml(obj.get('key', ''))}</Key>")
-        parts.append(
-            f"<LastModified>{_escape_xml(obj.get('last_modified', ''))}</LastModified>"
-        )
+        parts.append(f"<LastModified>{_escape_xml(obj.get('last_modified', ''))}</LastModified>")
         parts.append(f"<ETag>{_escape_xml(obj.get('etag', ''))}</ETag>")
         parts.append(f"<Size>{obj.get('size', 0)}</Size>")
         parts.append(
@@ -269,9 +263,7 @@ def render_list_objects_v1(
     for obj in contents:
         parts.append("<Contents>")
         parts.append(f"<Key>{_escape_xml(obj.get('key', ''))}</Key>")
-        parts.append(
-            f"<LastModified>{_escape_xml(obj.get('last_modified', ''))}</LastModified>"
-        )
+        parts.append(f"<LastModified>{_escape_xml(obj.get('last_modified', ''))}</LastModified>")
         parts.append(f"<ETag>{_escape_xml(obj.get('etag', ''))}</ETag>")
         parts.append(f"<Size>{obj.get('size', 0)}</Size>")
         parts.append(
@@ -331,9 +323,7 @@ def render_delete_result(
         parts.append("<Deleted>")
         parts.append(f"<Key>{_escape_xml(d['key'])}</Key>")
         if d.get("version_id"):
-            parts.append(
-                f"<VersionId>{_escape_xml(d['version_id'])}</VersionId>"
-            )
+            parts.append(f"<VersionId>{_escape_xml(d['version_id'])}</VersionId>")
         parts.append("</Deleted>")
 
     for e in errors:
@@ -473,9 +463,7 @@ def render_list_multipart_uploads(
         parts.append(
             f"<StorageClass>{_escape_xml(upload.get('storage_class', 'STANDARD'))}</StorageClass>"
         )
-        parts.append(
-            f"<Initiated>{_escape_xml(upload.get('initiated_at', ''))}</Initiated>"
-        )
+        parts.append(f"<Initiated>{_escape_xml(upload.get('initiated_at', ''))}</Initiated>")
         parts.append("</Upload>")
 
     if common_prefixes:
@@ -541,9 +529,7 @@ def render_list_parts(
     xml_parts.append(f"<PartNumberMarker>{part_number_marker}</PartNumberMarker>")
 
     if is_truncated and next_part_number_marker is not None:
-        xml_parts.append(
-            f"<NextPartNumberMarker>{next_part_number_marker}</NextPartNumberMarker>"
-        )
+        xml_parts.append(f"<NextPartNumberMarker>{next_part_number_marker}</NextPartNumberMarker>")
 
     xml_parts.append(f"<MaxParts>{max_parts}</MaxParts>")
     xml_parts.append(f"<IsTruncated>{str(is_truncated).lower()}</IsTruncated>")

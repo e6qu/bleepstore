@@ -24,7 +24,11 @@ pub fn render_error(code: &str, message: &str, resource: &str, request_id: &str)
     let mut writer = Writer::new(Cursor::new(Vec::new()));
 
     writer
-        .write_event(Event::Decl(quick_xml::events::BytesDecl::new("1.0", Some("UTF-8"), None)))
+        .write_event(Event::Decl(quick_xml::events::BytesDecl::new(
+            "1.0",
+            Some("UTF-8"),
+            None,
+        )))
         .expect("xml decl");
 
     write_simple_element_group(
@@ -46,11 +50,19 @@ pub fn render_error(code: &str, message: &str, resource: &str, request_id: &str)
 /// Render the `<ListAllMyBucketsResult>` response for `GET /`.
 ///
 /// `buckets` is a list of `(name, creation_date)` pairs.
-pub fn render_list_buckets_result(owner_id: &str, owner_display: &str, buckets: &[(&str, &str)]) -> String {
+pub fn render_list_buckets_result(
+    owner_id: &str,
+    owner_display: &str,
+    buckets: &[(&str, &str)],
+) -> String {
     let mut writer = Writer::new(Cursor::new(Vec::new()));
 
     writer
-        .write_event(Event::Decl(quick_xml::events::BytesDecl::new("1.0", Some("UTF-8"), None)))
+        .write_event(Event::Decl(quick_xml::events::BytesDecl::new(
+            "1.0",
+            Some("UTF-8"),
+            None,
+        )))
         .expect("xml decl");
 
     let root = BytesStart::new("ListAllMyBucketsResult")
@@ -58,14 +70,22 @@ pub fn render_list_buckets_result(owner_id: &str, owner_display: &str, buckets: 
     writer.write_event(Event::Start(root)).expect("start root");
 
     // <Owner>
-    write_simple_element_group(&mut writer, "Owner", &[("ID", owner_id), ("DisplayName", owner_display)]);
+    write_simple_element_group(
+        &mut writer,
+        "Owner",
+        &[("ID", owner_id), ("DisplayName", owner_display)],
+    );
 
     // <Buckets>
     writer
         .write_event(Event::Start(BytesStart::new("Buckets")))
         .expect("start Buckets");
     for (name, date) in buckets {
-        write_simple_element_group(&mut writer, "Bucket", &[("Name", name), ("CreationDate", date)]);
+        write_simple_element_group(
+            &mut writer,
+            "Bucket",
+            &[("Name", name), ("CreationDate", date)],
+        );
     }
     writer
         .write_event(Event::End(BytesEnd::new("Buckets")))
@@ -106,7 +126,11 @@ pub fn render_list_objects_result(
     let mut writer = Writer::new(Cursor::new(Vec::new()));
 
     writer
-        .write_event(Event::Decl(quick_xml::events::BytesDecl::new("1.0", Some("UTF-8"), None)))
+        .write_event(Event::Decl(quick_xml::events::BytesDecl::new(
+            "1.0",
+            Some("UTF-8"),
+            None,
+        )))
         .expect("xml decl");
 
     let root = BytesStart::new("ListBucketResult")
@@ -120,7 +144,11 @@ pub fn render_list_objects_result(
     }
     write_text_element(&mut writer, "MaxKeys", &max_keys.to_string());
     write_text_element(&mut writer, "KeyCount", &key_count.to_string());
-    write_text_element(&mut writer, "IsTruncated", if is_truncated { "true" } else { "false" });
+    write_text_element(
+        &mut writer,
+        "IsTruncated",
+        if is_truncated { "true" } else { "false" },
+    );
 
     if let Some(token) = continuation_token {
         write_text_element(&mut writer, "ContinuationToken", token);
@@ -182,7 +210,11 @@ pub fn render_list_objects_result_v1(
     let mut writer = Writer::new(Cursor::new(Vec::new()));
 
     writer
-        .write_event(Event::Decl(quick_xml::events::BytesDecl::new("1.0", Some("UTF-8"), None)))
+        .write_event(Event::Decl(quick_xml::events::BytesDecl::new(
+            "1.0",
+            Some("UTF-8"),
+            None,
+        )))
         .expect("xml decl");
 
     let root = BytesStart::new("ListBucketResult")
@@ -196,7 +228,11 @@ pub fn render_list_objects_result_v1(
         write_text_element(&mut writer, "Delimiter", delimiter);
     }
     write_text_element(&mut writer, "MaxKeys", &max_keys.to_string());
-    write_text_element(&mut writer, "IsTruncated", if is_truncated { "true" } else { "false" });
+    write_text_element(
+        &mut writer,
+        "IsTruncated",
+        if is_truncated { "true" } else { "false" },
+    );
 
     if let Some(nm) = next_marker {
         write_text_element(&mut writer, "NextMarker", nm);
@@ -256,7 +292,11 @@ pub fn render_delete_result(
     let mut writer = Writer::new(Cursor::new(Vec::new()));
 
     writer
-        .write_event(Event::Decl(quick_xml::events::BytesDecl::new("1.0", Some("UTF-8"), None)))
+        .write_event(Event::Decl(quick_xml::events::BytesDecl::new(
+            "1.0",
+            Some("UTF-8"),
+            None,
+        )))
         .expect("xml decl");
 
     let root = BytesStart::new("DeleteResult")
@@ -302,7 +342,11 @@ pub fn render_copy_object_result(etag: &str, last_modified: &str) -> String {
     let mut writer = Writer::new(Cursor::new(Vec::new()));
 
     writer
-        .write_event(Event::Decl(quick_xml::events::BytesDecl::new("1.0", Some("UTF-8"), None)))
+        .write_event(Event::Decl(quick_xml::events::BytesDecl::new(
+            "1.0",
+            Some("UTF-8"),
+            None,
+        )))
         .expect("xml decl");
 
     write_simple_element_group(
@@ -321,7 +365,11 @@ pub fn render_initiate_multipart_upload_result(bucket: &str, key: &str, upload_i
     let mut writer = Writer::new(Cursor::new(Vec::new()));
 
     writer
-        .write_event(Event::Decl(quick_xml::events::BytesDecl::new("1.0", Some("UTF-8"), None)))
+        .write_event(Event::Decl(quick_xml::events::BytesDecl::new(
+            "1.0",
+            Some("UTF-8"),
+            None,
+        )))
         .expect("xml decl");
 
     write_simple_element_group(
@@ -345,7 +393,11 @@ pub fn render_complete_multipart_upload_result(
     let mut writer = Writer::new(Cursor::new(Vec::new()));
 
     writer
-        .write_event(Event::Decl(quick_xml::events::BytesDecl::new("1.0", Some("UTF-8"), None)))
+        .write_event(Event::Decl(quick_xml::events::BytesDecl::new(
+            "1.0",
+            Some("UTF-8"),
+            None,
+        )))
         .expect("xml decl");
 
     write_simple_element_group(
@@ -372,18 +424,26 @@ pub fn render_location_constraint(region: &str) -> String {
     let mut writer = Writer::new(Cursor::new(Vec::new()));
 
     writer
-        .write_event(Event::Decl(quick_xml::events::BytesDecl::new("1.0", Some("UTF-8"), None)))
+        .write_event(Event::Decl(quick_xml::events::BytesDecl::new(
+            "1.0",
+            Some("UTF-8"),
+            None,
+        )))
         .expect("xml decl");
 
     if region == "us-east-1" || region.is_empty() {
         // Self-closing empty element with namespace.
         let elem = BytesStart::new("LocationConstraint")
             .with_attributes([("xmlns", "http://s3.amazonaws.com/doc/2006-03-01/")]);
-        writer.write_event(Event::Empty(elem)).expect("empty LocationConstraint");
+        writer
+            .write_event(Event::Empty(elem))
+            .expect("empty LocationConstraint");
     } else {
         let elem = BytesStart::new("LocationConstraint")
             .with_attributes([("xmlns", "http://s3.amazonaws.com/doc/2006-03-01/")]);
-        writer.write_event(Event::Start(elem)).expect("start LocationConstraint");
+        writer
+            .write_event(Event::Start(elem))
+            .expect("start LocationConstraint");
         writer
             .write_event(Event::Text(BytesText::new(region)))
             .expect("region text");
@@ -402,7 +462,11 @@ pub fn render_access_control_policy(acl: &crate::metadata::store::Acl) -> String
     let mut writer = Writer::new(Cursor::new(Vec::new()));
 
     writer
-        .write_event(Event::Decl(quick_xml::events::BytesDecl::new("1.0", Some("UTF-8"), None)))
+        .write_event(Event::Decl(quick_xml::events::BytesDecl::new(
+            "1.0",
+            Some("UTF-8"),
+            None,
+        )))
         .expect("xml decl");
 
     let root = BytesStart::new("AccessControlPolicy")
@@ -413,7 +477,10 @@ pub fn render_access_control_policy(acl: &crate::metadata::store::Acl) -> String
     write_simple_element_group(
         &mut writer,
         "Owner",
-        &[("ID", &acl.owner.id), ("DisplayName", &acl.owner.display_name)],
+        &[
+            ("ID", &acl.owner.id),
+            ("DisplayName", &acl.owner.display_name),
+        ],
     );
 
     // <AccessControlList>
@@ -430,9 +497,12 @@ pub fn render_access_control_policy(acl: &crate::metadata::store::Acl) -> String
             crate::metadata::store::AclGrantee::CanonicalUser { id, display_name } => {
                 // <Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CanonicalUser">
                 let mut grantee_start = BytesStart::new("Grantee");
-                grantee_start.push_attribute(("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance"));
+                grantee_start
+                    .push_attribute(("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance"));
                 grantee_start.push_attribute(("xsi:type", "CanonicalUser"));
-                writer.write_event(Event::Start(grantee_start)).expect("start Grantee");
+                writer
+                    .write_event(Event::Start(grantee_start))
+                    .expect("start Grantee");
 
                 write_text_element(&mut writer, "ID", id);
                 write_text_element(&mut writer, "DisplayName", display_name);
@@ -443,9 +513,12 @@ pub fn render_access_control_policy(acl: &crate::metadata::store::Acl) -> String
             }
             crate::metadata::store::AclGrantee::Group { uri } => {
                 let mut grantee_start = BytesStart::new("Grantee");
-                grantee_start.push_attribute(("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance"));
+                grantee_start
+                    .push_attribute(("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance"));
                 grantee_start.push_attribute(("xsi:type", "Group"));
-                writer.write_event(Event::Start(grantee_start)).expect("start Grantee");
+                writer
+                    .write_event(Event::Start(grantee_start))
+                    .expect("start Grantee");
 
                 write_text_element(&mut writer, "URI", uri);
 
@@ -500,7 +573,11 @@ pub fn render_list_multipart_uploads_result(
     let mut writer = Writer::new(Cursor::new(Vec::new()));
 
     writer
-        .write_event(Event::Decl(quick_xml::events::BytesDecl::new("1.0", Some("UTF-8"), None)))
+        .write_event(Event::Decl(quick_xml::events::BytesDecl::new(
+            "1.0",
+            Some("UTF-8"),
+            None,
+        )))
         .expect("xml decl");
 
     let root = BytesStart::new("ListMultipartUploadsResult")
@@ -517,7 +594,11 @@ pub fn render_list_multipart_uploads_result(
         write_text_element(&mut writer, "NextUploadIdMarker", nuim);
     }
     write_text_element(&mut writer, "MaxUploads", &max_uploads.to_string());
-    write_text_element(&mut writer, "IsTruncated", if is_truncated { "true" } else { "false" });
+    write_text_element(
+        &mut writer,
+        "IsTruncated",
+        if is_truncated { "true" } else { "false" },
+    );
     if !prefix.is_empty() {
         write_text_element(&mut writer, "Prefix", prefix);
     }
@@ -584,7 +665,11 @@ pub fn render_list_parts_result(
     let mut writer = Writer::new(Cursor::new(Vec::new()));
 
     writer
-        .write_event(Event::Decl(quick_xml::events::BytesDecl::new("1.0", Some("UTF-8"), None)))
+        .write_event(Event::Decl(quick_xml::events::BytesDecl::new(
+            "1.0",
+            Some("UTF-8"),
+            None,
+        )))
         .expect("xml decl");
 
     let root = BytesStart::new("ListPartsResult")
@@ -610,12 +695,20 @@ pub fn render_list_parts_result(
     );
 
     write_text_element(&mut writer, "StorageClass", storage_class);
-    write_text_element(&mut writer, "PartNumberMarker", &part_number_marker.to_string());
+    write_text_element(
+        &mut writer,
+        "PartNumberMarker",
+        &part_number_marker.to_string(),
+    );
     if let Some(npm) = next_part_number_marker {
         write_text_element(&mut writer, "NextPartNumberMarker", &npm.to_string());
     }
     write_text_element(&mut writer, "MaxParts", &max_parts.to_string());
-    write_text_element(&mut writer, "IsTruncated", if is_truncated { "true" } else { "false" });
+    write_text_element(
+        &mut writer,
+        "IsTruncated",
+        if is_truncated { "true" } else { "false" },
+    );
 
     for part in parts {
         writer

@@ -306,9 +306,7 @@ class MetadataStore(Protocol):
         """
         ...
 
-    async def abort_multipart_upload(
-        self, bucket: str, key: str, upload_id: str
-    ) -> None:
+    async def abort_multipart_upload(self, bucket: str, key: str, upload_id: str) -> None:
         """Abort a multipart upload and remove its part records.
 
         Args:
@@ -335,9 +333,7 @@ class MetadataStore(Protocol):
         """
         ...
 
-    async def get_parts_for_completion(
-        self, upload_id: str
-    ) -> list[dict[str, Any]]:
+    async def get_parts_for_completion(self, upload_id: str) -> list[dict[str, Any]]:
         """Get all parts for a multipart upload, ordered by part number.
 
         Used during CompleteMultipartUpload to validate and assemble parts.

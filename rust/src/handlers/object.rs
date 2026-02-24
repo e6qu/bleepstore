@@ -151,10 +151,7 @@ fn evaluate_conditions(
     }
 
     // 3. If-None-Match: For GET/HEAD, return 304 if ETag matches.
-    if let Some(if_none_match) = headers
-        .get("if-none-match")
-        .and_then(|v| v.to_str().ok())
-    {
+    if let Some(if_none_match) = headers.get("if-none-match").and_then(|v| v.to_str().ok()) {
         let if_none_match_inner = strip_etag_quotes(if_none_match);
         let matches = if_none_match_inner == "*" || if_none_match_inner == record_etag_inner;
         if matches {
@@ -200,8 +197,10 @@ fn parse_iso8601_to_system_time(iso: &str) -> Option<std::time::SystemTime> {
     let seconds: u32 = iso[17..19].parse().ok()?;
 
     let days_since_epoch = ymd_to_days(year, month, day);
-    let total_secs =
-        days_since_epoch as u64 * 86400 + hours as u64 * 3600 + minutes as u64 * 60 + seconds as u64;
+    let total_secs = days_since_epoch as u64 * 86400
+        + hours as u64 * 3600
+        + minutes as u64 * 60
+        + seconds as u64;
 
     Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(total_secs))
 }
@@ -278,11 +277,7 @@ fn default_acl_json(owner_id: &str, display_name: &str) -> String {
 }
 
 /// Build ACL JSON from a canned ACL header value.
-fn canned_acl_to_json(
-    canned: &str,
-    owner_id: &str,
-    display_name: &str,
-) -> Result<String, S3Error> {
+fn canned_acl_to_json(canned: &str, owner_id: &str, display_name: &str) -> Result<String, S3Error> {
     let mut grants = vec![AclGrant {
         grantee: AclGrantee::CanonicalUser {
             id: owner_id.to_string(),
@@ -361,7 +356,8 @@ fn iso8601_to_http_date(iso: &str) -> String {
     // Convert back to SystemTime via seconds since epoch.
     // Use a rough calculation (doesn't need to be perfect for Last-Modified).
     let days_since_epoch = ymd_to_days(year, month, day);
-    let total_secs = days_since_epoch as u64 * 86400 + hours as u64 * 3600
+    let total_secs = days_since_epoch as u64 * 86400
+        + hours as u64 * 3600
         + minutes as u64 * 60
         + seconds as u64;
 
@@ -559,9 +555,13 @@ pub async fn get_object(
                 if let Some((start, end)) = resolve_range(&byte_range, total_size) {
                     let slice = full_data.slice(start as usize..(end + 1) as usize);
                     let slice_len = slice.len() as u64;
-                    let content_range =
-                        format!("bytes {}-{}/{}", start, end, total_size);
-                    (StatusCode::PARTIAL_CONTENT, slice.to_vec(), Some(content_range), slice_len)
+                    let content_range = format!("bytes {}-{}/{}", start, end, total_size);
+                    (
+                        StatusCode::PARTIAL_CONTENT,
+                        slice.to_vec(),
+                        Some(content_range),
+                        slice_len,
+                    )
                 } else {
                     // Unsatisfiable range.
                     return Err(S3Error::InvalidRange);
@@ -580,9 +580,8 @@ pub async fn get_object(
 
     hdrs.insert(
         "content-type",
-        HeaderValue::from_str(&record.content_type).unwrap_or_else(|_| {
-            HeaderValue::from_static("application/octet-stream")
-        }),
+        HeaderValue::from_str(&record.content_type)
+            .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream")),
     );
     hdrs.insert("etag", HeaderValue::from_str(&record.etag).unwrap());
 
@@ -690,9 +689,8 @@ pub async fn head_object(
 
     hdrs.insert(
         "content-type",
-        HeaderValue::from_str(&record.content_type).unwrap_or_else(|_| {
-            HeaderValue::from_static("application/octet-stream")
-        }),
+        HeaderValue::from_str(&record.content_type)
+            .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream")),
     );
     hdrs.insert("etag", HeaderValue::from_str(&record.etag).unwrap());
     hdrs.insert(
@@ -956,16 +954,16 @@ pub async fn copy_object(
         })?;
 
     // URL-decode the copy source path.
-    let decoded_source =
-        percent_encoding::percent_decode_str(copy_source).decode_utf8_lossy();
+    let decoded_source = percent_encoding::percent_decode_str(copy_source).decode_utf8_lossy();
     let source_path = decoded_source.trim_start_matches('/');
 
     // Split into bucket/key.
-    let (src_bucket, src_key) = source_path
-        .split_once('/')
-        .ok_or_else(|| S3Error::InvalidArgument {
-            message: format!("Invalid x-amz-copy-source: {}", copy_source),
-        })?;
+    let (src_bucket, src_key) =
+        source_path
+            .split_once('/')
+            .ok_or_else(|| S3Error::InvalidArgument {
+                message: format!("Invalid x-amz-copy-source: {}", copy_source),
+            })?;
 
     // Check source bucket exists.
     if !state.metadata.bucket_exists(src_bucket).await? {
@@ -1124,7 +1122,14 @@ pub async fn list_objects_v2(
     // Query metadata store.
     let result = state
         .metadata
-        .list_objects(bucket, prefix, delimiter, max_keys, start_after, continuation_token)
+        .list_objects(
+            bucket,
+            prefix,
+            delimiter,
+            max_keys,
+            start_after,
+            continuation_token,
+        )
         .await?;
 
     // Build ObjectEntry list for XML rendering.
@@ -1305,9 +1310,8 @@ pub async fn get_object_acl(
     // Parse ACL JSON. If parsing fails, return a default FULL_CONTROL ACL.
     let owner_id = state.config.auth.access_key.clone();
     let owner_display = state.config.auth.access_key.clone();
-    let acl: Acl = serde_json::from_str(&record.acl).unwrap_or_else(|_| {
-        Acl::full_control(&owner_id, &owner_display)
-    });
+    let acl: Acl = serde_json::from_str(&record.acl)
+        .unwrap_or_else(|_| Acl::full_control(&owner_id, &owner_display));
 
     let body = crate::xml::render_access_control_policy(&acl);
 
@@ -1375,7 +1379,10 @@ pub async fn put_object_acl(
     // Suppress unused variable warning.
     let _ = record;
 
-    state.metadata.update_object_acl(bucket, key, &acl_json).await?;
+    state
+        .metadata
+        .update_object_acl(bucket, key, &acl_json)
+        .await?;
 
     Ok((StatusCode::OK, "").into_response())
 }
@@ -1433,10 +1440,7 @@ mod tests {
     #[test]
     fn test_resolve_range_start_end() {
         // bytes=0-4 on 16 bytes -> (0, 4)
-        assert_eq!(
-            resolve_range(&ByteRange::StartEnd(0, 4), 16),
-            Some((0, 4))
-        );
+        assert_eq!(resolve_range(&ByteRange::StartEnd(0, 4), 16), Some((0, 4)));
         // bytes=0-100 on 16 bytes -> (0, 15) -- clamped
         assert_eq!(
             resolve_range(&ByteRange::StartEnd(0, 100), 16),
@@ -1449,10 +1453,7 @@ mod tests {
     #[test]
     fn test_resolve_range_start_open() {
         // bytes=5- on 16 bytes -> (5, 15)
-        assert_eq!(
-            resolve_range(&ByteRange::StartOpen(5), 16),
-            Some((5, 15))
-        );
+        assert_eq!(resolve_range(&ByteRange::StartOpen(5), 16), Some((5, 15)));
         // bytes=20- on 16 bytes -> None
         assert_eq!(resolve_range(&ByteRange::StartOpen(20), 16), None);
     }
@@ -1462,10 +1463,7 @@ mod tests {
         // bytes=-5 on 16 bytes -> (11, 15)
         assert_eq!(resolve_range(&ByteRange::Suffix(5), 16), Some((11, 15)));
         // bytes=-100 on 16 bytes -> (0, 15) -- suffix larger than file
-        assert_eq!(
-            resolve_range(&ByteRange::Suffix(100), 16),
-            Some((0, 15))
-        );
+        assert_eq!(resolve_range(&ByteRange::Suffix(100), 16), Some((0, 15)));
     }
 
     #[test]

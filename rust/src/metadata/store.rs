@@ -353,9 +353,7 @@ pub trait MetadataStore: Send + Sync + 'static {
     fn get_multipart_upload(
         &self,
         upload_id: &str,
-    ) -> Pin<
-        Box<dyn Future<Output = anyhow::Result<Option<MultipartUploadRecord>>> + Send + '_>,
-    >;
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Option<MultipartUploadRecord>>> + Send + '_>>;
 
     /// Record an uploaded part (insert or replace).
     fn put_part(

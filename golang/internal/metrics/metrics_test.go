@@ -18,7 +18,7 @@ func TestNormalizePath(t *testing.T) {
 		{"/", "/"},
 		{"", "/"},
 		{"/my-bucket", "/{bucket}"},
-		{"/my-bucket/", "/{bucket}"},    // trailing slash, no key
+		{"/my-bucket/", "/{bucket}"}, // trailing slash, no key
 		{"/my-bucket/my-key", "/{bucket}/{key}"},
 		{"/my-bucket/path/to/object", "/{bucket}/{key}"},
 		{"/test-bucket", "/{bucket}"},

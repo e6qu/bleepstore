@@ -43,9 +43,7 @@ def build_default_acl(owner_id: str, owner_display: str) -> dict[str, Any]:
     }
 
 
-def parse_canned_acl(
-    acl_name: str, owner_id: str, owner_display: str
-) -> dict[str, Any]:
+def parse_canned_acl(acl_name: str, owner_id: str, owner_display: str) -> dict[str, Any]:
     """Parse a canned ACL name into a full ACL dict.
 
     Supported canned ACLs:
@@ -79,24 +77,32 @@ def parse_canned_acl(
     if acl_name == "private":
         pass  # owner FULL_CONTROL only
     elif acl_name == "public-read":
-        grants.append({
-            "grantee": {"type": "Group", "uri": ALL_USERS_URI},
-            "permission": "READ",
-        })
+        grants.append(
+            {
+                "grantee": {"type": "Group", "uri": ALL_USERS_URI},
+                "permission": "READ",
+            }
+        )
     elif acl_name == "public-read-write":
-        grants.append({
-            "grantee": {"type": "Group", "uri": ALL_USERS_URI},
-            "permission": "READ",
-        })
-        grants.append({
-            "grantee": {"type": "Group", "uri": ALL_USERS_URI},
-            "permission": "WRITE",
-        })
+        grants.append(
+            {
+                "grantee": {"type": "Group", "uri": ALL_USERS_URI},
+                "permission": "READ",
+            }
+        )
+        grants.append(
+            {
+                "grantee": {"type": "Group", "uri": ALL_USERS_URI},
+                "permission": "WRITE",
+            }
+        )
     elif acl_name == "authenticated-read":
-        grants.append({
-            "grantee": {"type": "Group", "uri": AUTHENTICATED_USERS_URI},
-            "permission": "READ",
-        })
+        grants.append(
+            {
+                "grantee": {"type": "Group", "uri": AUTHENTICATED_USERS_URI},
+                "permission": "READ",
+            }
+        )
     else:
         raise ValueError(f"Unknown canned ACL: {acl_name}")
 
@@ -175,17 +181,13 @@ def render_acl_xml(acl: dict[str, Any]) -> str:
         if grantee_type == "CanonicalUser":
             grantee_id = _escape(grantee.get("id", ""))
             grantee_display = _escape(grantee.get("display_name", ""))
-            parts.append(
-                f'<Grantee xmlns:xsi="{XSI_XMLNS}" xsi:type="CanonicalUser">'
-            )
+            parts.append(f'<Grantee xmlns:xsi="{XSI_XMLNS}" xsi:type="CanonicalUser">')
             parts.append(f"<ID>{grantee_id}</ID>")
             parts.append(f"<DisplayName>{grantee_display}</DisplayName>")
             parts.append("</Grantee>")
         elif grantee_type == "Group":
             uri = _escape(grantee.get("uri", ""))
-            parts.append(
-                f'<Grantee xmlns:xsi="{XSI_XMLNS}" xsi:type="Group">'
-            )
+            parts.append(f'<Grantee xmlns:xsi="{XSI_XMLNS}" xsi:type="Group">')
             parts.append(f"<URI>{uri}</URI>")
             parts.append("</Grantee>")
 

@@ -74,9 +74,7 @@ class GCPGatewayBackend:
         except Exception as e:
             await self._client.close()
             self._client = None
-            raise ValueError(
-                f"Cannot access upstream GCS bucket '{self.bucket_name}': {e}"
-            ) from e
+            raise ValueError(f"Cannot access upstream GCS bucket '{self.bucket_name}': {e}") from e
 
         logger.info(
             "GCP gateway backend initialized: bucket=%s project=%s prefix='%s'",
@@ -120,9 +118,7 @@ class GCPGatewayBackend:
             return await self._client.download(self.bucket_name, gcs_name)
         except Exception as e:
             if _is_not_found(e):
-                raise FileNotFoundError(
-                    f"Object not found: {bucket}/{key}"
-                ) from e
+                raise FileNotFoundError(f"Object not found: {bucket}/{key}") from e
             raise
 
     async def get_stream(
@@ -151,9 +147,7 @@ class GCPGatewayBackend:
             )
         except Exception as e:
             if _is_not_found(e):
-                raise FileNotFoundError(
-                    f"Object not found: {bucket}/{key}"
-                ) from e
+                raise FileNotFoundError(f"Object not found: {bucket}/{key}") from e
             raise
 
         while True:
@@ -237,9 +231,7 @@ class GCPGatewayBackend:
 
         if len(source_names) <= _MAX_COMPOSE_SOURCES:
             # Simple case: single compose call
-            await self._client.compose(
-                self.bucket_name, final_name, source_names
-            )
+            await self._client.compose(self.bucket_name, final_name, source_names)
         else:
             # Chain compose in batches of 32
             intermediates = await self._chain_compose(source_names, final_name)
@@ -254,9 +246,7 @@ class GCPGatewayBackend:
         data = await self._client.download(self.bucket_name, final_name)
         return hashlib.md5(data).hexdigest()
 
-    async def _chain_compose(
-        self, source_names: list[str], final_name: str
-    ) -> list[str]:
+    async def _chain_compose(self, source_names: list[str], final_name: str) -> list[str]:
         """Chain GCS compose calls for >32 sources.
 
         Returns a list of intermediate object names that should be cleaned up.
@@ -274,18 +264,14 @@ class GCPGatewayBackend:
                     next_sources.append(batch[0])
                     continue
                 intermediate_name = f"{final_name}.__compose_tmp_{generation}_{i}"
-                await self._client.compose(
-                    self.bucket_name, intermediate_name, batch
-                )
+                await self._client.compose(self.bucket_name, intermediate_name, batch)
                 next_sources.append(intermediate_name)
                 all_intermediates.append(intermediate_name)
             current_sources = next_sources
             generation += 1
 
         # Final compose
-        await self._client.compose(
-            self.bucket_name, final_name, current_sources
-        )
+        await self._client.compose(self.bucket_name, final_name, current_sources)
         return all_intermediates
 
     async def delete_parts(self, bucket: str, key: str, upload_id: str) -> None:

@@ -200,9 +200,7 @@ pub fn parse_authorization_header(header: &str) -> Result<ParsedAuthorization, S
 // ── Presigned URL parsing ───────────────────────────────────────────
 
 /// Parse presigned URL query parameters.
-fn parse_presigned_params(
-    params: &BTreeMap<String, String>,
-) -> Result<ParsedPresigned, String> {
+fn parse_presigned_params(params: &BTreeMap<String, String>) -> Result<ParsedPresigned, String> {
     let algorithm = params
         .get("X-Amz-Algorithm")
         .ok_or("Missing X-Amz-Algorithm")?;
@@ -228,9 +226,7 @@ fn parse_presigned_params(
         .ok_or("Missing X-Amz-Date")?
         .to_string();
 
-    let expires_str = params
-        .get("X-Amz-Expires")
-        .ok_or("Missing X-Amz-Expires")?;
+    let expires_str = params.get("X-Amz-Expires").ok_or("Missing X-Amz-Expires")?;
     let expires: u64 = expires_str
         .parse()
         .map_err(|_| "Invalid X-Amz-Expires value")?;
@@ -429,8 +425,7 @@ pub fn derive_signing_key(
 
 /// Compute HMAC-SHA256.
 fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
-    let mut mac =
-        HmacSha256::new_from_slice(key).expect("HMAC can take key of any size");
+    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC can take key of any size");
     mac.update(data);
     mac.finalize().into_bytes().to_vec()
 }
@@ -731,10 +726,9 @@ fn percent_decode(s: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(byte) = u8::from_str_radix(
-                std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""),
-                16,
-            ) {
+            if let Ok(byte) =
+                u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""), 16)
+            {
                 result.push(byte);
                 i += 3;
                 continue;
@@ -747,9 +741,7 @@ fn percent_decode(s: &str) -> String {
 }
 
 /// Extract headers from an axum HeaderMap as sorted (lowercase-name, trimmed-value) pairs.
-pub fn extract_headers_for_signing(
-    header_map: &axum::http::HeaderMap,
-) -> Vec<(String, String)> {
+pub fn extract_headers_for_signing(header_map: &axum::http::HeaderMap) -> Vec<(String, String)> {
     let mut headers: Vec<(String, String)> = Vec::new();
 
     // Collect all headers, grouping multiple values for the same name.
@@ -757,10 +749,7 @@ pub fn extract_headers_for_signing(
     for (name, value) in header_map.iter() {
         let name_lower = name.as_str().to_lowercase();
         let val_str = value.to_str().unwrap_or("").to_string();
-        header_values
-            .entry(name_lower)
-            .or_default()
-            .push(val_str);
+        header_values.entry(name_lower).or_default().push(val_str);
     }
 
     // Join multiple values for the same header with comma.
@@ -893,10 +882,7 @@ mod tests {
 
     #[test]
     fn test_canonical_query_sorted() {
-        assert_eq!(
-            build_canonical_query_string("z=3&a=1&m=2"),
-            "a=1&m=2&z=3"
-        );
+        assert_eq!(build_canonical_query_string("z=3&a=1&m=2"), "a=1&m=2&z=3");
     }
 
     #[test]
@@ -918,7 +904,10 @@ mod tests {
     fn test_build_canonical_request() {
         let headers = vec![
             ("host".to_string(), "mybucket.s3.amazonaws.com".to_string()),
-            ("x-amz-content-sha256".to_string(), "UNSIGNED-PAYLOAD".to_string()),
+            (
+                "x-amz-content-sha256".to_string(),
+                "UNSIGNED-PAYLOAD".to_string(),
+            ),
             ("x-amz-date".to_string(), "20260222T120000Z".to_string()),
         ];
         let result = build_canonical_request(
@@ -1039,21 +1028,18 @@ mod tests {
         let payload_hash = "UNSIGNED-PAYLOAD";
 
         let headers = vec![
-            ("host".to_string(), "examplebucket.s3.amazonaws.com".to_string()),
+            (
+                "host".to_string(),
+                "examplebucket.s3.amazonaws.com".to_string(),
+            ),
             ("x-amz-content-sha256".to_string(), payload_hash.to_string()),
             ("x-amz-date".to_string(), timestamp.to_string()),
         ];
 
         let signed_headers = "host;x-amz-content-sha256;x-amz-date";
 
-        let canonical_request = build_canonical_request(
-            "GET",
-            "/",
-            "",
-            &headers,
-            signed_headers,
-            payload_hash,
-        );
+        let canonical_request =
+            build_canonical_request("GET", "/", "", &headers, signed_headers, payload_hash);
 
         let credential_scope = format!("{}/{}/{}/aws4_request", date_stamp, region, service);
         let string_to_sign = build_string_to_sign(timestamp, &credential_scope, &canonical_request);
@@ -1097,7 +1083,8 @@ mod tests {
         ];
 
         let signed_headers = "host;x-amz-content-sha256;x-amz-date";
-        let canonical_request = build_canonical_request("GET", "/", "", &headers, signed_headers, payload_hash);
+        let canonical_request =
+            build_canonical_request("GET", "/", "", &headers, signed_headers, payload_hash);
         let credential_scope = format!("{}/{}/{}/aws4_request", date_stamp, region, service);
         let string_to_sign = build_string_to_sign(timestamp, &credential_scope, &canonical_request);
         let signing_key = derive_signing_key(secret, date_stamp, region, service);
@@ -1114,7 +1101,15 @@ mod tests {
         };
 
         // Verify with wrong secret should fail.
-        assert!(!verify_header_auth("GET", "/", "", &headers, payload_hash, &parsed, "wrong-secret"));
+        assert!(!verify_header_auth(
+            "GET",
+            "/",
+            "",
+            &headers,
+            payload_hash,
+            &parsed,
+            "wrong-secret"
+        ));
     }
 
     // ── percent_decode ──────────────────────────────────────────────
@@ -1136,9 +1131,7 @@ mod tests {
         let service = "s3";
         let timestamp = "20260222T120000Z";
 
-        let headers = vec![
-            ("host".to_string(), "mybucket.s3.amazonaws.com".to_string()),
-        ];
+        let headers = vec![("host".to_string(), "mybucket.s3.amazonaws.com".to_string())];
 
         let signed_headers = "host";
 
@@ -1178,6 +1171,13 @@ mod tests {
             expires: 3600,
         };
 
-        assert!(verify_presigned_auth("GET", "/test-key", &full_qs, &headers, &parsed, secret));
+        assert!(verify_presigned_auth(
+            "GET",
+            "/test-key",
+            &full_qs,
+            &headers,
+            &parsed,
+            secret
+        ));
     }
 }

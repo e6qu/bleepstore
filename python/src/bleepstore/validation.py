@@ -35,6 +35,7 @@ _MAX_MAX_KEYS = 1000
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def validate_bucket_name(name: str) -> None:
     """Validate an S3 bucket name against AWS naming rules.
 
@@ -94,13 +95,9 @@ def validate_max_keys(value: str) -> int:
     try:
         n = int(value)
     except (ValueError, TypeError):
-        raise InvalidArgument(
-            f"Argument max-keys must be an integer between 0 and {_MAX_MAX_KEYS}"
-        )
+        raise InvalidArgument(f"Argument max-keys must be an integer between 0 and {_MAX_MAX_KEYS}")
 
     if n < 0 or n > _MAX_MAX_KEYS:
-        raise InvalidArgument(
-            f"Argument max-keys must be an integer between 0 and {_MAX_MAX_KEYS}"
-        )
+        raise InvalidArgument(f"Argument max-keys must be an integer between 0 and {_MAX_MAX_KEYS}")
 
     return n

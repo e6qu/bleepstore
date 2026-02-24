@@ -15,11 +15,11 @@ from azure.core.exceptions import ResourceNotFoundError
 from bleepstore.storage.azure import AzureGatewayBackend
 
 
-def _make_backend(container="test-container", account_url="https://test.blob.core.windows.net", prefix=""):
+def _make_backend(
+    container="test-container", account_url="https://test.blob.core.windows.net", prefix=""
+):
     """Create an AzureGatewayBackend with a mock client (skip init)."""
-    backend = AzureGatewayBackend(
-        container_name=container, account_url=account_url, prefix=prefix
-    )
+    backend = AzureGatewayBackend(container_name=container, account_url=account_url, prefix=prefix)
     backend._container_client = AsyncMock()
     backend._credential = AsyncMock()
     return backend
@@ -90,8 +90,10 @@ class TestInit:
 
     async def test_init_verifies_container_exists(self):
         """init() checks container existence via exists()."""
-        with patch("bleepstore.storage.azure.DefaultAzureCredential") as mock_cred_cls, \
-             patch("bleepstore.storage.azure.ContainerClient") as mock_cc_cls:
+        with (
+            patch("bleepstore.storage.azure.DefaultAzureCredential") as mock_cred_cls,
+            patch("bleepstore.storage.azure.ContainerClient") as mock_cc_cls,
+        ):
             mock_cred = AsyncMock()
             mock_cred_cls.return_value = mock_cred
             mock_cc = AsyncMock()
@@ -109,8 +111,10 @@ class TestInit:
 
     async def test_init_raises_on_missing_container(self):
         """init() raises ValueError if the container doesn't exist."""
-        with patch("bleepstore.storage.azure.DefaultAzureCredential") as mock_cred_cls, \
-             patch("bleepstore.storage.azure.ContainerClient") as mock_cc_cls:
+        with (
+            patch("bleepstore.storage.azure.DefaultAzureCredential") as mock_cred_cls,
+            patch("bleepstore.storage.azure.ContainerClient") as mock_cc_cls,
+        ):
             mock_cred = AsyncMock()
             mock_cred_cls.return_value = mock_cred
             mock_cc = AsyncMock()
@@ -125,8 +129,10 @@ class TestInit:
 
     async def test_init_raises_on_access_error(self):
         """init() raises ValueError if container check throws."""
-        with patch("bleepstore.storage.azure.DefaultAzureCredential") as mock_cred_cls, \
-             patch("bleepstore.storage.azure.ContainerClient") as mock_cc_cls:
+        with (
+            patch("bleepstore.storage.azure.DefaultAzureCredential") as mock_cred_cls,
+            patch("bleepstore.storage.azure.ContainerClient") as mock_cc_cls,
+        ):
             mock_cred = AsyncMock()
             mock_cred_cls.return_value = mock_cred
             mock_cc = AsyncMock()
@@ -199,9 +205,7 @@ class TestGet:
     async def test_get_not_found_raises_file_not_found(self):
         backend = _make_backend()
         blob = _setup_blob_client(backend)
-        blob.download_blob = AsyncMock(
-            side_effect=ResourceNotFoundError("Blob not found")
-        )
+        blob.download_blob = AsyncMock(side_effect=ResourceNotFoundError("Blob not found"))
 
         with pytest.raises(FileNotFoundError, match="Object not found"):
             await backend.get("bucket", "key")
@@ -273,9 +277,7 @@ class TestGetStream:
     async def test_get_stream_not_found(self):
         backend = _make_backend()
         blob = _setup_blob_client(backend)
-        blob.download_blob = AsyncMock(
-            side_effect=ResourceNotFoundError("Blob not found")
-        )
+        blob.download_blob = AsyncMock(side_effect=ResourceNotFoundError("Blob not found"))
 
         with pytest.raises(FileNotFoundError):
             async for _ in backend.get_stream("b", "k"):
@@ -296,9 +298,7 @@ class TestDelete:
         """delete() silently ignores ResourceNotFoundError (idempotent)."""
         backend = _make_backend()
         blob = _setup_blob_client(backend)
-        blob.delete_blob = AsyncMock(
-            side_effect=ResourceNotFoundError("not found")
-        )
+        blob.delete_blob = AsyncMock(side_effect=ResourceNotFoundError("not found"))
 
         await backend.delete("bucket", "key")  # Should not raise
 
@@ -358,9 +358,7 @@ class TestPutPart:
         await backend.put_part("b", "k", "uid", 1, data)
 
         expected_block_id = AzureGatewayBackend._block_id("uid", 1)
-        blob.stage_block.assert_awaited_once_with(
-            expected_block_id, data, length=len(data)
-        )
+        blob.stage_block.assert_awaited_once_with(expected_block_id, data, length=len(data))
 
     async def test_put_part_uses_final_blob_name(self):
         """put_part stages blocks on the final blob, not a temp object."""
@@ -486,9 +484,7 @@ class TestServerFactory:
         from bleepstore.config import BleepStoreConfig, StorageConfig
         from bleepstore.server import _create_storage_backend
 
-        config = BleepStoreConfig(
-            storage=StorageConfig(backend="azure", azure_container="")
-        )
+        config = BleepStoreConfig(storage=StorageConfig(backend="azure", azure_container=""))
 
         with pytest.raises(ValueError, match="azure.container.*required"):
             _create_storage_backend(config)

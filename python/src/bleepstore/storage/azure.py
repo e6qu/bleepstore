@@ -68,9 +68,7 @@ class AzureGatewayBackend:
         blocks in a blob. Includes upload_id to avoid collisions between
         concurrent multipart uploads to the same key.
         """
-        return base64.b64encode(
-            f"{upload_id}:{part_number:05d}".encode()
-        ).decode()
+        return base64.b64encode(f"{upload_id}:{part_number:05d}".encode()).decode()
 
     async def init(self) -> None:
         """Create the Azure ContainerClient and verify the container exists.
@@ -102,9 +100,7 @@ class AzureGatewayBackend:
             await self._credential.close()
             self._container_client = None
             self._credential = None
-            raise ValueError(
-                f"Upstream Azure container '{self.container_name}' does not exist"
-            )
+            raise ValueError(f"Upstream Azure container '{self.container_name}' does not exist")
 
         logger.info(
             "Azure gateway backend initialized: container=%s account=%s prefix='%s'",
@@ -150,9 +146,7 @@ class AzureGatewayBackend:
             downloader = await blob_client.download_blob()
             return await downloader.readall()
         except ResourceNotFoundError as e:
-            raise FileNotFoundError(
-                f"Object not found: {bucket}/{key}"
-            ) from e
+            raise FileNotFoundError(f"Object not found: {bucket}/{key}") from e
 
     async def get_stream(
         self, bucket: str, key: str, offset: int = 0, length: int | None = None
@@ -174,9 +168,7 @@ class AzureGatewayBackend:
         try:
             downloader = await blob_client.download_blob(**kwargs)
         except ResourceNotFoundError as e:
-            raise FileNotFoundError(
-                f"Object not found: {bucket}/{key}"
-            ) from e
+            raise FileNotFoundError(f"Object not found: {bucket}/{key}") from e
 
         async for chunk in downloader.chunks():
             yield chunk
@@ -239,10 +231,7 @@ class AzureGatewayBackend:
         blob_name = self._blob_name(bucket, key)
         blob_client = self._container_client.get_blob_client(blob_name)
 
-        block_list = [
-            BlobBlock(block_id=self._block_id(upload_id, pn))
-            for pn in part_numbers
-        ]
+        block_list = [BlobBlock(block_id=self._block_id(upload_id, pn)) for pn in part_numbers]
         await blob_client.commit_block_list(block_list)
 
         # Download the committed blob to compute MD5
@@ -278,9 +267,7 @@ class AzureGatewayBackend:
         dst_blob_name = self._blob_name(dst_bucket, dst_key)
 
         # Build source URL
-        source_url = (
-            f"{self.account_url}/{self.container_name}/{src_blob_name}"
-        )
+        source_url = f"{self.account_url}/{self.container_name}/{src_blob_name}"
 
         dst_blob_client = self._container_client.get_blob_client(dst_blob_name)
         await dst_blob_client.start_copy_from_url(source_url)

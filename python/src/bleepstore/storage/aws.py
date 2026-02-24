@@ -63,9 +63,7 @@ class AWSGatewayBackend:
         Raises:
             ValueError: If the upstream bucket does not exist or is inaccessible.
         """
-        self._client_ctx = self._session.create_client(
-            "s3", region_name=self.region
-        )
+        self._client_ctx = self._session.create_client("s3", region_name=self.region)
         self._client = await self._client_ctx.__aenter__()
 
         # Verify bucket exists
@@ -120,15 +118,11 @@ class AWSGatewayBackend:
         """
         s3_key = self._s3_key(bucket, key)
         try:
-            resp = await self._client.get_object(
-                Bucket=self.bucket_name, Key=s3_key
-            )
+            resp = await self._client.get_object(Bucket=self.bucket_name, Key=s3_key)
         except ClientError as e:
             code = e.response.get("Error", {}).get("Code", "")
             if code in ("NoSuchKey", "404"):
-                raise FileNotFoundError(
-                    f"Object not found: {bucket}/{key}"
-                ) from e
+                raise FileNotFoundError(f"Object not found: {bucket}/{key}") from e
             raise
 
         async with resp["Body"] as stream:
@@ -157,9 +151,7 @@ class AWSGatewayBackend:
         except ClientError as e:
             code = e.response.get("Error", {}).get("Code", "")
             if code in ("NoSuchKey", "404"):
-                raise FileNotFoundError(
-                    f"Object not found: {bucket}/{key}"
-                ) from e
+                raise FileNotFoundError(f"Object not found: {bucket}/{key}") from e
             raise
 
         async with resp["Body"] as stream:
@@ -175,17 +167,13 @@ class AWSGatewayBackend:
         Idempotent — S3 delete_object does not error on missing keys.
         """
         s3_key = self._s3_key(bucket, key)
-        await self._client.delete_object(
-            Bucket=self.bucket_name, Key=s3_key
-        )
+        await self._client.delete_object(Bucket=self.bucket_name, Key=s3_key)
 
     async def exists(self, bucket: str, key: str) -> bool:
         """Check if an object exists in the upstream S3 bucket."""
         s3_key = self._s3_key(bucket, key)
         try:
-            await self._client.head_object(
-                Bucket=self.bucket_name, Key=s3_key
-            )
+            await self._client.head_object(Bucket=self.bucket_name, Key=s3_key)
             return True
         except ClientError as e:
             code = e.response.get("Error", {}).get("Code", "")
@@ -306,9 +294,7 @@ class AWSGatewayBackend:
                     UploadId=aws_upload_id,
                 )
             except Exception:
-                logger.warning(
-                    "Failed to abort AWS multipart upload %s", aws_upload_id
-                )
+                logger.warning("Failed to abort AWS multipart upload %s", aws_upload_id)
             raise
 
     async def delete_parts(self, bucket: str, key: str, upload_id: str) -> None:
@@ -320,9 +306,7 @@ class AWSGatewayBackend:
         prefix = f"{self.prefix}.parts/{upload_id}/"
         paginator = self._client.get_paginator("list_objects_v2")
 
-        async for page in paginator.paginate(
-            Bucket=self.bucket_name, Prefix=prefix
-        ):
+        async for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix):
             contents = page.get("Contents", [])
             if not contents:
                 continue

@@ -48,6 +48,7 @@ def _get_instrumentator() -> Instrumentator:
 # Application factory
 # ---------------------------------------------------------------------------
 
+
 def create_app(config: BleepStoreConfig) -> FastAPI:
     """Create and configure the BleepStore FastAPI application.
 
@@ -140,9 +141,7 @@ def _create_storage_backend(config: BleepStoreConfig) -> StorageBackend:
         return LocalStorageBackend(config.storage.local_root)
     elif backend == "aws":
         if not config.storage.aws_bucket:
-            raise ValueError(
-                "storage.aws.bucket is required when backend is 'aws'"
-            )
+            raise ValueError("storage.aws.bucket is required when backend is 'aws'")
         try:
             from bleepstore.storage.aws import AWSGatewayBackend
         except ImportError as exc:
@@ -157,9 +156,7 @@ def _create_storage_backend(config: BleepStoreConfig) -> StorageBackend:
         )
     elif backend == "gcp":
         if not config.storage.gcp_bucket:
-            raise ValueError(
-                "storage.gcp.bucket is required when backend is 'gcp'"
-            )
+            raise ValueError("storage.gcp.bucket is required when backend is 'gcp'")
         try:
             from bleepstore.storage.gcp import GCPGatewayBackend
         except ImportError as exc:
@@ -174,9 +171,7 @@ def _create_storage_backend(config: BleepStoreConfig) -> StorageBackend:
         )
     elif backend == "azure":
         if not config.storage.azure_container:
-            raise ValueError(
-                "storage.azure.container is required when backend is 'azure'"
-            )
+            raise ValueError("storage.azure.container is required when backend is 'azure'")
         try:
             from bleepstore.storage.azure import AzureGatewayBackend
         except ImportError as exc:
@@ -196,6 +191,7 @@ def _create_storage_backend(config: BleepStoreConfig) -> StorageBackend:
 # ---------------------------------------------------------------------------
 # Exception handlers
 # ---------------------------------------------------------------------------
+
 
 def _register_exception_handlers(app: FastAPI) -> None:
     """Register exception handlers on the FastAPI app."""
@@ -271,6 +267,7 @@ def _register_exception_handlers(app: FastAPI) -> None:
 # Middleware
 # ---------------------------------------------------------------------------
 
+
 def _register_middleware(app: FastAPI) -> None:
     """Register middleware on the FastAPI app.
 
@@ -280,7 +277,14 @@ def _register_middleware(app: FastAPI) -> None:
     """
 
     # Paths that skip auth -- health, metrics, docs, openapi
-    AUTH_SKIP_PATHS = {"/health", "/metrics", "/docs", "/docs/oauth2-redirect", "/openapi.json", "/redoc"}
+    AUTH_SKIP_PATHS = {
+        "/health",
+        "/metrics",
+        "/docs",
+        "/docs/oauth2-redirect",
+        "/openapi.json",
+        "/redoc",
+    }
 
     @app.middleware("http")
     async def common_headers_middleware(request: Request, call_next) -> Response:
@@ -296,9 +300,7 @@ def _register_middleware(app: FastAPI) -> None:
         response = await call_next(request)
 
         response.headers["x-amz-request-id"] = request_id
-        response.headers["x-amz-id-2"] = base64.b64encode(
-            secrets.token_bytes(24)
-        ).decode()
+        response.headers["x-amz-id-2"] = base64.b64encode(secrets.token_bytes(24)).decode()
         response.headers["Date"] = email.utils.formatdate(usegmt=True)
         response.headers["Server"] = "BleepStore"
         return response
@@ -362,6 +364,7 @@ def _register_middleware(app: FastAPI) -> None:
 # ---------------------------------------------------------------------------
 # Route handlers
 # ---------------------------------------------------------------------------
+
 
 def _setup_routes(app: FastAPI) -> None:
     """Register all S3-compatible routes on the application.

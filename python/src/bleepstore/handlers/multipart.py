@@ -104,7 +104,7 @@ class MultipartHandler:
         for name, value in request.headers.items():
             lower_name = name.lower()
             if lower_name.startswith("x-amz-meta-"):
-                meta_key = lower_name[len("x-amz-meta-"):]
+                meta_key = lower_name[len("x-amz-meta-") :]
                 meta[meta_key] = value
         return meta
 
@@ -149,6 +149,7 @@ class MultipartHandler:
         # If owner info not on request state, derive from config
         if not owner_id:
             import hashlib
+
             access_key = self.config.auth.access_key
             owner_id = hashlib.sha256(access_key.encode()).hexdigest()[:32]
             owner_display = access_key
@@ -296,7 +297,7 @@ class MultipartHandler:
             raise InvalidArgument("Invalid x-amz-copy-source header")
 
         src_bucket = copy_source[:slash_pos]
-        src_key = copy_source[slash_pos + 1:]
+        src_key = copy_source[slash_pos + 1 :]
 
         if not src_bucket or not src_key:
             raise InvalidArgument("Invalid x-amz-copy-source header")
@@ -320,7 +321,7 @@ class MultipartHandler:
             if range_match:
                 start = int(range_match.group(1))
                 end = int(range_match.group(2))
-                data = data[start:end + 1]
+                data = data[start : end + 1]
 
         # Write part to storage (atomic: temp-fsync-rename)
         md5_hex = await self.storage.put_part(bucket, key, upload_id, part_number, data)
@@ -338,15 +339,19 @@ class MultipartHandler:
 
         # Build CopyPartResult XML response
         from datetime import datetime, timezone
+
         last_modified = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-        body = "\n".join([
-            '<?xml version="1.0" encoding="UTF-8"?>',
-            '<CopyPartResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">',
-            f"<ETag>{_escape_xml(etag)}</ETag>",
-            f"<LastModified>{_escape_xml(last_modified)}</LastModified>",
-            "</CopyPartResult>",
-        ])
+        body = "\n".join(
+            [
+                '<?xml version="1.0" encoding="UTF-8"?>',
+                '<CopyPartResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">',
+                f"<ETag>{_escape_xml(etag)}</ETag>",
+                f"<LastModified>{_escape_xml(last_modified)}</LastModified>",
+                "</CopyPartResult>",
+            ]
+        )
         from bleepstore.xml_utils import xml_response as _xml_response
+
         return _xml_response(body, status=200)
 
     @staticmethod
@@ -424,10 +429,12 @@ class MultipartHandler:
             if etag_elem is None or etag_elem.text is None:
                 raise MalformedXML("Missing ETag element")
 
-            requested_parts.append({
-                "part_number": pn_elem.text.strip(),
-                "etag": etag_elem.text.strip(),
-            })
+            requested_parts.append(
+                {
+                    "part_number": pn_elem.text.strip(),
+                    "etag": etag_elem.text.strip(),
+                }
+            )
 
         if not requested_parts:
             raise MalformedXML("No parts specified in request body")
@@ -445,9 +452,7 @@ class MultipartHandler:
 
         # Get all stored parts from metadata
         stored_parts = await self.metadata.get_parts_for_completion(upload_id)
-        stored_by_number: dict[int, dict] = {
-            p["part_number"]: p for p in stored_parts
-        }
+        stored_by_number: dict[int, dict] = {p["part_number"]: p for p in stored_parts}
 
         # Validate each requested part exists and ETags match
         validated_parts: list[dict] = []
@@ -517,7 +522,9 @@ class MultipartHandler:
         except Exception:
             logger.warning(
                 "Failed to clean up part files for upload %s after completion: %s/%s",
-                upload_id, bucket, key,
+                upload_id,
+                bucket,
+                key,
                 exc_info=True,
             )
 
@@ -565,7 +572,9 @@ class MultipartHandler:
         except Exception:
             logger.warning(
                 "Failed to delete part files for upload %s: %s/%s",
-                upload_id, bucket, key,
+                upload_id,
+                bucket,
+                key,
                 exc_info=True,
             )
 

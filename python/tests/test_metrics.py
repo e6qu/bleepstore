@@ -14,7 +14,9 @@ class TestMetricsEndpoint:
         resp = await client.get("/metrics")
         ct = resp.headers.get("content-type", "")
         # Prometheus exposition format
-        assert "text/plain" in ct or "text/plain; version=0.0.4" in ct or "openmetrics" in ct.lower()
+        assert (
+            "text/plain" in ct or "text/plain; version=0.0.4" in ct or "openmetrics" in ct.lower()
+        )
 
     async def test_metrics_contains_bleepstore_prefix(self, client):
         """GET /metrics response includes bleepstore_ prefixed metrics."""
