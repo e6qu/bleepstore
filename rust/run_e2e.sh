@@ -38,6 +38,9 @@ fi
 lsof -ti:$PORT 2>/dev/null | xargs kill -9 2>/dev/null || true
 sleep 0.5
 
+# Ensure data directories exist (config uses ./data/metadata.db and ./data/objects)
+mkdir -p "$SCRIPT_DIR/data/objects"
+
 # Start the server in background
 echo "Starting BleepStore Rust on port $PORT..."
 $BINARY --config "$PROJECT_ROOT/bleepstore.example.yaml" --bind "0.0.0.0:$PORT" \

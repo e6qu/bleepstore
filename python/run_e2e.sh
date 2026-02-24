@@ -38,6 +38,9 @@ uv pip install -e ".[dev]" --quiet
 lsof -ti:$PORT 2>/dev/null | xargs kill -9 2>/dev/null || true
 sleep 0.5
 
+# Ensure data directories exist (config uses ./data/metadata.db and ./data/objects)
+mkdir -p "$SCRIPT_DIR/data/objects"
+
 # Start the server in background
 echo "Starting BleepStore Python on port $PORT..."
 bleepstore --config "$PROJECT_ROOT/bleepstore.example.yaml" --port $PORT \
