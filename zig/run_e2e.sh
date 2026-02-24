@@ -20,10 +20,14 @@ E2E_LOG="$LOG_DIR/e2e.log"
 
 mkdir -p "$LOG_DIR"
 
-# Build
-echo "Building BleepStore Zig..."
+# Build (skip if binary already exists, e.g. from `make build`)
 cd "$SCRIPT_DIR"
-zig build -Doptimize=ReleaseFast 2>&1
+if [ ! -f zig-out/bin/bleepstore ]; then
+    echo "Building BleepStore Zig..."
+    zig build 2>&1
+else
+    echo "Using existing BleepStore Zig binary."
+fi
 
 # Kill any existing server on our port
 lsof -ti:$PORT 2>/dev/null | xargs kill -9 2>/dev/null || true
@@ -45,17 +49,25 @@ trap cleanup EXIT
 
 # Wait for server to be ready
 echo "Waiting for server..."
+SERVER_READY=false
 for i in $(seq 1 30); do
     if curl -s "http://localhost:$PORT/" >/dev/null 2>&1; then
         echo "Server ready."
+        SERVER_READY=true
         break
     fi
     if ! kill -0 $SERVER_PID 2>/dev/null; then
-        echo "Server failed to start. Check $SERVER_LOG"
+        echo "Server failed to start. Log output:"
+        cat "$SERVER_LOG" 2>/dev/null || true
         exit 1
     fi
     sleep 0.5
 done
+if [ "$SERVER_READY" = false ]; then
+    echo "Server did not become ready within 15s. Log output:"
+    cat "$SERVER_LOG" 2>/dev/null || true
+    exit 1
+fi
 
 # Run E2E tests
 echo ""
