@@ -179,6 +179,11 @@ pub fn uploadPart(
     // Read the request body.
     const body = req.body() orelse "";
 
+    // Check max object size.
+    if (body.len > server.global_max_object_size) {
+        return sendS3Error(res, req_alloc, .EntityTooLarge, "/", request_id);
+    }
+
     // Write part to storage (atomic: temp + fsync + rename).
     const put_result = try sb.putPart(bucket_name, upload_id, part_number, body);
     // Copy etag to arena since it may be allocated by LocalBackend's allocator.

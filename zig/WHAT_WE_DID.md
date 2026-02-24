@@ -1,5 +1,59 @@
 # BleepStore Zig — What We Did
 
+## Session 24 — Stage 15: Performance Optimization & Production Readiness (2026-02-24)
+
+### Summary
+Implemented Stage 15 performance optimization and production hardening. Added SigV4 signing key cache (24h TTL) and credential cache (60s TTL) to avoid per-request HMAC-SHA256 derivation and SQLite queries. Rewrote batch DeleteObjects to use SQL `IN` clause. Added structured logging with runtime log level and JSON format support. Added shutdown timeout watchdog thread and max object size enforcement. All 160 unit tests pass. 86/86 E2E tests pass.
+
+### Files Modified
+
+#### `src/auth.zig`
+- Added `AuthCache` struct with `SigningKeyEntry` and `CredEntry` types
+- Thread-safe via `std.Thread.Mutex`, max 1000 entries, evict-all on overflow
+- `getSigningKey`/`putSigningKey`: stack-based `[32]u8` keys, 24h TTL
+- `getCredential`/`putCredential`: owned string copies, 60s TTL
+- `CredSnapshot` return type with arena-duped secret_key
+- Made `parsePresignedParams` pub for cache key extraction in server.zig
+- Added `precomputed_signing_key` parameter to `verifyHeaderAuth` and `verifyPresignedAuth`
+
+#### `src/server.zig`
+- Added `global_auth_cache` and `global_max_object_size` globals
+- Rewrote `authenticateRequest` to check credential cache before DB lookup
+- Added signing key cache check/populate around verify calls
+- Passes precomputed signing key to avoid `deriveSigningKey` on cache hit
+
+#### `src/metadata/sqlite.zig`
+- Rewrote `deleteObjectsMeta` to use batched `DELETE ... WHERE key IN (?2, ?3, ...)`
+- Batch size 998 (SQLite 999-param limit minus 1 for bucket)
+- Dynamic SQL construction via `std.ArrayList`
+
+#### `src/handlers/object.zig`
+- `deleteObjects` handler calls batch `deleteObjectsMeta` instead of per-key deletes
+- Added max object size check in `putObject` (EntityTooLarge on exceed)
+
+#### `src/handlers/multipart.zig`
+- Added max object size check in `uploadPart` (EntityTooLarge on exceed)
+
+#### `src/config.zig`
+- Added `LoggingConfig` struct (level, format)
+- Added `logging` field to `Config`
+- Added `shutdown_timeout` and `max_object_size` to `ServerConfig`
+- Added parsing for all new config keys
+
+#### `src/main.zig`
+- Added `pub const std_options` with `log_level = .debug` and `logFn = customLogFn`
+- Implemented `customLogFn` with runtime level filtering and JSON format
+- Added `--log-level`, `--log-format`, `--shutdown-timeout`, `--max-object-size` CLI args
+- Created `AuthCache` on startup, set `global_auth_cache`
+- Spawned shutdown watchdog thread
+- Set `global_max_object_size` from config
+
+### Test Results
+- `zig build test` -- 160/160 pass, 0 leaks
+- `./run_e2e.sh` -- 86/86 pass
+
+---
+
 ## Session 23 — Stage 11b: Azure Blob Storage Gateway Backend (2026-02-24)
 
 ### Summary

@@ -161,6 +161,11 @@ pub fn putObject(
     // Read the request body.
     const body = req.body() orelse "";
 
+    // Check max object size.
+    if (body.len > server.global_max_object_size) {
+        return sendS3Error(res, req_alloc, .EntityTooLarge, object_key, request_id);
+    }
+
     // Write to storage backend (atomic: temp + fsync + rename).
     const put_result = try sb.putObject(bucket_name, object_key, body, .{
         .content_type = req.header("content-type") orelse "application/octet-stream",
@@ -543,20 +548,28 @@ pub fn deleteObjects(
         return sendS3Error(res, req_alloc, .MalformedXML, "/", request_id);
     }
 
-    // Delete each key.
+    // Batch delete from metadata store.
+    const batch_results = ms.deleteObjectsMeta(bucket_name, keys) catch null;
+    defer {
+        if (batch_results) |br| {
+            if (server.global_allocator) |gpa| gpa.free(br);
+        }
+    }
+
+    // Delete from storage (per-key, since files are individual).
     var deleted_keys: std.ArrayList([]const u8) = .empty;
     var error_keys: std.ArrayList([]const u8) = .empty;
 
-    for (keys) |key| {
-        // Delete from storage (ignores FileNotFound).
+    for (keys, 0..) |key, i| {
         sb.deleteObject(bucket_name, key) catch {};
 
-        // Delete from metadata store.
-        const existed = ms.deleteObjectMeta(bucket_name, key) catch false;
-        if (existed) {
-            const current = metrics_mod.objects_total.load(.monotonic);
-            if (current > 0) {
-                _ = metrics_mod.objects_total.fetchSub(1, .monotonic);
+        // Update metrics if metadata row was deleted.
+        if (batch_results) |br| {
+            if (i < br.len and br[i]) {
+                const current = metrics_mod.objects_total.load(.monotonic);
+                if (current > 0) {
+                    _ = metrics_mod.objects_total.fetchSub(1, .monotonic);
+                }
             }
         }
 

@@ -21,6 +21,231 @@ pub const AwsCredentials = struct {
     region: []const u8,
 };
 
+// ---------------------------------------------------------------------------
+// Auth Cache — caches signing keys (24h TTL) and credentials (60s TTL)
+// ---------------------------------------------------------------------------
+
+pub const AuthCache = struct {
+    const max_entries = 1000;
+    const signing_key_ttl_ns: i128 = 86400 * std.time.ns_per_s; // 24h
+    const credential_ttl_ns: i128 = 60 * std.time.ns_per_s; // 60s
+
+    const SigningKeyEntry = struct {
+        key: [HmacSha256.mac_length]u8,
+        expires: i128,
+    };
+
+    const CredEntry = struct {
+        access_key_id: []const u8,
+        secret_key: []const u8,
+        owner_id: []const u8,
+        display_name: []const u8,
+        created_at: []const u8,
+        expires: i128,
+    };
+
+    /// Snapshot returned from getCredential — fields are duped to caller's allocator.
+    pub const CredSnapshot = struct {
+        access_key_id: []const u8,
+        secret_key: []const u8,
+        owner_id: []const u8,
+        display_name: []const u8,
+        created_at: []const u8,
+    };
+
+    allocator: std.mem.Allocator,
+    mutex: std.Thread.Mutex = .{},
+    signing_keys: std.StringHashMap(SigningKeyEntry),
+    credentials: std.StringHashMap(CredEntry),
+
+    pub fn init(allocator: std.mem.Allocator) AuthCache {
+        return .{
+            .allocator = allocator,
+            .signing_keys = std.StringHashMap(SigningKeyEntry).init(allocator),
+            .credentials = std.StringHashMap(CredEntry).init(allocator),
+        };
+    }
+
+    pub fn deinit(self: *AuthCache) void {
+        // Free all owned signing key cache keys.
+        var sk_iter = self.signing_keys.iterator();
+        while (sk_iter.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+        }
+        self.signing_keys.deinit();
+
+        // Free all owned credential entries.
+        var cred_iter = self.credentials.iterator();
+        while (cred_iter.next()) |entry| {
+            self.freeCredEntry(entry.value_ptr.*);
+            self.allocator.free(entry.key_ptr.*);
+        }
+        self.credentials.deinit();
+    }
+
+    fn freeCredEntry(self: *AuthCache, entry: CredEntry) void {
+        self.allocator.free(entry.access_key_id);
+        self.allocator.free(entry.secret_key);
+        self.allocator.free(entry.owner_id);
+        self.allocator.free(entry.display_name);
+        self.allocator.free(entry.created_at);
+    }
+
+    /// Look up a cached signing key. Returns null on miss or expiry.
+    pub fn getSigningKey(
+        self: *AuthCache,
+        secret_key: []const u8,
+        date_stamp: []const u8,
+        region: []const u8,
+        service: []const u8,
+    ) ?[HmacSha256.mac_length]u8 {
+        // Build cache key on the stack.
+        var key_buf: [512]u8 = undefined;
+        const cache_key = std.fmt.bufPrint(&key_buf, "{s}\x00{s}\x00{s}\x00{s}", .{
+            secret_key, date_stamp, region, service,
+        }) catch return null;
+
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        const entry = self.signing_keys.get(cache_key) orelse return null;
+        const now = std.time.nanoTimestamp();
+        if (now > entry.expires) return null;
+        return entry.key;
+    }
+
+    /// Store a signing key in the cache.
+    pub fn putSigningKey(
+        self: *AuthCache,
+        secret_key: []const u8,
+        date_stamp: []const u8,
+        region: []const u8,
+        service: []const u8,
+        key: [HmacSha256.mac_length]u8,
+    ) void {
+        var key_buf: [512]u8 = undefined;
+        const cache_key_slice = std.fmt.bufPrint(&key_buf, "{s}\x00{s}\x00{s}\x00{s}", .{
+            secret_key, date_stamp, region, service,
+        }) catch return;
+
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        if (self.signing_keys.count() >= max_entries) {
+            // Evict all entries on overflow (simple strategy).
+            var iter = self.signing_keys.iterator();
+            while (iter.next()) |entry| {
+                self.allocator.free(entry.key_ptr.*);
+            }
+            self.signing_keys.clearRetainingCapacity();
+        }
+
+        const now = std.time.nanoTimestamp();
+        const owned_key = self.allocator.dupe(u8, cache_key_slice) catch return;
+
+        self.signing_keys.put(owned_key, .{
+            .key = key,
+            .expires = now + signing_key_ttl_ns,
+        }) catch {
+            self.allocator.free(owned_key);
+        };
+    }
+
+    /// Look up cached credentials. Returns a CredSnapshot with secret_key duped
+    /// to the caller's allocator (typically the per-request arena). Returns null
+    /// on miss or expiry.
+    pub fn getCredential(
+        self: *AuthCache,
+        access_key_id: []const u8,
+        caller_alloc: std.mem.Allocator,
+    ) ?CredSnapshot {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        const entry = self.credentials.get(access_key_id) orelse return null;
+        const now = std.time.nanoTimestamp();
+        if (now > entry.expires) return null;
+
+        // Dupe secret_key to caller's allocator (arena) so it survives after unlock.
+        const secret_dup = caller_alloc.dupe(u8, entry.secret_key) catch return null;
+        return CredSnapshot{
+            .access_key_id = entry.access_key_id,
+            .secret_key = secret_dup,
+            .owner_id = entry.owner_id,
+            .display_name = entry.display_name,
+            .created_at = entry.created_at,
+        };
+    }
+
+    /// Store credentials in the cache. The cache owns copies of all strings.
+    pub fn putCredential(
+        self: *AuthCache,
+        access_key_id: []const u8,
+        secret_key: []const u8,
+        owner_id: []const u8,
+        display_name: []const u8,
+        created_at: []const u8,
+    ) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        if (self.credentials.count() >= max_entries) {
+            var iter = self.credentials.iterator();
+            while (iter.next()) |entry| {
+                self.freeCredEntry(entry.value_ptr.*);
+                self.allocator.free(entry.key_ptr.*);
+            }
+            self.credentials.clearRetainingCapacity();
+        }
+
+        const now = std.time.nanoTimestamp();
+        const owned_akid = self.allocator.dupe(u8, access_key_id) catch return;
+        const owned_secret = self.allocator.dupe(u8, secret_key) catch {
+            self.allocator.free(owned_akid);
+            return;
+        };
+        const owned_owner = self.allocator.dupe(u8, owner_id) catch {
+            self.allocator.free(owned_akid);
+            self.allocator.free(owned_secret);
+            return;
+        };
+        const owned_display = self.allocator.dupe(u8, display_name) catch {
+            self.allocator.free(owned_akid);
+            self.allocator.free(owned_secret);
+            self.allocator.free(owned_owner);
+            return;
+        };
+        const owned_created = self.allocator.dupe(u8, created_at) catch {
+            self.allocator.free(owned_akid);
+            self.allocator.free(owned_secret);
+            self.allocator.free(owned_owner);
+            self.allocator.free(owned_display);
+            return;
+        };
+
+        // If entry already exists, free the old one first.
+        if (self.credentials.fetchRemove(access_key_id)) |old| {
+            self.freeCredEntry(old.value);
+            self.allocator.free(old.key);
+        }
+
+        self.credentials.put(owned_akid, .{
+            .access_key_id = owned_akid,
+            .secret_key = owned_secret,
+            .owner_id = owned_owner,
+            .display_name = owned_display,
+            .created_at = owned_created,
+            .expires = now + credential_ttl_ns,
+        }) catch {
+            self.allocator.free(owned_akid);
+            self.allocator.free(owned_secret);
+            self.allocator.free(owned_owner);
+            self.allocator.free(owned_display);
+            self.allocator.free(owned_created);
+        };
+    }
+};
+
 /// Parsed components from the Authorization header.
 pub const AuthorizationComponents = struct {
     access_key: []const u8,
@@ -107,6 +332,7 @@ pub fn verifyHeaderAuth(
     header_values: []const []const u8,
     secret_key: []const u8,
     region: []const u8,
+    precomputed_signing_key: ?*const [HmacSha256.mac_length]u8,
 ) AuthError!void {
     // 1. Parse the Authorization header
     const components = parseAuthorizationHeader(authorization_header) orelse
@@ -173,7 +399,10 @@ pub fn verifyHeaderAuth(
     defer allocator.free(string_to_sign);
 
     // 9. Derive signing key and compute signature
-    const signing_key = deriveSigningKey(secret_key, components.date_stamp, components.region, components.service);
+    const signing_key = if (precomputed_signing_key) |pk|
+        pk.*
+    else
+        deriveSigningKey(secret_key, components.date_stamp, components.region, components.service);
 
     var sig_mac: [HmacSha256.mac_length]u8 = undefined;
     HmacSha256.create(&sig_mac, string_to_sign, &signing_key);
@@ -199,6 +428,7 @@ pub fn verifyPresignedAuth(
     header_values: []const []const u8,
     secret_key: []const u8,
     region: []const u8,
+    precomputed_signing_key: ?*const [HmacSha256.mac_length]u8,
 ) AuthError!void {
     // 1. Extract presigned query parameters
     const ps = parsePresignedParams(query) orelse
@@ -270,7 +500,10 @@ pub fn verifyPresignedAuth(
     defer allocator.free(string_to_sign);
 
     // 9. Derive signing key and compute signature
-    const signing_key = deriveSigningKey(secret_key, ps.date_stamp, ps.region, ps.service);
+    const signing_key = if (precomputed_signing_key) |pk|
+        pk.*
+    else
+        deriveSigningKey(secret_key, ps.date_stamp, ps.region, ps.service);
 
     var sig_mac: [HmacSha256.mac_length]u8 = undefined;
     HmacSha256.create(&sig_mac, string_to_sign, &signing_key);
@@ -374,7 +607,7 @@ fn extractField(rest: []const u8, field_prefix: []const u8) ?[]const u8 {
 }
 
 /// Parse presigned URL query parameters.
-fn parsePresignedParams(query: []const u8) ?PresignedComponents {
+pub fn parsePresignedParams(query: []const u8) ?PresignedComponents {
     const amz_date = getQueryParam(query, "X-Amz-Date") orelse return null;
     const credential_raw = getQueryParam(query, "X-Amz-Credential") orelse return null;
     const expires = getQueryParam(query, "X-Amz-Expires") orelse return null;

@@ -39,6 +39,12 @@ pub var global_auth_enabled: bool = true;
 /// allocator in the auth middleware to free credentials after verification.
 pub var global_allocator: ?std.mem.Allocator = null;
 
+/// Global auth cache for signing keys and credentials (set in main.zig).
+pub var global_auth_cache: ?*auth_mod.AuthCache = null;
+
+/// Global max object size (5 GiB default, configurable via server.max_object_size).
+pub var global_max_object_size: u64 = 5368709120;
+
 pub const ServerState = struct {
     allocator: std.mem.Allocator,
     config: config_mod.Config,
@@ -116,14 +122,48 @@ fn handleS3CatchAll(ctx: *tk.Context) anyerror!void {
     // Mark as responded so tokamak doesn't return 404 after us.
     ctx.responded = true;
 
-    // Handle Expect: 100-continue. boto3 sends this on PutObject requests.
-    // Without this, the client waits for "100 Continue" before sending the body,
-    // but the server processes the request immediately. The response gets
-    // misinterpreted by the client as it expects the 100 Continue first.
+    // Handle Expect: 100-continue. boto3 sends this on PUT/POST requests.
+    // We use lazy_read_size=1 so httpz doesn't block reading the body before
+    // calling us. Send "100 Continue" first, then read the body ourselves.
     if (req.header("expect")) |expect_val| {
         if (std.mem.eql(u8, expect_val, "100-continue")) {
             res.conn.writeAll("HTTP/1.1 100 Continue\r\n\r\n") catch {};
         }
+    }
+
+    // With lazy_read_size enabled, httpz defers body reading. Read the full
+    // body now (after 100-continue was sent) so req.body() works for handlers.
+    if (req.unread_body > 0) {
+        const content_length = req.body_len;
+        const req_alloc_body = res.arena;
+        const full_buf = try req_alloc_body.alloc(u8, content_length);
+
+        // Copy any partial body already received with headers.
+        var pos: usize = 0;
+        if (req.body_buffer) |bb| {
+            const partial = bb.data[0 .. content_length - req.unread_body];
+            @memcpy(full_buf[0..partial.len], partial);
+            pos = partial.len;
+        }
+
+        // Ensure socket is in blocking mode (required for lazy_read).
+        try req.conn.blockingMode();
+
+        // Read remaining bytes from the socket.
+        const socket = req.conn.stream.handle;
+        while (pos < content_length) {
+            const n = std.posix.read(socket, full_buf[pos..content_length]) catch |err| {
+                std.log.err("body read error: {}", .{err});
+                return err;
+            };
+            if (n == 0) break;
+            pos += n;
+        }
+
+        // Update request so req.body() returns the full body.
+        req.body_buffer = .{ .type = .static, .data = full_buf };
+        req.body_len = pos;
+        req.unread_body = 0;
     }
 
     // Increment HTTP request counter for S3 routes.
@@ -244,25 +284,43 @@ fn authenticateRequest(
         .none => unreachable,
     };
 
-    // Look up credentials from the metadata store
-    const cred_opt = ms.getCredential(access_key_id) catch {
-        return error.AccessDenied;
+    // Look up credentials — try cache first, then DB.
+    const secret_key: []const u8 = blk: {
+        if (global_auth_cache) |cache| {
+            if (cache.getCredential(access_key_id, req_alloc)) |snap| {
+                break :blk snap.secret_key; // duped to arena by getCredential
+            }
+        }
+        // Cache miss — query the metadata store.
+        const cred_opt = ms.getCredential(access_key_id) catch {
+            return error.AccessDenied;
+        };
+        const cred = cred_opt orelse return error.InvalidAccessKeyId;
+
+        // Copy the secret key to the arena allocator (lives for the request duration).
+        const sk = try req_alloc.dupe(u8, cred.secret_key);
+
+        // Populate cache before freeing GPA strings.
+        if (global_auth_cache) |cache| {
+            cache.putCredential(
+                cred.access_key_id,
+                cred.secret_key,
+                cred.owner_id,
+                cred.display_name,
+                cred.created_at,
+            );
+        }
+
+        // Free all GPA-allocated credential fields.
+        if (global_allocator) |gpa| {
+            gpa.free(cred.access_key_id);
+            gpa.free(cred.secret_key);
+            gpa.free(cred.owner_id);
+            gpa.free(cred.display_name);
+            gpa.free(cred.created_at);
+        }
+        break :blk sk;
     };
-    const cred = cred_opt orelse return error.InvalidAccessKeyId;
-
-    // Copy the secret key to the arena allocator (lives for the request duration).
-    // Then free the GPA-allocated credential strings to avoid leaks.
-    const secret_key = try req_alloc.dupe(u8, cred.secret_key);
-
-    // Free all GPA-allocated credential fields.
-    // The credential was allocated by SqliteMetadataStore using the GPA.
-    if (global_allocator) |gpa| {
-        gpa.free(cred.access_key_id);
-        gpa.free(cred.secret_key);
-        gpa.free(cred.owner_id);
-        gpa.free(cred.display_name);
-        gpa.free(cred.created_at);
-    }
 
     // Get the HTTP method as string
     const method_str = httpMethodToString(req.method);
@@ -276,6 +334,39 @@ fn authenticateRequest(
     const header_keys = req.headers.keys;
     const header_values = req.headers.values;
     const header_count = req.headers.len;
+
+    // Extract auth components for signing key cache lookup.
+    var date_stamp: []const u8 = "";
+    var region_for_cache: []const u8 = global_region;
+    var service_for_cache: []const u8 = "s3";
+
+    switch (auth_type) {
+        .header => {
+            if (auth_mod.parseAuthorizationHeader(auth_header.?)) |components| {
+                date_stamp = components.date_stamp;
+                region_for_cache = components.region;
+                service_for_cache = components.service;
+            }
+        },
+        .presigned => {
+            if (auth_mod.parsePresignedParams(query)) |ps| {
+                date_stamp = ps.date_stamp;
+                region_for_cache = ps.region;
+                service_for_cache = ps.service;
+            }
+        },
+        .none => unreachable,
+    }
+
+    // Try signing key cache.
+    var cached_key_buf: [32]u8 = undefined;
+    var precomputed_key: ?*const [32]u8 = null;
+    if (global_auth_cache) |cache| {
+        if (cache.getSigningKey(secret_key, date_stamp, region_for_cache, service_for_cache)) |k| {
+            cached_key_buf = k;
+            precomputed_key = &cached_key_buf;
+        }
+    }
 
     // Perform verification based on auth type
     switch (auth_type) {
@@ -309,6 +400,7 @@ fn authenticateRequest(
                 header_values[0..header_count],
                 secret_key,
                 global_region,
+                precomputed_key,
             ) catch |err| {
                 return err;
             };
@@ -324,11 +416,20 @@ fn authenticateRequest(
                 header_values[0..header_count],
                 secret_key,
                 global_region,
+                precomputed_key,
             ) catch |err| {
                 return err;
             };
         },
         .none => unreachable,
+    }
+
+    // On successful verification, cache the signing key for next request.
+    if (precomputed_key == null and date_stamp.len > 0) {
+        if (global_auth_cache) |cache| {
+            const derived = auth_mod.deriveSigningKey(secret_key, date_stamp, region_for_cache, service_for_cache);
+            cache.putSigningKey(secret_key, date_stamp, region_for_cache, service_for_cache, derived);
+        }
     }
 }
 
@@ -530,6 +631,11 @@ pub const Server = struct {
                 // Allow large request bodies for multipart uploads.
                 // Default httpz max_body_size is too small for 5MB+ parts.
                 .max_body_size = 128 * 1024 * 1024, // 128 MB
+                // Defer body reading so we can send "100 Continue" before
+                // the client sends the body. Without this, httpz blocks on
+                // socket read while the client waits for 100 Continue,
+                // causing a ~1s delay (boto3's Expect timeout).
+                .lazy_read_size = 1,
             },
         }) catch |err| {
             std.log.err("failed to init tokamak server: {}", .{err});

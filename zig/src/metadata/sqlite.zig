@@ -383,19 +383,56 @@ pub const SqliteMetadataStore = struct {
         const results = try self.allocator.alloc(bool, keys.len);
         errdefer self.allocator.free(results);
 
-        const sql = "DELETE FROM objects WHERE bucket = ?1 AND key = ?2;";
-        for (keys, 0..) |key, i| {
-            const stmt = try self.prepareStmt(sql);
-            defer self.finalizeStmt(stmt);
-            self.bindText(stmt, 1, bucket);
-            self.bindText(stmt, 2, key);
+        // S3 always reports all keys as deleted, so init all to true.
+        @memset(results, true);
 
-            const rc = c.sqlite3_step(stmt);
-            if (rc != c.SQLITE_DONE) {
-                results[i] = false;
-            } else {
-                results[i] = c.sqlite3_changes(self.db) > 0;
+        if (keys.len == 0) return results;
+
+        // Batch delete using DELETE ... WHERE key IN (?, ?, ...).
+        // SQLite max params = 999; reserve ?1 for bucket, so batch size = 998.
+        const batch_size: usize = 998;
+        var offset: usize = 0;
+        while (offset < keys.len) {
+            const end = @min(offset + batch_size, keys.len);
+            const batch = keys[offset..end];
+            const count = batch.len;
+
+            // Build SQL: "DELETE FROM objects WHERE bucket = ?1 AND key IN (?2, ?3, ...)"
+            var sql_buf = std.ArrayList(u8).empty;
+            defer sql_buf.deinit(self.allocator);
+            sql_buf.appendSlice(self.allocator, "DELETE FROM objects WHERE bucket = ?1 AND key IN (") catch {
+                offset = end;
+                continue;
+            };
+            for (0..count) |i| {
+                if (i > 0) sql_buf.append(self.allocator, ',') catch {};
+                const param_str = std.fmt.allocPrint(self.allocator, "?{d}", .{i + 2}) catch {
+                    break;
+                };
+                defer self.allocator.free(param_str);
+                sql_buf.appendSlice(self.allocator, param_str) catch {};
             }
+            sql_buf.appendSlice(self.allocator, ");") catch {};
+            sql_buf.append(self.allocator, 0) catch {}; // null terminator
+
+            // Prepare the dynamic SQL (raw C API since prepareStmt needs [*:0]const u8).
+            var stmt: ?*c.sqlite3_stmt = null;
+            const rc_prep = c.sqlite3_prepare_v2(self.db, @ptrCast(sql_buf.items.ptr), @intCast(sql_buf.items.len), &stmt, null);
+            if (rc_prep != c.SQLITE_OK or stmt == null) {
+                offset = end;
+                continue;
+            }
+            defer _ = c.sqlite3_finalize(stmt.?);
+
+            // Bind bucket as ?1.
+            self.bindText(stmt.?, 1, bucket);
+            // Bind each key.
+            for (batch, 0..) |key, i| {
+                self.bindText(stmt.?, @intCast(i + 2), key);
+            }
+
+            _ = c.sqlite3_step(stmt.?);
+            offset = end;
         }
         return results;
     }
