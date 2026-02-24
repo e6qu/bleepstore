@@ -1206,7 +1206,7 @@ async fn test_leader_failure_triggers_election() { /* kill leader, new election 
 
 ## Milestone 9: Performance & Hardening (Stage 15)
 
-### Stage 15: Performance Optimization & Production Readiness
+### Stage 15: Performance Optimization & Production Readiness ✅
 
 **Goal:** Streaming I/O, startup < 1s, memory < 50MB idle, performance within 2x of MinIO.
 

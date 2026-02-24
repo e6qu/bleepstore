@@ -29,4 +29,6 @@ pub struct AppState {
     pub metadata: Arc<dyn MetadataStore>,
     /// Object storage backend (local filesystem or cloud gateway).
     pub storage: Arc<dyn StorageBackend>,
+    /// SigV4 signing key and credential cache.
+    pub auth_cache: auth::AuthCache,
 }

@@ -1,5 +1,32 @@
 # BleepStore Rust — What We Did
 
+## Session 17 -- Stage 15: Performance Optimization & Production Readiness (2026-02-24)
+
+### Phase 1: SigV4 Signing Key & Credential Cache
+- **src/auth.rs**: Added `AuthCache` struct with `RwLock<HashMap>` for both signing keys (24h TTL) and credentials (60s TTL). Max 1000 entries each; full clear on overflow. Methods: `get_signing_key`, `put_signing_key`, `get_credential`, `put_credential`. Added `find_header_value_pub()` public wrapper.
+- **src/lib.rs**: Added `auth_cache: auth::AuthCache` field to `AppState`.
+- **src/main.rs**: Creates `AuthCache::new()` and passes to `AppState`.
+- **src/server.rs**: Auth middleware now checks cache before DB for credentials. After getting credential, checks signing key cache before calling `derive_signing_key()`. Inline signature verification using cached signing key (avoids redundant `verify_header_auth`/`verify_presigned_auth` calls that would re-derive the key).
+
+### Phase 2: Batch DeleteObjects SQL
+- **src/metadata/sqlite.rs**: Rewrote `delete_objects()` to use `DELETE FROM objects WHERE bucket = ?1 AND key IN (?2, ?3, ...)`. Batches of 998 keys (SQLite 999-param limit minus 1 for bucket). Uses `rusqlite::types::ToSql` boxed params with `params_from_iter`-style dynamic binding.
+- **src/handlers/object.rs**: Rewrote `delete_objects()` handler to call batch `state.metadata.delete_objects()` once, then loop only for storage file deletion.
+
+### Phase 3: Structured Logging CLI Flags & JSON Format
+- **Cargo.toml**: Added `json` feature to `tracing-subscriber`.
+- **src/config.rs**: Added `LoggingConfig { level, format }` with defaults (info/text). Added to top-level `Config`.
+- **src/main.rs**: Added `--log-level` and `--log-format` CLI args. Replaced `tracing_subscriber::fmt()` init with registry-based setup: `tracing_subscriber::registry().with(env_filter).with(fmt::layer())` or `.with(fmt::layer().json())`. CLI flags override config values. `RUST_LOG` env var still works via `EnvFilter`.
+
+### Phase 4: Production Config (Shutdown Timeout, Max Object Size)
+- **src/config.rs**: Added `shutdown_timeout: u64` (default 30) and `max_object_size: u64` (default 5 GiB) to `ServerConfig`.
+- **src/main.rs**: Added `--shutdown-timeout` and `--max-object-size` CLI args. CLI overrides applied after config load. Shutdown now spawns a background task that force-exits after timeout.
+- **src/handlers/object.rs**: `put_object()` checks `body.len() > max_object_size` → returns `EntityTooLarge`.
+- **src/handlers/multipart.rs**: `upload_part()` same check for part size.
+
+### Verification
+- `cargo test` -- 194 unit tests pass
+- `./run_e2e.sh` -- 86/86 E2E tests pass
+
 ## Session 16 -- Stage 11b: Azure Blob Storage Gateway Backend (2026-02-24)
 - **src/storage/azure.rs**: Full implementation of `AzureGatewayBackend` using `reqwest` + Azure Blob REST API:
   - All 10 `StorageBackend` trait methods implemented (put, get, delete, exists, copy_object, put_part, assemble_parts, delete_parts, create_bucket, delete_bucket)

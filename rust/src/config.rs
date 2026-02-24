@@ -30,6 +30,10 @@ pub struct Config {
     /// Cluster / replication settings.
     #[serde(default)]
     pub cluster: ClusterConfig,
+
+    /// Logging settings.
+    #[serde(default)]
+    pub logging: LoggingConfig,
 }
 
 /// HTTP listener configuration.
@@ -46,6 +50,14 @@ pub struct ServerConfig {
     /// AWS region to present (e.g. `us-east-1`).
     #[serde(default = "default_region")]
     pub region: String,
+
+    /// Graceful shutdown timeout in seconds.
+    #[serde(default = "default_shutdown_timeout")]
+    pub shutdown_timeout: u64,
+
+    /// Maximum object size in bytes (default 5 GiB).
+    #[serde(default = "default_max_object_size")]
+    pub max_object_size: u64,
 }
 
 impl Default for ServerConfig {
@@ -54,6 +66,29 @@ impl Default for ServerConfig {
             host: default_host(),
             port: default_port(),
             region: default_region(),
+            shutdown_timeout: default_shutdown_timeout(),
+            max_object_size: default_max_object_size(),
+        }
+    }
+}
+
+/// Logging configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LoggingConfig {
+    /// Log level: trace, debug, info, warn, error.
+    #[serde(default = "default_log_level")]
+    pub level: String,
+
+    /// Log format: text or json.
+    #[serde(default = "default_log_format")]
+    pub format: String,
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self {
+            level: default_log_level(),
+            format: default_log_format(),
         }
     }
 }
@@ -260,6 +295,22 @@ fn default_storage_backend() -> String {
 
 fn default_storage_root() -> String {
     "./data/objects".to_string()
+}
+
+fn default_shutdown_timeout() -> u64 {
+    30
+}
+
+fn default_max_object_size() -> u64 {
+    5_368_709_120 // 5 GiB
+}
+
+fn default_log_level() -> String {
+    "info".to_string()
+}
+
+fn default_log_format() -> String {
+    "text".to_string()
 }
 
 // -- Loader ------------------------------------------------------------------

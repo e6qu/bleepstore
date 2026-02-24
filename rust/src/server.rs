@@ -200,18 +200,28 @@ async fn auth_middleware(
             });
         }
         auth::AuthType::Header(parsed) => {
-            // Look up credential.
-            let credential = state
-                .metadata
-                .get_credential(&parsed.access_key_id)
-                .await
-                .map_err(S3Error::InternalError)?;
-
-            let credential = match credential {
-                Some(c) => c,
-                None => {
-                    debug!("Unknown access key: {}", parsed.access_key_id);
-                    return Err(S3Error::InvalidAccessKeyId);
+            // Look up credential (cache first, then DB).
+            let credential = if let Some(cached) =
+                state.auth_cache.get_credential(&parsed.access_key_id)
+            {
+                cached
+            } else {
+                let db_cred = state
+                    .metadata
+                    .get_credential(&parsed.access_key_id)
+                    .await
+                    .map_err(S3Error::InternalError)?;
+                match db_cred {
+                    Some(c) => {
+                        state
+                            .auth_cache
+                            .put_credential(&parsed.access_key_id, c.clone());
+                        c
+                    }
+                    None => {
+                        debug!("Unknown access key: {}", parsed.access_key_id);
+                        return Err(S3Error::InvalidAccessKeyId);
+                    }
                 }
             };
 
@@ -264,19 +274,56 @@ async fn auth_middleware(
                 hash
             };
 
-            // Verify the signature.
+            // Derive signing key (cache first, then compute).
+            let signing_key = if let Some(cached) = state.auth_cache.get_signing_key(
+                &credential.secret_key,
+                &parsed.date_stamp,
+                &parsed.region,
+                &parsed.service,
+            ) {
+                cached
+            } else {
+                let derived = auth::derive_signing_key(
+                    &credential.secret_key,
+                    &parsed.date_stamp,
+                    &parsed.region,
+                    &parsed.service,
+                );
+                state.auth_cache.put_signing_key(
+                    &credential.secret_key,
+                    &parsed.date_stamp,
+                    &parsed.region,
+                    &parsed.service,
+                    derived.clone(),
+                );
+                derived
+            };
+
+            // Build canonical request and string to sign.
             let method = req.method().as_str().to_string();
             let uri = req.uri().path().to_string();
 
-            let valid = auth::verify_header_auth(
+            let canonical_request = auth::build_canonical_request(
                 &method,
                 &uri,
                 &query_string,
                 &headers,
+                &parsed.signed_headers,
                 &payload_hash,
-                &parsed,
-                &credential.secret_key,
             );
+
+            let timestamp = auth::find_header_value_pub(&headers, "x-amz-date")
+                .or_else(|| auth::find_header_value_pub(&headers, "date"))
+                .unwrap_or_default();
+
+            let string_to_sign = auth::build_string_to_sign(
+                timestamp,
+                &parsed.credential_scope,
+                &canonical_request,
+            );
+
+            let computed = auth::compute_signature(&signing_key, &string_to_sign);
+            let valid = auth::constant_time_eq(&computed, &parsed.signature);
 
             if !valid {
                 debug!("Signature mismatch for access key {}", parsed.access_key_id);
@@ -286,18 +333,28 @@ async fn auth_middleware(
             debug!("Auth OK for access key {}", parsed.access_key_id);
         }
         auth::AuthType::Presigned(parsed) => {
-            // Look up credential.
-            let credential = state
-                .metadata
-                .get_credential(&parsed.access_key_id)
-                .await
-                .map_err(S3Error::InternalError)?;
-
-            let credential = match credential {
-                Some(c) => c,
-                None => {
-                    debug!("Unknown access key: {}", parsed.access_key_id);
-                    return Err(S3Error::InvalidAccessKeyId);
+            // Look up credential (cache first, then DB).
+            let credential = if let Some(cached) =
+                state.auth_cache.get_credential(&parsed.access_key_id)
+            {
+                cached
+            } else {
+                let db_cred = state
+                    .metadata
+                    .get_credential(&parsed.access_key_id)
+                    .await
+                    .map_err(S3Error::InternalError)?;
+                match db_cred {
+                    Some(c) => {
+                        state
+                            .auth_cache
+                            .put_credential(&parsed.access_key_id, c.clone());
+                        c
+                    }
+                    None => {
+                        debug!("Unknown access key: {}", parsed.access_key_id);
+                        return Err(S3Error::InvalidAccessKeyId);
+                    }
                 }
             };
 
@@ -312,6 +369,31 @@ async fn auth_middleware(
                 });
             }
 
+            // Derive signing key (cache first, then compute).
+            let signing_key = if let Some(cached) = state.auth_cache.get_signing_key(
+                &credential.secret_key,
+                &parsed.date_stamp,
+                &parsed.region,
+                &parsed.service,
+            ) {
+                cached
+            } else {
+                let derived = auth::derive_signing_key(
+                    &credential.secret_key,
+                    &parsed.date_stamp,
+                    &parsed.region,
+                    &parsed.service,
+                );
+                state.auth_cache.put_signing_key(
+                    &credential.secret_key,
+                    &parsed.date_stamp,
+                    &parsed.region,
+                    &parsed.service,
+                    derived.clone(),
+                );
+                derived
+            };
+
             // Extract headers for signing.
             let headers = auth::extract_headers_for_signing(req.headers());
 
@@ -319,14 +401,23 @@ async fn auth_middleware(
             let method = req.method().as_str().to_string();
             let uri = req.uri().path().to_string();
 
-            let valid = auth::verify_presigned_auth(
+            let canonical_request = auth::build_canonical_request(
                 &method,
                 &uri,
                 &query_string,
                 &headers,
-                &parsed,
-                &credential.secret_key,
+                &parsed.signed_headers,
+                "UNSIGNED-PAYLOAD",
             );
+
+            let string_to_sign = auth::build_string_to_sign(
+                &parsed.amz_date,
+                &parsed.credential_scope,
+                &canonical_request,
+            );
+
+            let computed = auth::compute_signature(&signing_key, &string_to_sign);
+            let valid = auth::constant_time_eq(&computed, &parsed.signature);
 
             if !valid {
                 debug!(

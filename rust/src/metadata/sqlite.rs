@@ -632,18 +632,29 @@ impl MetadataStore for SqliteMetadataStore {
         let keys = keys.to_vec();
         Box::pin(async move {
             let conn = self.conn.lock().expect("mutex poisoned");
-            let mut deleted = Vec::new();
-            for key in &keys {
-                let changes = conn.execute(
-                    "DELETE FROM objects WHERE bucket = ?1 AND key = ?2",
-                    params![bucket, key],
-                )?;
-                // S3 always reports the key as deleted even if it didn't exist,
-                // unless in quiet mode (handled at the handler level).
-                let _ = changes;
-                deleted.push(key.clone());
+            // Batch delete using DELETE...WHERE key IN (...).
+            // SQLite has a 999-variable limit; reserve 1 for bucket = 998 keys per batch.
+            const BATCH_SIZE: usize = 998;
+            for chunk in keys.chunks(BATCH_SIZE) {
+                let placeholders: Vec<String> = (0..chunk.len())
+                    .map(|i| format!("?{}", i + 2))
+                    .collect();
+                let sql = format!(
+                    "DELETE FROM objects WHERE bucket = ?1 AND key IN ({})",
+                    placeholders.join(", ")
+                );
+                let mut params: Vec<Box<dyn rusqlite::types::ToSql>> =
+                    Vec::with_capacity(chunk.len() + 1);
+                params.push(Box::new(bucket.clone()));
+                for k in chunk {
+                    params.push(Box::new(k.clone()));
+                }
+                let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                    params.iter().map(|p| p.as_ref()).collect();
+                conn.execute(&sql, param_refs.as_slice())?;
             }
-            Ok(deleted)
+            // S3 always reports all keys as deleted regardless of whether they existed.
+            Ok(keys)
         })
     }
 
