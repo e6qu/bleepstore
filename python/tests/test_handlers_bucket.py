@@ -11,7 +11,6 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from bleepstore.metadata.sqlite import SQLiteMetadataStore
 from bleepstore.storage.local import LocalStorageBackend
-from bleepstore.server import create_app
 
 
 # Use the session-scoped app from conftest but with function-scoped

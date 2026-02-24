@@ -33,6 +33,21 @@ from bleepstore.errors import (
     NotImplementedS3Error,
     PreconditionFailed,
 )
+from bleepstore.handlers.acl import (
+    acl_from_json,
+    acl_to_json,
+    build_default_acl,
+    parse_canned_acl,
+    render_acl_xml,
+)
+from bleepstore.validation import validate_max_keys, validate_object_key
+from bleepstore.xml_utils import (
+    render_copy_object_result,
+    render_delete_result,
+    render_list_objects_v1,
+    render_list_objects_v2,
+    xml_response,
+)
 
 
 def _iso_to_http_date(iso_str: str) -> str:
@@ -62,22 +77,6 @@ def _iso_to_http_date(iso_str: str) -> str:
         except (ValueError, TypeError):
             return iso_str
 
-
-from bleepstore.handlers.acl import (
-    acl_from_json,
-    acl_to_json,
-    build_default_acl,
-    parse_canned_acl,
-    render_acl_xml,
-)
-from bleepstore.validation import validate_max_keys, validate_object_key
-from bleepstore.xml_utils import (
-    render_copy_object_result,
-    render_delete_result,
-    render_list_objects_v1,
-    render_list_objects_v2,
-    xml_response,
-)
 
 logger = logging.getLogger(__name__)
 

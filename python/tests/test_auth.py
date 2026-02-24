@@ -20,7 +20,6 @@ from httpx import ASGITransport, AsyncClient
 
 from bleepstore.auth import (
     ALGORITHM,
-    EMPTY_SHA256,
     KEY_PREFIX,
     SCOPE_TERMINATOR,
     SERVICE_NAME,
@@ -32,7 +31,6 @@ from bleepstore.auth import (
     _uri_encode_path,
     derive_signing_key,
 )
-from bleepstore.config import AuthConfig
 from bleepstore.metadata.sqlite import SQLiteMetadataStore
 from bleepstore.storage.local import LocalStorageBackend
 
