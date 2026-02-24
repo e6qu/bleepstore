@@ -6,6 +6,8 @@ pub const ServerConfig = struct {
     region: []const u8 = "us-east-1",
     max_connections: u32 = 1024,
     request_timeout_ms: u64 = 30_000,
+    shutdown_timeout: u64 = 30,
+    max_object_size: u64 = 5368709120, // 5 GiB
 };
 
 pub const AuthConfig = struct {
@@ -47,6 +49,11 @@ pub const StorageConfig = struct {
     };
 };
 
+pub const LoggingConfig = struct {
+    level: []const u8 = "info",
+    format: []const u8 = "text",
+};
+
 pub const ClusterConfig = struct {
     enabled: bool = false,
     node_id: []const u8 = "",
@@ -63,6 +70,7 @@ pub const Config = struct {
     metadata: MetadataConfig = .{},
     storage: StorageConfig = .{},
     cluster: ClusterConfig = .{},
+    logging: LoggingConfig = .{},
 
     /// Backing buffer for string values loaded from file.
     /// When non-null, string fields in sub-configs point into this buffer.
@@ -172,6 +180,11 @@ fn applyConfigValue(cfg: *Config, key: []const u8, value: []const u8) void {
     } else if (std.mem.eql(u8, key, "server.region")) {
         cfg.server.region = value;
     }
+    else if (std.mem.eql(u8, key, "server.shutdown_timeout")) {
+        cfg.server.shutdown_timeout = std.fmt.parseInt(u64, value, 10) catch return;
+    } else if (std.mem.eql(u8, key, "server.max_object_size")) {
+        cfg.server.max_object_size = std.fmt.parseInt(u64, value, 10) catch return;
+    }
     // Auth settings
     else if (std.mem.eql(u8, key, "auth.enabled")) {
         cfg.auth.enabled = std.mem.eql(u8, value, "true");
@@ -239,6 +252,12 @@ fn applyConfigValue(cfg: *Config, key: []const u8, value: []const u8) void {
         cfg.cluster.election_timeout_ms = std.fmt.parseInt(u64, value, 10) catch return;
     } else if (std.mem.eql(u8, key, "cluster.heartbeat_interval_ms")) {
         cfg.cluster.heartbeat_interval_ms = std.fmt.parseInt(u64, value, 10) catch return;
+    }
+    // Logging settings
+    else if (std.mem.eql(u8, key, "logging.level")) {
+        cfg.logging.level = value;
+    } else if (std.mem.eql(u8, key, "logging.format")) {
+        cfg.logging.format = value;
     }
 }
 

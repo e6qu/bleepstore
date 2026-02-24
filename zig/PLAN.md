@@ -1111,7 +1111,7 @@ cd ../s3-compat-tests && python run_tests.py --endpoint http://localhost:9000
 
 ---
 
-## Stage 15: Performance & Hardening
+## Stage 15: Performance & Hardening ✅
 
 > **Global plan ref:** Milestone 9, Stage 15. Streaming I/O, memory optimization, graceful shutdown, benchmarks.
 

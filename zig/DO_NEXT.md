@@ -1,17 +1,15 @@
 # BleepStore Zig -- Do Next
 
-## Current State: Stage 11b COMPLETE -- Azure Blob Storage Gateway Backend
+## Current State: Stage 15 COMPLETE -- Performance Optimization & Production Readiness
 
-Azure gateway backend fully implemented. All 10 StorageBackend vtable methods proxy
-to real Azure Blob Storage via `std.http.Client` and the Azure Blob REST API. Config
-integration, environment variable auth (AZURE_ACCESS_TOKEN), backend factory in `main.zig`.
-
-All three cloud gateway backends (AWS, GCP, Azure) are now complete.
+SigV4 signing key cache (24h TTL), credential cache (60s TTL), batch DeleteObjects SQL,
+structured logging (runtime level + JSON format), shutdown timeout watchdog, max object
+size enforcement.
 
 - `zig build` -- clean
 - `zig build test` -- 160/160 pass, 0 leaks
 - `zig build e2e` -- 34/34 pass
-- Python E2E -- **85/86 pass** (1 known test bug)
+- Python E2E -- **86/86 pass**
 
 ## Next: Stage 12a -- Raft State Machine & Storage
 
@@ -42,4 +40,3 @@ zig build e2e          # Zig E2E tests
 ## Known Issues
 - `test_invalid_access_key` has hardcoded `endpoint_url="http://localhost:9000"` (test bug, per CLAUDE.md rule 6)
 - PutBucketAcl/PutObjectAcl with XML body not fully parsed (canned ACL via header works)
-- Python E2E tests should be re-run to confirm all bug fixes from Stage 9b

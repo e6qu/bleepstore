@@ -1,18 +1,16 @@
 # BleepStore Zig -- Status
 
-## Current Stage: Stage 11b COMPLETE -- Azure Blob Storage Gateway Backend
+## Current Stage: Stage 15 COMPLETE -- Performance Optimization & Production Readiness
 
 ## Zig Version: 0.15.2 (minimum: 0.15.0), ZLS: 0.15.1
 
-Migrated from std.http.Server to tokamak (on httpz). Added OpenAPI/Swagger UI,
-hand-rolled Prometheus metrics, S3 input validation, full SQLite metadata store,
-all 7 bucket CRUD handlers, all object CRUD handlers (including range, conditional,
-ACL), list/copy/batch delete handlers, full AWS SigV4 authentication, multipart
-upload core operations (create, upload part, abort, list uploads, list parts),
-multipart upload completion (CompleteMultipartUpload with part assembly,
-composite ETag, part validation), UploadPartCopy with URL-decoding and range
-support, and memory leak fixes -- all wired to both metadata store and local
-storage backend.
+Stage 15 adds performance optimization and production hardening:
+- **SigV4 signing key cache** (24h TTL) and **credential cache** (60s TTL) to avoid
+  per-request HMAC-SHA256 derivation and SQLite queries
+- **Batch DeleteObjects** using `DELETE ... WHERE key IN (?)` instead of per-key SQL
+- **Structured logging** with runtime log level (`--log-level`) and JSON format (`--log-format json`)
+- **Shutdown timeout** (`--shutdown-timeout`) with watchdog thread for hard exit
+- **Max object size** enforcement (`--max-object-size`, default 5 GiB) in PutObject and UploadPart
 
 Stage 9a integration testing is complete. Two critical runtime bugs were found
 and fixed. A standalone Zig-based E2E test suite (34 tests) was created to
@@ -25,6 +23,20 @@ failures. Three bugs were identified and fixed:
 Unit tests now pass at 134/134. Python E2E tests need to be re-run to verify fixes.
 
 ## What Works
+- **Stage 15: Performance Optimization & Production Readiness (Session 24):**
+  - **AuthCache** (`src/auth.zig`): `AuthCache` struct with `std.StringHashMap` for signing keys (24h TTL) and credentials (60s TTL). Thread-safe via `std.Thread.Mutex`. Cache eviction on overflow (max 1000 entries). Signing keys are stack values (`[32]u8`), no allocation. Credential cache owns duped strings, frees on eviction.
+  - **Signing key cache integration** (`src/server.zig`): `authenticateRequest` checks `global_auth_cache.getSigningKey()` before verification. On hit, passes precomputed key to `verifyHeaderAuth`/`verifyPresignedAuth` (skips `deriveSigningKey`). On miss, derives key after successful verification and caches it.
+  - **Credential cache integration** (`src/server.zig`): `authenticateRequest` checks `global_auth_cache.getCredential()` before DB query. On hit, skips SQLite lookup entirely. On miss, queries DB, populates cache, then frees GPA strings.
+  - **Batch DeleteObjects SQL** (`src/metadata/sqlite.zig`): Rewrote `deleteObjectsMeta` to use `DELETE FROM objects WHERE bucket = ?1 AND key IN (?2, ?3, ...)` with batches of 998 keys (SQLite 999-param limit). Previously ran separate DELETE per key.
+  - **Batch DeleteObjects handler** (`src/handlers/object.zig`): `deleteObjects` handler calls `ms.deleteObjectsMeta(bucket_name, keys)` once (batch), then loops only for per-key storage file deletion.
+  - **Structured logging** (`src/main.zig`): Custom `logFn` in `pub const std_options` with runtime level filtering and JSON format support. `std_options.log_level = .debug` allows all levels at compile time; `customLogFn` checks `runtime_log_level` at runtime. JSON format outputs `{"level":"...","scope":"...","ts":epoch,"msg":"..."}` to stderr.
+  - **CLI args**: `--log-level` (debug/info/warn/err), `--log-format` (text/json), `--shutdown-timeout` (seconds), `--max-object-size` (bytes).
+  - **Config keys**: `logging.level`, `logging.format`, `server.shutdown_timeout`, `server.max_object_size`.
+  - **Shutdown timeout** (`src/main.zig`): Watchdog thread polls `shutdown_requested`, then sleeps `shutdown_timeout` seconds and calls `std.process.exit(1)` for hard exit.
+  - **Max object size** (`src/handlers/object.zig`, `src/handlers/multipart.zig`): PutObject and UploadPart check `body.len > server.global_max_object_size` and return `EntityTooLarge` (HTTP 413). Default 5 GiB.
+  - `zig build test` -- 160/160 unit tests pass, 0 memory leaks.
+  - `zig build` -- clean, no errors.
+  - E2E -- **86/86 pass**.
 - **Stage 11b: Azure Blob Storage Gateway Backend (Session 23):**
   - **AzureGatewayBackend** (`src/storage/azure.zig`): Full implementation of all 10 StorageBackend vtable methods, proxying requests to a real Azure Blob Storage container via `std.http.Client` and the Azure Blob REST API.
   - **Key mapping**: Objects at `{prefix}{bucket}/{key}` in a single upstream Azure container.
@@ -248,7 +260,7 @@ Unit tests now pass at 134/134. Python E2E tests need to be re-run to verify fix
   - 4 multipart tests (basic upload, abort, list uploads, list parts)
   - 5 error tests (NoSuchBucket, NoSuchKey, BucketNotEmpty, request ID, key too long)
   - 2 ACL tests (bucket ACL, object ACL)
-- Python E2E -- **85/86 pass** (1 known test bug)
+- Python E2E -- **86/86 pass**
 - External conformance -- **PASS** (Snowflake s3compat, Ceph s3-tests, MinIO Mint patterns)
 
 ## Blockers

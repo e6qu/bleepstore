@@ -33,15 +33,88 @@ pub const cluster = struct {
 };
 
 pub const auth = @import("auth.zig");
+const auth_mod = @import("auth.zig");
 pub const xml = @import("xml.zig");
 pub const errors = @import("errors.zig");
 pub const validation = @import("validation.zig");
 pub const metrics = @import("metrics.zig");
 
+// ---------------------------------------------------------------------------
+// Runtime logging configuration
+// ---------------------------------------------------------------------------
+
+var runtime_log_level: std.log.Level = .info;
+var runtime_log_json: bool = false;
+
+/// Override std_options to allow all log levels at comptime and use our custom logFn.
+pub const std_options: std.Options = .{
+    .log_level = .debug, // compile-time max — runtime filtering in customLogFn
+    .logFn = customLogFn,
+};
+
+fn customLogFn(
+    comptime level: std.log.Level,
+    comptime scope: @TypeOf(.enum_literal),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    // Runtime level filter.
+    if (@intFromEnum(level) > @intFromEnum(runtime_log_level)) return;
+
+    if (runtime_log_json) {
+        // JSON format: {"level":"info","scope":"default","msg":"...","ts":epoch_s}
+        const level_str = comptime level.asText();
+        const scope_str = if (scope == .default) "default" else @tagName(scope);
+        const now = std.time.timestamp();
+
+        // Format the message into a stack buffer.
+        var msg_buf: [4096]u8 = undefined;
+        const msg = std.fmt.bufPrint(&msg_buf, format, args) catch "(message too long)";
+
+        // Use lockStderrWriter (Zig 0.15 API).
+        var lock_buf: [64]u8 = undefined;
+        const stderr = std.debug.lockStderrWriter(&lock_buf);
+        defer std.debug.unlockStderrWriter();
+
+        // Escape any quotes/backslashes in message for valid JSON.
+        nosuspend stderr.print("{{\"level\":\"{s}\",\"scope\":\"{s}\",\"ts\":{d},\"msg\":\"", .{ level_str, scope_str, now }) catch return;
+        for (msg) |ch| {
+            nosuspend switch (ch) {
+                '"' => stderr.writeAll("\\\"") catch return,
+                '\\' => stderr.writeAll("\\\\") catch return,
+                '\n' => stderr.writeAll("\\n") catch return,
+                '\r' => stderr.writeAll("\\r") catch return,
+                '\t' => stderr.writeAll("\\t") catch return,
+                else => stderr.writeByte(ch) catch return,
+            };
+        }
+        nosuspend stderr.writeAll("\"}\n") catch return;
+    } else {
+        // Default text format (matches std.log.defaultLog).
+        std.log.defaultLog(level, scope, format, args);
+    }
+}
+
+fn parseLogLevel(level_str: []const u8) std.log.Level {
+    if (std.mem.eql(u8, level_str, "debug")) return .debug;
+    if (std.mem.eql(u8, level_str, "info")) return .info;
+    if (std.mem.eql(u8, level_str, "warn") or std.mem.eql(u8, level_str, "warning")) return .warn;
+    if (std.mem.eql(u8, level_str, "err") or std.mem.eql(u8, level_str, "error")) return .err;
+    return .info;
+}
+
+// ---------------------------------------------------------------------------
+// CLI argument parsing
+// ---------------------------------------------------------------------------
+
 const CliArgs = struct {
     config_path: []const u8 = "bleepstore.yaml",
     port: ?u16 = null,
     host: ?[]const u8 = null,
+    log_level: ?[]const u8 = null,
+    log_format: ?[]const u8 = null,
+    shutdown_timeout: ?u64 = null,
+    max_object_size: ?u64 = null,
 };
 
 fn parseArgs(allocator: std.mem.Allocator) !CliArgs {
@@ -71,6 +144,34 @@ fn parseArgs(allocator: std.mem.Allocator) !CliArgs {
         } else if (std.mem.eql(u8, arg, "--host")) {
             cli.host = args_iter.next() orelse {
                 std.log.err("--host requires a value", .{});
+                return error.InvalidArgument;
+            };
+        } else if (std.mem.eql(u8, arg, "--log-level")) {
+            cli.log_level = args_iter.next() orelse {
+                std.log.err("--log-level requires a value", .{});
+                return error.InvalidArgument;
+            };
+        } else if (std.mem.eql(u8, arg, "--log-format")) {
+            cli.log_format = args_iter.next() orelse {
+                std.log.err("--log-format requires a value", .{});
+                return error.InvalidArgument;
+            };
+        } else if (std.mem.eql(u8, arg, "--shutdown-timeout")) {
+            const val = args_iter.next() orelse {
+                std.log.err("--shutdown-timeout requires a value", .{});
+                return error.InvalidArgument;
+            };
+            cli.shutdown_timeout = std.fmt.parseInt(u64, val, 10) catch {
+                std.log.err("invalid shutdown-timeout: {s}", .{val});
+                return error.InvalidArgument;
+            };
+        } else if (std.mem.eql(u8, arg, "--max-object-size")) {
+            const val = args_iter.next() orelse {
+                std.log.err("--max-object-size requires a value", .{});
+                return error.InvalidArgument;
+            };
+            cli.max_object_size = std.fmt.parseInt(u64, val, 10) catch {
+                std.log.err("invalid max-object-size: {s}", .{val});
                 return error.InvalidArgument;
             };
         } else {
@@ -128,6 +229,17 @@ pub fn main() !void {
     // CLI args override config file values
     if (cli.port) |p| cfg.server.port = p;
     if (cli.host) |h| cfg.server.host = h;
+    if (cli.log_level) |l| cfg.logging.level = l;
+    if (cli.log_format) |f| cfg.logging.format = f;
+    if (cli.shutdown_timeout) |t| cfg.server.shutdown_timeout = t;
+    if (cli.max_object_size) |s| cfg.server.max_object_size = s;
+
+    // Apply runtime log settings from config.
+    runtime_log_level = parseLogLevel(cfg.logging.level);
+    runtime_log_json = std.mem.eql(u8, cfg.logging.format, "json");
+
+    // Set global max object size for handler access.
+    server_mod.global_max_object_size = cfg.server.max_object_size;
 
     // Step 2: Initialize metrics (record start time)
     metrics_mod.initMetrics();
@@ -268,7 +380,12 @@ pub fn main() !void {
         if (azure_backend) |*azb| azb.deinit();
     }
 
-    // Step 6: Update metrics gauges from metadata store
+    // Step 6: Initialize auth cache for signing key and credential caching.
+    var auth_cache = auth_mod.AuthCache.init(allocator);
+    defer auth_cache.deinit();
+    server_mod.global_auth_cache = &auth_cache;
+
+    // Step 7: Update metrics gauges from metadata store
     if (metadata_store.metadataStore().countBuckets()) |count| {
         metrics_mod.setBucketsTotal(count);
     } else |_| {}
@@ -278,6 +395,12 @@ pub fn main() !void {
 
     // Install signal handlers (SIGTERM/SIGINT -> stop accepting, exit)
     installSignalHandlers();
+
+    // Spawn shutdown timeout watchdog thread: waits for shutdown_requested,
+    // then enforces a hard exit after shutdown_timeout seconds.
+    const shutdown_timeout_secs = cfg.server.shutdown_timeout;
+    const watchdog = std.Thread.spawn(.{}, shutdownWatchdog, .{shutdown_timeout_secs}) catch null;
+    if (watchdog) |t| t.detach();
 
     std.log.info("starting server on {s}:{d} (region: {s})", .{
         cfg.server.host,
@@ -292,6 +415,19 @@ pub fn main() !void {
         std.log.err("server error: {}", .{err});
         std.process.exit(1);
     };
+}
+
+/// Watchdog thread: polls shutdown_requested, then enforces hard exit.
+fn shutdownWatchdog(timeout_secs: u64) void {
+    // Poll until shutdown is requested (100ms intervals).
+    while (!server_mod.shutdown_requested.load(.acquire)) {
+        std.Thread.sleep(100 * std.time.ns_per_ms);
+    }
+    // Shutdown requested — allow graceful drain for timeout_secs, then hard exit.
+    std.log.info("shutdown requested, allowing {d}s for graceful drain", .{timeout_secs});
+    std.Thread.sleep(timeout_secs * std.time.ns_per_s);
+    std.log.warn("shutdown timeout expired, forcing exit", .{});
+    std.process.exit(1);
 }
 
 /// Ensure the parent directory for a given file path exists.
