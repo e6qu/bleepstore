@@ -179,8 +179,7 @@ fn applyConfigValue(cfg: *Config, key: []const u8, value: []const u8) void {
         cfg.server.port = std.fmt.parseInt(u16, value, 10) catch return;
     } else if (std.mem.eql(u8, key, "server.region")) {
         cfg.server.region = value;
-    }
-    else if (std.mem.eql(u8, key, "server.shutdown_timeout")) {
+    } else if (std.mem.eql(u8, key, "server.shutdown_timeout")) {
         cfg.server.shutdown_timeout = std.fmt.parseInt(u64, value, 10) catch return;
     } else if (std.mem.eql(u8, key, "server.max_object_size")) {
         cfg.server.max_object_size = std.fmt.parseInt(u64, value, 10) catch return;
