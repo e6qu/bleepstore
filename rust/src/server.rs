@@ -201,29 +201,28 @@ async fn auth_middleware(
         }
         auth::AuthType::Header(parsed) => {
             // Look up credential (cache first, then DB).
-            let credential = if let Some(cached) =
-                state.auth_cache.get_credential(&parsed.access_key_id)
-            {
-                cached
-            } else {
-                let db_cred = state
-                    .metadata
-                    .get_credential(&parsed.access_key_id)
-                    .await
-                    .map_err(S3Error::InternalError)?;
-                match db_cred {
-                    Some(c) => {
-                        state
-                            .auth_cache
-                            .put_credential(&parsed.access_key_id, c.clone());
-                        c
+            let credential =
+                if let Some(cached) = state.auth_cache.get_credential(&parsed.access_key_id) {
+                    cached
+                } else {
+                    let db_cred = state
+                        .metadata
+                        .get_credential(&parsed.access_key_id)
+                        .await
+                        .map_err(S3Error::InternalError)?;
+                    match db_cred {
+                        Some(c) => {
+                            state
+                                .auth_cache
+                                .put_credential(&parsed.access_key_id, c.clone());
+                            c
+                        }
+                        None => {
+                            debug!("Unknown access key: {}", parsed.access_key_id);
+                            return Err(S3Error::InvalidAccessKeyId);
+                        }
                     }
-                    None => {
-                        debug!("Unknown access key: {}", parsed.access_key_id);
-                        return Err(S3Error::InvalidAccessKeyId);
-                    }
-                }
-            };
+                };
 
             // Check clock skew using x-amz-date header.
             let amz_date = req
@@ -316,11 +315,8 @@ async fn auth_middleware(
                 .or_else(|| auth::find_header_value_pub(&headers, "date"))
                 .unwrap_or_default();
 
-            let string_to_sign = auth::build_string_to_sign(
-                timestamp,
-                &parsed.credential_scope,
-                &canonical_request,
-            );
+            let string_to_sign =
+                auth::build_string_to_sign(timestamp, &parsed.credential_scope, &canonical_request);
 
             let computed = auth::compute_signature(&signing_key, &string_to_sign);
             let valid = auth::constant_time_eq(&computed, &parsed.signature);
@@ -334,29 +330,28 @@ async fn auth_middleware(
         }
         auth::AuthType::Presigned(parsed) => {
             // Look up credential (cache first, then DB).
-            let credential = if let Some(cached) =
-                state.auth_cache.get_credential(&parsed.access_key_id)
-            {
-                cached
-            } else {
-                let db_cred = state
-                    .metadata
-                    .get_credential(&parsed.access_key_id)
-                    .await
-                    .map_err(S3Error::InternalError)?;
-                match db_cred {
-                    Some(c) => {
-                        state
-                            .auth_cache
-                            .put_credential(&parsed.access_key_id, c.clone());
-                        c
+            let credential =
+                if let Some(cached) = state.auth_cache.get_credential(&parsed.access_key_id) {
+                    cached
+                } else {
+                    let db_cred = state
+                        .metadata
+                        .get_credential(&parsed.access_key_id)
+                        .await
+                        .map_err(S3Error::InternalError)?;
+                    match db_cred {
+                        Some(c) => {
+                            state
+                                .auth_cache
+                                .put_credential(&parsed.access_key_id, c.clone());
+                            c
+                        }
+                        None => {
+                            debug!("Unknown access key: {}", parsed.access_key_id);
+                            return Err(S3Error::InvalidAccessKeyId);
+                        }
                     }
-                    None => {
-                        debug!("Unknown access key: {}", parsed.access_key_id);
-                        return Err(S3Error::InvalidAccessKeyId);
-                    }
-                }
-            };
+                };
 
             // Check presigned URL expiration.
             if !auth::check_presigned_expiration(&parsed.amz_date, parsed.expires) {
