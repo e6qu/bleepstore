@@ -58,6 +58,12 @@ pub struct AuthCache {
     credentials: RwLock<HashMap<String, CredCacheEntry>>,
 }
 
+impl Default for AuthCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AuthCache {
     /// Create a new empty cache.
     pub fn new() -> Self {
