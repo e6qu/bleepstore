@@ -46,7 +46,7 @@ func newTestObjectHandler(t *testing.T) *ObjectHandler {
 		t.Fatalf("CreateBucket storage failed: %v", err)
 	}
 
-	return NewObjectHandler(meta, store, "bleepstore", "bleepstore")
+	return NewObjectHandler(meta, store, "bleepstore", "bleepstore", 5368709120)
 }
 
 func TestPutAndGetObject(t *testing.T) {

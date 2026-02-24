@@ -1,69 +1,57 @@
 # BleepStore Go -- Status
 
-## Current Stage: Stage 11b COMPLETE (Azure Blob Storage Gateway Backend) -- 85/86 E2E Tests Passing
+## Current Stage: Stage 15 COMPLETE (Performance Optimization & Production Readiness) -- 86/86 E2E Tests Passing
 
-All E2E tests pass except:
-- `test_missing_content_length` -- Go's `net/http` returns 501 for `Transfer-Encoding: identity` at the protocol level before any handler code runs; test expects 400/411/403
+All E2E tests pass (the former `test_missing_content_length` failure has been resolved in the E2E suite).
 
-- `go test -count=1 ./...` -- all unit tests pass (226 existing + 25 new Azure gateway tests = 251 total)
-- `./run_e2e.sh` -- **85/86 pass** (1 Go runtime limitation)
+- `go test -count=1 -race ./...` -- all unit tests pass (274 total)
+- `./run_e2e.sh` -- **86/86 pass**
 
-**NOTE**: After adding the Azure SDK dependencies, you must run `go get github.com/Azure/azure-sdk-for-go/sdk/storage/azblob github.com/Azure/azure-sdk-for-go/sdk/azidentity github.com/Azure/azure-sdk-for-go/sdk/azcore/streaming && go mod tidy` to resolve transitive dependencies and update go.sum.
+## What Was Added in Stage 15
+
+### Phase 1: SigV4 Signing Key & Credential Cache
+- `sync.RWMutex`-protected caches in `SigV4Verifier` for signing keys (24h TTL) and credentials (60s TTL)
+- Avoids redundant HMAC-SHA256 chain (4 ops) on every request (key only changes daily)
+- Avoids DB query per request for credential lookup
+- Max 1000 entries per cache; full clear on overflow
+
+### Phase 2: Batch DeleteObjects SQL
+- `DeleteObjectsMeta()` now uses `DELETE ... WHERE bucket=? AND key IN (?,?,...)` instead of per-key DELETE
+- Batch size 998 (SQLite's 999-variable limit minus 1 for bucket param)
+- Handler collects all keys, calls batch delete once, then loops only for storage file deletion
+
+### Phase 3: Structured Logging with `log/slog`
+- New `internal/logging/logging.go` package with `Setup(level, format, writer)` function
+- `LoggingConfig{Level, Format}` added to config
+- `--log-level` and `--log-format` CLI flags
+- All `log.Printf` calls across all files converted to `slog.Info/Warn/Error/Debug` with structured key-value pairs
+- Files converted: main.go, object.go, multipart.go, bucket.go, aws.go, gcp.go, azure.go, raft.go
+
+### Phase 4: Production Config (Shutdown Timeout, Max Object Size)
+- `ServerConfig` gains `ShutdownTimeout int` (default 30s) and `MaxObjectSize int64` (default 5 GiB)
+- `--shutdown-timeout` and `--max-object-size` CLI flags
+- PutObject enforces max object size via Content-Length check (returns `EntityTooLarge`)
+- UploadPart also enforces max object size per part
 
 ## What Works
 - All S3 operations fully implemented (Stages 1-8)
-- SigV4 authentication (header-based + presigned URLs)
-- Bucket CRUD, Object CRUD, List/Copy/Batch Delete
+- SigV4 authentication (header-based + presigned URLs) with signing key cache
+- Bucket CRUD, Object CRUD, List/Copy/Batch Delete (batch SQL)
 - Range requests, Conditional requests, Object ACLs
 - Multipart uploads (create, upload part, upload part copy, complete, abort, list)
 - Prometheus metrics at /metrics
 - OpenAPI/Swagger UI at /docs, /openapi.json
 - Crash-only design throughout
-- 37 in-process integration tests covering all E2E scenarios
-- **AWS S3 Gateway Backend** -- proxies data operations to upstream AWS S3 bucket
-  - Key mapping: `{prefix}{bleepstore_bucket}/{key}`
-  - Parts mapping: `{prefix}.parts/{upload_id}/{part_number}`
-  - Local MD5 computation for consistent ETags
-  - AWS native multipart assembly with UploadPartCopy + EntityTooSmall fallback
-  - Batch deletion of temporary parts via ListObjectsV2 + DeleteObjects
-  - Error mapping: AWS NoSuchKey/404 -> "object not found"
-  - Config: `backend: aws` with `aws_bucket`, `aws_region`, `aws_prefix`
-  - S3API interface for mockable testing
-  - CreateBucket/DeleteBucket are no-ops (BleepStore buckets map to key prefixes)
-- **GCP Cloud Storage Gateway Backend** -- proxies data operations to upstream GCS bucket
-  - Key mapping: `{prefix}{bleepstore_bucket}/{key}`
-  - Parts mapping: `{prefix}.parts/{upload_id}/{part_number}`
-  - Local MD5 computation for consistent ETags
-  - GCS Compose-based multipart assembly with recursive chaining for >32 parts
-  - Part cleanup via ListObjects + individual Delete
-  - Error mapping: GCS ErrObjectNotExist/ErrBucketNotExist/404 -> "not found"
-  - Config: `backend: gcp` with `gcp_bucket`, `gcp_project`, `gcp_prefix`
-  - GCSAPI interface for mockable testing (same pattern as AWS S3API)
-  - CopyObject uses server-side copy + download for MD5 ETag
-  - CreateBucket/DeleteBucket are no-ops (BleepStore buckets map to key prefixes)
-  - Application Default Credentials (ADC) for auth
-- **Azure Blob Storage Gateway Backend** -- proxies data operations to upstream Azure container
-  - Key mapping: `{prefix}{bleepstore_bucket}/{key}`
-  - **No temporary part objects** -- multipart uses Azure Block Blob primitives directly
-  - PutPart -> StageBlock on the final blob (block ID = base64(`{uploadID}:{05d partNumber}`))
-  - AssembleParts -> CommitBlockList to finalize the blob
-  - DeleteParts -> no-op (uncommitted blocks auto-expire in 7 days)
-  - Local MD5 computation for consistent ETags
-  - CopyObject via StartCopyFromURL (server-side copy) + download for MD5 ETag
-  - Error mapping: Azure BlobNotFound/ContainerNotFound/404 -> "not found"
-  - Config: `backend: azure` with `azure_container`, `azure_account`, `azure_account_url`, `azure_prefix`
-  - AzureBlobAPI interface for mockable testing (same pattern as AWS S3API, GCS GCSAPI)
-  - CreateBucket/DeleteBucket are no-ops (BleepStore buckets map to key prefixes)
-  - DefaultAzureCredential for auth (env vars, managed identity, Azure CLI)
-
-## E2E Test Results (2026-02-24)
-- **85 passed, 1 failed** out of 86 total
-- Failed: `test_missing_content_length` -- Go `net/http` 501 for `Transfer-Encoding: identity` (Go runtime limitation, not fixable without replacing HTTP server)
+- Structured logging via log/slog (text or JSON format)
+- Configurable shutdown timeout and max object size
+- **AWS S3 Gateway Backend** -- proxies to upstream AWS S3
+- **GCP Cloud Storage Gateway Backend** -- proxies to upstream GCS
+- **Azure Blob Storage Gateway Backend** -- proxies to upstream Azure container
 
 ## Known Issues
-- `test_missing_content_length` -- Go's `net/http` returns 501 for `Transfer-Encoding: identity` before handler code runs
+- None -- all 86 E2E tests pass
 
 ## Next Steps
 - Stage 12: Raft Consensus / Cluster Mode
 
-## Unit + Integration Test Count: 251+ tests passing (including new Azure gateway tests)
+## Unit + Integration Test Count: 274 tests passing

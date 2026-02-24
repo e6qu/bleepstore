@@ -100,9 +100,10 @@ func New(cfg *config.Config, args ...interface{}) (*Server, error) {
 	}
 
 	// Create handlers with injected dependencies.
+	maxObjectSize := cfg.Server.MaxObjectSize
 	s.bucket = handlers.NewBucketHandler(s.meta, s.store, ownerID, ownerDisplay, region)
-	s.object = handlers.NewObjectHandler(s.meta, s.store, ownerID, ownerDisplay)
-	s.multi = handlers.NewMultipartHandler(s.meta, s.store, ownerID, ownerDisplay)
+	s.object = handlers.NewObjectHandler(s.meta, s.store, ownerID, ownerDisplay, maxObjectSize)
+	s.multi = handlers.NewMultipartHandler(s.meta, s.store, ownerID, ownerDisplay, maxObjectSize)
 
 	s.registerRoutes()
 	return s, nil

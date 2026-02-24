@@ -16,13 +16,24 @@ type Config struct {
 	Metadata MetadataConfig `yaml:"metadata"`
 	Storage  StorageConfig  `yaml:"storage"`
 	Cluster  ClusterConfig  `yaml:"cluster"`
+	Logging  LoggingConfig  `yaml:"logging"`
+}
+
+// LoggingConfig holds structured logging settings.
+type LoggingConfig struct {
+	// Level is the minimum log level: "debug", "info", "warn", "error".
+	Level string `yaml:"level"`
+	// Format is the log output format: "text" or "json".
+	Format string `yaml:"format"`
 }
 
 // ServerConfig holds HTTP server settings.
 type ServerConfig struct {
-	Host   string `yaml:"host"`
-	Port   int    `yaml:"port"`
-	Region string `yaml:"region"`
+	Host            string `yaml:"host"`
+	Port            int    `yaml:"port"`
+	Region          string `yaml:"region"`
+	ShutdownTimeout int    `yaml:"shutdown_timeout"` // Graceful shutdown timeout in seconds (default: 30).
+	MaxObjectSize   int64  `yaml:"max_object_size"`  // Maximum object size in bytes (default: 5 GiB).
 }
 
 // AuthConfig holds authentication and authorization settings.
@@ -133,9 +144,11 @@ func Load(path string) (*Config, error) {
 func defaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
-			Host:   "0.0.0.0",
-			Port:   9000,
-			Region: "us-east-1",
+			Host:            "0.0.0.0",
+			Port:            9000,
+			Region:          "us-east-1",
+			ShutdownTimeout: 30,
+			MaxObjectSize:   5368709120, // 5 GiB
 		},
 		Auth: AuthConfig{
 			AccessKey: "bleepstore",
@@ -179,6 +192,12 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Metadata.SQLite.Path == "" {
 		cfg.Metadata.SQLite.Path = "./data/metadata.db"
+	}
+	if cfg.Server.ShutdownTimeout == 0 {
+		cfg.Server.ShutdownTimeout = 30
+	}
+	if cfg.Server.MaxObjectSize == 0 {
+		cfg.Server.MaxObjectSize = 5368709120 // 5 GiB
 	}
 	if cfg.Storage.Backend == "" {
 		cfg.Storage.Backend = "local"

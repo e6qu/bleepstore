@@ -14,10 +14,32 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bleepstore/bleepstore/internal/metadata"
 )
+
+const (
+	// signingKeyTTL is the TTL for cached signing keys (24 hours).
+	signingKeyTTL = 24 * time.Hour
+	// credCacheTTL is the TTL for cached credential lookups (60 seconds).
+	credCacheTTL = 60 * time.Second
+	// maxCacheEntries is the maximum number of entries in each cache map.
+	maxCacheEntries = 1000
+)
+
+// signingKeyCacheEntry holds a cached signing key with its expiration.
+type signingKeyCacheEntry struct {
+	key       []byte
+	expiresAt time.Time
+}
+
+// credCacheEntry holds a cached credential record with its expiration.
+type credCacheEntry struct {
+	cred      *metadata.CredentialRecord
+	expiresAt time.Time
+}
 
 const (
 	// algorithm is the signing algorithm identifier.
@@ -86,14 +108,81 @@ type SigV4Verifier struct {
 	Meta metadata.MetadataStore
 	// Region is the AWS region used in the credential scope.
 	Region string
+
+	// signingKeys caches derived signing keys. Key format: "secretKey\x00dateStr\x00region\x00service".
+	signingKeyMu   sync.RWMutex
+	signingKeys    map[string]signingKeyCacheEntry
+
+	// credCache caches credential lookups by access key ID.
+	credCacheMu sync.RWMutex
+	credCache   map[string]credCacheEntry
 }
 
 // NewSigV4Verifier creates a new SigV4Verifier with the given metadata store and region.
 func NewSigV4Verifier(meta metadata.MetadataStore, region string) *SigV4Verifier {
 	return &SigV4Verifier{
-		Meta:   meta,
-		Region: region,
+		Meta:        meta,
+		Region:      region,
+		signingKeys: make(map[string]signingKeyCacheEntry),
+		credCache:   make(map[string]credCacheEntry),
 	}
+}
+
+// cachedDeriveSigningKey returns a cached signing key or derives and caches a new one.
+func (v *SigV4Verifier) cachedDeriveSigningKey(secretKey, dateStr, region, svc string) []byte {
+	cacheKey := secretKey + "\x00" + dateStr + "\x00" + region + "\x00" + svc
+	now := time.Now()
+
+	v.signingKeyMu.RLock()
+	if entry, ok := v.signingKeys[cacheKey]; ok && now.Before(entry.expiresAt) {
+		v.signingKeyMu.RUnlock()
+		return entry.key
+	}
+	v.signingKeyMu.RUnlock()
+
+	key := deriveSigningKey(secretKey, dateStr, region, svc)
+
+	v.signingKeyMu.Lock()
+	if len(v.signingKeys) >= maxCacheEntries {
+		// Clear entire map to avoid unbounded growth.
+		v.signingKeys = make(map[string]signingKeyCacheEntry)
+	}
+	v.signingKeys[cacheKey] = signingKeyCacheEntry{
+		key:       key,
+		expiresAt: now.Add(signingKeyTTL),
+	}
+	v.signingKeyMu.Unlock()
+
+	return key
+}
+
+// cachedGetCredential returns a cached credential or fetches and caches from the store.
+func (v *SigV4Verifier) cachedGetCredential(ctx context.Context, accessKeyID string) (*metadata.CredentialRecord, error) {
+	now := time.Now()
+
+	v.credCacheMu.RLock()
+	if entry, ok := v.credCache[accessKeyID]; ok && now.Before(entry.expiresAt) {
+		v.credCacheMu.RUnlock()
+		return entry.cred, nil
+	}
+	v.credCacheMu.RUnlock()
+
+	cred, err := v.Meta.GetCredential(ctx, accessKeyID)
+	if err != nil {
+		return nil, err
+	}
+
+	v.credCacheMu.Lock()
+	if len(v.credCache) >= maxCacheEntries {
+		v.credCache = make(map[string]credCacheEntry)
+	}
+	v.credCache[accessKeyID] = credCacheEntry{
+		cred:      cred,
+		expiresAt: now.Add(credCacheTTL),
+	}
+	v.credCacheMu.Unlock()
+
+	return cred, nil
 }
 
 // AuthError represents an authentication failure with an S3-compatible error code.
@@ -185,8 +274,8 @@ func (v *SigV4Verifier) VerifyRequest(r *http.Request) (*metadata.CredentialReco
 		return nil, &AuthError{Code: "AccessDenied", Message: fmt.Sprintf("Invalid Authorization header: %v", err)}
 	}
 
-	// Look up credential by access key ID.
-	cred, err := v.Meta.GetCredential(r.Context(), parsed.AccessKeyID)
+	// Look up credential by access key ID (cached).
+	cred, err := v.cachedGetCredential(r.Context(), parsed.AccessKeyID)
 	if err != nil {
 		return nil, &AuthError{Code: "InternalError", Message: "Failed to look up credentials"}
 	}
@@ -254,8 +343,8 @@ func (v *SigV4Verifier) VerifyRequest(r *http.Request) (*metadata.CredentialReco
 	scope := fmt.Sprintf("%s/%s/%s/%s", parsed.DateStr, parsed.Region, parsed.Service, scopeTerminator)
 	stringToSign := buildStringToSign(amzDate, scope, canonicalRequest)
 
-	// Derive signing key and compute expected signature.
-	signingKey := deriveSigningKey(cred.SecretKey, parsed.DateStr, parsed.Region, parsed.Service)
+	// Derive signing key (cached) and compute expected signature.
+	signingKey := v.cachedDeriveSigningKey(cred.SecretKey, parsed.DateStr, parsed.Region, parsed.Service)
 	expectedSignature := hex.EncodeToString(hmacSHA256(signingKey, stringToSign))
 
 	// Constant-time comparison.
@@ -335,8 +424,8 @@ func (v *SigV4Verifier) VerifyPresigned(r *http.Request) (*metadata.CredentialRe
 		return nil, &AuthError{Code: "SignatureDoesNotMatch", Message: "Credential date does not match X-Amz-Date"}
 	}
 
-	// Look up credential.
-	cred, err := v.Meta.GetCredential(r.Context(), accessKeyID)
+	// Look up credential (cached).
+	cred, err := v.cachedGetCredential(r.Context(), accessKeyID)
 	if err != nil {
 		return nil, &AuthError{Code: "InternalError", Message: "Failed to look up credentials"}
 	}
@@ -352,8 +441,8 @@ func (v *SigV4Verifier) VerifyPresigned(r *http.Request) (*metadata.CredentialRe
 	scope := fmt.Sprintf("%s/%s/%s/%s", dateStr, region, svc, scopeTerminator)
 	stringToSign := buildStringToSign(amzDate, scope, canonicalRequest)
 
-	// Derive signing key and compute expected signature.
-	signingKey := deriveSigningKey(cred.SecretKey, dateStr, region, svc)
+	// Derive signing key (cached) and compute expected signature.
+	signingKey := v.cachedDeriveSigningKey(cred.SecretKey, dateStr, region, svc)
 	expectedSignature := hex.EncodeToString(hmacSHA256(signingKey, stringToSign))
 
 	// Constant-time comparison.

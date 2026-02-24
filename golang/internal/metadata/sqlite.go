@@ -430,26 +430,46 @@ func (s *SQLiteStore) ObjectExists(ctx context.Context, bucket, key string) (boo
 	return count > 0, nil
 }
 
-// DeleteObjectsMeta removes metadata for multiple objects. Returns the
-// list of keys that were successfully deleted and any errors.
+// DeleteObjectsMeta removes metadata for multiple objects using batch SQL.
+// Returns the list of keys that were successfully deleted and any errors.
+// Uses batches of 998 keys to stay within SQLite's 999-variable limit.
 func (s *SQLiteStore) DeleteObjectsMeta(ctx context.Context, bucket string, keys []string) ([]string, []error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
+
 	var deleted []string
 	var errs []error
 
-	for _, key := range keys {
-		result, err := s.db.ExecContext(ctx,
-			`DELETE FROM objects WHERE bucket = ? AND key = ?`,
-			bucket, key,
-		)
+	const batchSize = 998 // SQLite 999-variable limit minus 1 for bucket
+
+	for i := 0; i < len(keys); i += batchSize {
+		end := i + batchSize
+		if end > len(keys) {
+			end = len(keys)
+		}
+		batch := keys[i:end]
+
+		// Build DELETE ... WHERE bucket=? AND key IN (?,?,...)
+		placeholders := make([]string, len(batch))
+		args := make([]interface{}, 0, len(batch)+1)
+		args = append(args, bucket)
+		for j, key := range batch {
+			placeholders[j] = "?"
+			args = append(args, key)
+		}
+
+		query := `DELETE FROM objects WHERE bucket = ? AND key IN (` + strings.Join(placeholders, ",") + `)`
+		_, err := s.db.ExecContext(ctx, query, args...)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("deleting %q: %w", key, err))
+			errs = append(errs, fmt.Errorf("batch deleting keys: %w", err))
 			continue
 		}
-		rows, _ := result.RowsAffected()
+
 		// S3 reports deletion even if the key didn't exist.
-		_ = rows
-		deleted = append(deleted, key)
+		deleted = append(deleted, batch...)
 	}
+
 	return deleted, errs
 }
 

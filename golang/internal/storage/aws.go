@@ -20,7 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -91,7 +91,7 @@ func NewAWSGatewayBackend(ctx context.Context, bucket, region, prefix string) (*
 		return nil, fmt.Errorf("cannot access upstream S3 bucket %q: %w", bucket, err)
 	}
 
-	log.Printf("AWS gateway backend initialized: bucket=%s region=%s prefix=%q", bucket, region, prefix)
+	slog.Info("AWS gateway backend initialized", "bucket", bucket, "region", region, "prefix", prefix)
 	return b, nil
 }
 
@@ -297,7 +297,7 @@ func (b *AWSGatewayBackend) AssembleParts(ctx context.Context, bucket, key, uplo
 			UploadId: aws.String(awsUploadID),
 		})
 		if abortErr != nil {
-			log.Printf("Warning: failed to abort AWS multipart upload %s: %v", awsUploadID, abortErr)
+			slog.Warn("Failed to abort AWS multipart upload", "upload_id", awsUploadID, "error", abortErr)
 		}
 	}
 

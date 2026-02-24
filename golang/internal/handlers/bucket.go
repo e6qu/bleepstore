@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/xml"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -48,7 +48,7 @@ func (h *BucketHandler) ListBuckets(w http.ResponseWriter, r *http.Request) {
 
 	buckets, err := h.meta.ListBuckets(ctx, h.ownerID)
 	if err != nil {
-		log.Printf("ListBuckets error: %v", err)
+		slog.Error("ListBuckets error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -108,7 +108,7 @@ func (h *BucketHandler) CreateBucket(w http.ResponseWriter, r *http.Request) {
 	// Check if bucket already exists.
 	existing, err := h.meta.GetBucket(ctx, bucketName)
 	if err != nil {
-		log.Printf("CreateBucket GetBucket error: %v", err)
+		slog.Error("CreateBucket GetBucket error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -143,14 +143,14 @@ func (h *BucketHandler) CreateBucket(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		log.Printf("CreateBucket metadata error: %v", err)
+		slog.Error("CreateBucket metadata error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
 
 	// Create the bucket directory in the storage backend.
 	if err := h.store.CreateBucket(ctx, bucketName); err != nil {
-		log.Printf("CreateBucket storage error: %v", err)
+		slog.Error("CreateBucket storage error", "error", err)
 		// Best effort: metadata is created, storage directory failed.
 		// Log but don't fail -- the directory will be created on first object write.
 	}
@@ -180,14 +180,14 @@ func (h *BucketHandler) DeleteBucket(w http.ResponseWriter, r *http.Request) {
 			xmlutil.WriteErrorResponse(w, r, s3err.ErrBucketNotEmpty)
 			return
 		}
-		log.Printf("DeleteBucket error: %v", err)
+		slog.Error("DeleteBucket error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
 
 	// Remove bucket directory from storage backend (best effort).
 	if err := h.store.DeleteBucket(ctx, bucketName); err != nil {
-		log.Printf("DeleteBucket storage cleanup error: %v", err)
+		slog.Error("DeleteBucket storage cleanup error", "error", err)
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -206,7 +206,7 @@ func (h *BucketHandler) HeadBucket(w http.ResponseWriter, r *http.Request) {
 
 	bucket, err := h.meta.GetBucket(ctx, bucketName)
 	if err != nil {
-		log.Printf("HeadBucket error: %v", err)
+		slog.Error("HeadBucket error", "error", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -234,7 +234,7 @@ func (h *BucketHandler) GetBucketLocation(w http.ResponseWriter, r *http.Request
 
 	bucket, err := h.meta.GetBucket(ctx, bucketName)
 	if err != nil {
-		log.Printf("GetBucketLocation error: %v", err)
+		slog.Error("GetBucketLocation error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -266,7 +266,7 @@ func (h *BucketHandler) GetBucketAcl(w http.ResponseWriter, r *http.Request) {
 
 	bucket, err := h.meta.GetBucket(ctx, bucketName)
 	if err != nil {
-		log.Printf("GetBucketAcl error: %v", err)
+		slog.Error("GetBucketAcl error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -306,7 +306,7 @@ func (h *BucketHandler) PutBucketAcl(w http.ResponseWriter, r *http.Request) {
 	// Verify bucket exists.
 	bucket, err := h.meta.GetBucket(ctx, bucketName)
 	if err != nil {
-		log.Printf("PutBucketAcl error: %v", err)
+		slog.Error("PutBucketAcl error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -346,7 +346,7 @@ func (h *BucketHandler) PutBucketAcl(w http.ResponseWriter, r *http.Request) {
 	// Store the ACL.
 	aclJSON := aclToJSON(acp)
 	if err := h.meta.UpdateBucketAcl(ctx, bucketName, aclJSON); err != nil {
-		log.Printf("PutBucketAcl update error: %v", err)
+		slog.Error("PutBucketAcl update error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -378,7 +378,7 @@ func parseCreateBucketRegion(body []byte, defaultRegion string) string {
 func (h *BucketHandler) ensureBucketExists(w http.ResponseWriter, r *http.Request, ctx context.Context, bucketName string) *metadata.BucketRecord {
 	bucket, err := h.meta.GetBucket(ctx, bucketName)
 	if err != nil {
-		log.Printf("ensureBucketExists error: %v", err)
+		slog.Error("ensureBucketExists error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return nil
 	}

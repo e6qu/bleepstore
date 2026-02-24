@@ -4,7 +4,7 @@ package cluster
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 )
 
 // RaftNode manages the lifecycle and operations of a single Raft consensus
@@ -40,7 +40,7 @@ func NewRaftNode(nodeID, bindAddr string, peers []string) *RaftNode {
 //   - Bootstrap the cluster if this is the first node, otherwise wait for
 //     leader to add this node.
 func (n *RaftNode) Start() error {
-	log.Printf("RaftNode %s: starting on %s with peers %v", n.NodeID, n.BindAddr, n.Peers)
+	slog.Info("RaftNode starting", "node_id", n.NodeID, "bind_addr", n.BindAddr, "peers", n.Peers)
 	// TODO: Implement Raft initialization.
 	return nil
 }
@@ -53,7 +53,7 @@ func (n *RaftNode) Start() error {
 //   - Shut down the Raft instance.
 //   - Close the transport.
 func (n *RaftNode) Stop() error {
-	log.Printf("RaftNode %s: stopping", n.NodeID)
+	slog.Info("RaftNode stopping", "node_id", n.NodeID)
 	// TODO: Implement graceful shutdown.
 	return nil
 }
@@ -70,7 +70,7 @@ func (n *RaftNode) Stop() error {
 //   - Wait for the apply future to complete.
 //   - Return any error from the FSM.
 func (n *RaftNode) Apply(command []byte) error {
-	log.Printf("RaftNode %s: applying command (%d bytes)", n.NodeID, len(command))
+	slog.Debug("RaftNode applying command", "node_id", n.NodeID, "bytes", len(command))
 	// TODO: Implement Raft log apply.
 	return fmt.Errorf("not implemented")
 }

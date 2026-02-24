@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -19,19 +19,21 @@ import (
 
 // MultipartHandler contains handlers for S3 multipart upload operations.
 type MultipartHandler struct {
-	meta         metadata.MetadataStore
-	store        storage.StorageBackend
-	ownerID      string
-	ownerDisplay string
+	meta          metadata.MetadataStore
+	store         storage.StorageBackend
+	ownerID       string
+	ownerDisplay  string
+	maxObjectSize int64
 }
 
 // NewMultipartHandler creates a new MultipartHandler with the given dependencies.
-func NewMultipartHandler(meta metadata.MetadataStore, store storage.StorageBackend, ownerID, ownerDisplay string) *MultipartHandler {
+func NewMultipartHandler(meta metadata.MetadataStore, store storage.StorageBackend, ownerID, ownerDisplay string, maxObjectSize int64) *MultipartHandler {
 	return &MultipartHandler{
-		meta:         meta,
-		store:        store,
-		ownerID:      ownerID,
-		ownerDisplay: ownerDisplay,
+		meta:          meta,
+		store:         store,
+		ownerID:       ownerID,
+		ownerDisplay:  ownerDisplay,
+		maxObjectSize: maxObjectSize,
 	}
 }
 
@@ -55,7 +57,7 @@ func (h *MultipartHandler) CreateMultipartUpload(w http.ResponseWriter, r *http.
 	// Verify bucket exists.
 	bucket, err := h.meta.GetBucket(ctx, bucketName)
 	if err != nil {
-		log.Printf("CreateMultipartUpload GetBucket error: %v", err)
+		slog.Error("CreateMultipartUpload GetBucket error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -118,7 +120,7 @@ func (h *MultipartHandler) CreateMultipartUpload(w http.ResponseWriter, r *http.
 
 	uploadID, err := h.meta.CreateMultipartUpload(ctx, upload)
 	if err != nil {
-		log.Printf("CreateMultipartUpload metadata error: %v", err)
+		slog.Error("CreateMultipartUpload metadata error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -167,10 +169,16 @@ func (h *MultipartHandler) UploadPart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Enforce max object size on individual parts.
+	if h.maxObjectSize > 0 && r.ContentLength > 0 && r.ContentLength > h.maxObjectSize {
+		xmlutil.WriteErrorResponse(w, r, s3err.ErrEntityTooLarge)
+		return
+	}
+
 	// Verify the upload exists.
 	upload, err := h.meta.GetMultipartUpload(ctx, bucketName, key, uploadID)
 	if err != nil {
-		log.Printf("UploadPart GetMultipartUpload error: %v", err)
+		slog.Error("UploadPart GetMultipartUpload error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -182,7 +190,7 @@ func (h *MultipartHandler) UploadPart(w http.ResponseWriter, r *http.Request) {
 	// Write part data to storage backend (atomic: temp-fsync-rename).
 	etag, err := h.store.PutPart(ctx, bucketName, key, uploadID, partNumber, r.Body, r.ContentLength)
 	if err != nil {
-		log.Printf("UploadPart storage error: %v", err)
+		slog.Error("UploadPart storage error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -220,7 +228,7 @@ func (h *MultipartHandler) UploadPart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.meta.PutPart(ctx, partRecord); err != nil {
-		log.Printf("UploadPart metadata error: %v", err)
+		slog.Error("UploadPart metadata error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -261,7 +269,7 @@ func (h *MultipartHandler) uploadPartCopy(w http.ResponseWriter, r *http.Request
 	// Verify the upload exists.
 	upload, err := h.meta.GetMultipartUpload(ctx, bucketName, key, uploadID)
 	if err != nil {
-		log.Printf("UploadPartCopy GetMultipartUpload error: %v", err)
+		slog.Error("UploadPartCopy GetMultipartUpload error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -273,7 +281,7 @@ func (h *MultipartHandler) uploadPartCopy(w http.ResponseWriter, r *http.Request
 	// Verify source bucket exists.
 	srcBucketRec, err := h.meta.GetBucket(ctx, srcBucket)
 	if err != nil {
-		log.Printf("UploadPartCopy GetBucket (src) error: %v", err)
+		slog.Error("UploadPartCopy GetBucket (src) error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -285,7 +293,7 @@ func (h *MultipartHandler) uploadPartCopy(w http.ResponseWriter, r *http.Request
 	// Get source object metadata.
 	srcObj, err := h.meta.GetObject(ctx, srcBucket, srcKey)
 	if err != nil {
-		log.Printf("UploadPartCopy GetObject (src) error: %v", err)
+		slog.Error("UploadPartCopy GetObject (src) error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -297,7 +305,7 @@ func (h *MultipartHandler) uploadPartCopy(w http.ResponseWriter, r *http.Request
 	// Open source object data from storage.
 	reader, _, _, err := h.store.GetObject(ctx, srcBucket, srcKey)
 	if err != nil {
-		log.Printf("UploadPartCopy GetObject storage error: %v", err)
+		slog.Error("UploadPartCopy GetObject storage error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -316,14 +324,14 @@ func (h *MultipartHandler) uploadPartCopy(w http.ResponseWriter, r *http.Request
 		// Seek to start position.
 		if seeker, seekOK := reader.(io.ReadSeeker); seekOK {
 			if _, seekErr := seeker.Seek(start, io.SeekStart); seekErr != nil {
-				log.Printf("UploadPartCopy seek error: %v", seekErr)
+				slog.Error("UploadPartCopy seek error", "error", seekErr)
 				xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 				return
 			}
 		} else {
 			// Discard bytes to reach start.
 			if _, discardErr := io.CopyN(io.Discard, reader, start); discardErr != nil {
-				log.Printf("UploadPartCopy discard error: %v", discardErr)
+				slog.Error("UploadPartCopy discard error", "error", discardErr)
 				xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 				return
 			}
@@ -336,7 +344,7 @@ func (h *MultipartHandler) uploadPartCopy(w http.ResponseWriter, r *http.Request
 	// Write part data to storage backend (atomic: temp-fsync-rename).
 	etag, err := h.store.PutPart(ctx, bucketName, key, uploadID, partNumber, partReader, -1)
 	if err != nil {
-		log.Printf("UploadPartCopy storage error: %v", err)
+		slog.Error("UploadPartCopy storage error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -362,7 +370,7 @@ func (h *MultipartHandler) uploadPartCopy(w http.ResponseWriter, r *http.Request
 	}
 
 	if err := h.meta.PutPart(ctx, partRecord); err != nil {
-		log.Printf("UploadPartCopy metadata error: %v", err)
+		slog.Error("UploadPartCopy metadata error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -396,7 +404,7 @@ func (h *MultipartHandler) CompleteMultipartUpload(w http.ResponseWriter, r *htt
 	// Verify the upload exists.
 	upload, err := h.meta.GetMultipartUpload(ctx, bucketName, key, uploadID)
 	if err != nil {
-		log.Printf("CompleteMultipartUpload GetMultipartUpload error: %v", err)
+		slog.Error("CompleteMultipartUpload GetMultipartUpload error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -408,7 +416,7 @@ func (h *MultipartHandler) CompleteMultipartUpload(w http.ResponseWriter, r *htt
 	// Parse the request body: <CompleteMultipartUpload> XML.
 	parts, err := parseCompleteMultipartXML(r.Body)
 	if err != nil {
-		log.Printf("CompleteMultipartUpload XML parse error: %v", err)
+		slog.Error("CompleteMultipartUpload XML parse error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrMalformedXML)
 		return
 	}
@@ -435,7 +443,7 @@ func (h *MultipartHandler) CompleteMultipartUpload(w http.ResponseWriter, r *htt
 	// Fetch stored part records from metadata.
 	storedParts, err := h.meta.GetPartsForCompletion(ctx, uploadID, partNumbers)
 	if err != nil {
-		log.Printf("CompleteMultipartUpload GetPartsForCompletion error: %v", err)
+		slog.Error("CompleteMultipartUpload GetPartsForCompletion error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -473,7 +481,7 @@ func (h *MultipartHandler) CompleteMultipartUpload(w http.ResponseWriter, r *htt
 	// Assemble part files into the final object via the storage backend.
 	compositeETag, err := h.store.AssembleParts(ctx, bucketName, key, uploadID, partNumbers)
 	if err != nil {
-		log.Printf("CompleteMultipartUpload AssembleParts error: %v", err)
+		slog.Error("CompleteMultipartUpload AssembleParts error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -506,7 +514,7 @@ func (h *MultipartHandler) CompleteMultipartUpload(w http.ResponseWriter, r *htt
 
 	// Finalize in metadata: insert object, delete parts and upload record (transactional).
 	if err := h.meta.CompleteMultipartUpload(ctx, bucketName, key, uploadID, obj); err != nil {
-		log.Printf("CompleteMultipartUpload metadata error: %v", err)
+		slog.Error("CompleteMultipartUpload metadata error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -544,7 +552,7 @@ func (h *MultipartHandler) AbortMultipartUpload(w http.ResponseWriter, r *http.R
 	// Verify the upload exists.
 	upload, err := h.meta.GetMultipartUpload(ctx, bucketName, key, uploadID)
 	if err != nil {
-		log.Printf("AbortMultipartUpload GetMultipartUpload error: %v", err)
+		slog.Error("AbortMultipartUpload GetMultipartUpload error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -555,7 +563,7 @@ func (h *MultipartHandler) AbortMultipartUpload(w http.ResponseWriter, r *http.R
 
 	// Delete part files from storage (best-effort).
 	if err := h.store.DeleteParts(ctx, bucketName, key, uploadID); err != nil {
-		log.Printf("AbortMultipartUpload storage error: %v", err)
+		slog.Error("AbortMultipartUpload storage error", "error", err)
 		// Don't fail the request — metadata deletion is authoritative.
 	}
 
@@ -565,7 +573,7 @@ func (h *MultipartHandler) AbortMultipartUpload(w http.ResponseWriter, r *http.R
 			xmlutil.WriteErrorResponse(w, r, s3err.ErrNoSuchUpload)
 			return
 		}
-		log.Printf("AbortMultipartUpload metadata error: %v", err)
+		slog.Error("AbortMultipartUpload metadata error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -588,7 +596,7 @@ func (h *MultipartHandler) ListMultipartUploads(w http.ResponseWriter, r *http.R
 	// Verify bucket exists.
 	bucket, err := h.meta.GetBucket(ctx, bucketName)
 	if err != nil {
-		log.Printf("ListMultipartUploads GetBucket error: %v", err)
+		slog.Error("ListMultipartUploads GetBucket error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -620,7 +628,7 @@ func (h *MultipartHandler) ListMultipartUploads(w http.ResponseWriter, r *http.R
 
 	listResult, err := h.meta.ListMultipartUploads(ctx, bucketName, opts)
 	if err != nil {
-		log.Printf("ListMultipartUploads error: %v", err)
+		slog.Error("ListMultipartUploads error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -685,7 +693,7 @@ func (h *MultipartHandler) ListParts(w http.ResponseWriter, r *http.Request) {
 	// Verify the upload exists.
 	upload, err := h.meta.GetMultipartUpload(ctx, bucketName, key, uploadID)
 	if err != nil {
-		log.Printf("ListParts GetMultipartUpload error: %v", err)
+		slog.Error("ListParts GetMultipartUpload error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -716,7 +724,7 @@ func (h *MultipartHandler) ListParts(w http.ResponseWriter, r *http.Request) {
 
 	listResult, err := h.meta.ListParts(ctx, uploadID, opts)
 	if err != nil {
-		log.Printf("ListParts error: %v", err)
+		slog.Error("ListParts error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}

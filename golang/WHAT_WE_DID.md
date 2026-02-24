@@ -1,5 +1,62 @@
 # BleepStore Go -- What We Did
 
+## Session 18 -- Stage 15: Performance Optimization & Production Readiness (2026-02-24)
+
+### What was implemented:
+
+**Phase 1: SigV4 Signing Key & Credential Cache** (`internal/auth/sigv4.go`)
+- Added `sync.RWMutex`-protected cache maps to `SigV4Verifier`: `signingKeys` (24h TTL) and `credCache` (60s TTL)
+- `cachedDeriveSigningKey()` avoids recomputing 4 HMAC-SHA256 ops per request (signing key only changes daily)
+- `cachedGetCredential()` avoids DB query per request for credential lookup
+- Both caches have max 1000 entries; full map clear on overflow
+- Updated `VerifyRequest()` and `VerifyPresigned()` to use cached versions
+
+**Phase 2: Batch DeleteObjects SQL** (`internal/metadata/sqlite.go`, `internal/handlers/object.go`)
+- Rewrote `DeleteObjectsMeta()` to use `DELETE FROM objects WHERE bucket=? AND key IN (?,?,...)` instead of per-key DELETE loops
+- Batch size 998 (SQLite's 999-variable limit minus 1 for bucket parameter)
+- Rewrote `DeleteObjects()` handler to collect all keys, call batch metadata delete once, then loop only for storage file deletion
+
+**Phase 3: Structured Logging with `log/slog`**
+- Created `internal/logging/logging.go` package with `Setup(level, format, writer)` function
+- Added `LoggingConfig{Level, Format}` to `config.Config`
+- Added `--log-level` and `--log-format` CLI flags to main.go
+- Converted all `log.Printf` calls to `slog.Info/Warn/Error/Debug` with structured key-value pairs across:
+  - `cmd/bleepstore/main.go` (~10 calls)
+  - `internal/handlers/object.go` (~31 calls)
+  - `internal/handlers/multipart.go` (~25 calls)
+  - `internal/handlers/bucket.go` (~12 calls)
+  - `internal/storage/aws.go`, `gcp.go`, `azure.go` (~5 calls)
+  - `internal/cluster/raft.go` (~3 calls)
+
+**Phase 4: Production Config (Shutdown Timeout, Max Object Size)**
+- Added `ShutdownTimeout int` (default 30) and `MaxObjectSize int64` (default 5 GiB) to `ServerConfig`
+- Added `--shutdown-timeout` and `--max-object-size` CLI flags
+- Server shutdown uses configurable timeout instead of hardcoded 30s
+- PutObject enforces max object size via Content-Length check (returns `EntityTooLarge`)
+- UploadPart also enforces max object size per part
+- Handler constructors updated: `NewObjectHandler()` and `NewMultipartHandler()` accept `maxObjectSize int64`
+
+### Test results:
+- `go test ./... -v -race` -- 274 unit tests pass
+- `./run_e2e.sh` -- **86/86 E2E tests pass**
+
+### Files changed:
+- `internal/auth/sigv4.go` -- signing key & credential caching
+- `internal/metadata/sqlite.go` -- batch DELETE SQL
+- `internal/handlers/object.go` -- batch delete handler, slog, max object size
+- `internal/handlers/multipart.go` -- slog, max object size
+- `internal/handlers/bucket.go` -- slog
+- `internal/storage/aws.go` -- slog
+- `internal/storage/gcp.go` -- slog
+- `internal/storage/azure.go` -- slog
+- `internal/cluster/raft.go` -- slog
+- `internal/config/config.go` -- LoggingConfig, ShutdownTimeout, MaxObjectSize
+- `internal/server/server.go` -- pass maxObjectSize to handlers
+- `cmd/bleepstore/main.go` -- CLI flags, logging setup, slog
+- NEW `internal/logging/logging.go` -- structured logging setup
+
+---
+
 ## Session 17 -- Stage 11b: Azure Blob Storage Gateway Backend (2026-02-24)
 
 ### What was implemented:

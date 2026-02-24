@@ -37,8 +37,8 @@ func newTestMultipartHandler(t *testing.T) (*MultipartHandler, *ObjectHandler, m
 		t.Fatalf("NewLocalBackend failed: %v", err)
 	}
 
-	mh := NewMultipartHandler(meta, store, "bleepstore", "bleepstore")
-	oh := NewObjectHandler(meta, store, "bleepstore", "bleepstore")
+	mh := NewMultipartHandler(meta, store, "bleepstore", "bleepstore", 5368709120)
+	oh := NewObjectHandler(meta, store, "bleepstore", "bleepstore", 5368709120)
 
 	return mh, oh, meta, store
 }

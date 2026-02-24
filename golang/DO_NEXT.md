@@ -1,24 +1,13 @@
 # BleepStore Go -- Do Next
 
-## Current State: Stage 11b COMPLETE (Azure Blob Storage Gateway Backend) -- 85/86 E2E Tests Passing
+## Current State: Stage 15 COMPLETE (Performance Optimization & Production Readiness) -- 86/86 E2E Tests Passing
 
-All E2E tests pass except `test_missing_content_length` (Go runtime limitation).
-
-- `go test -count=1 ./...` -- all unit tests pass (251 total: 226 existing + 25 new Azure gateway tests)
-- `./run_e2e.sh` -- **85/86 pass**
-- Azure gateway backend fully implemented with mocked unit tests
-- GCP gateway backend fully implemented with mocked unit tests
-- AWS gateway backend fully implemented with mocked unit tests
-- All three cloud gateway backends (AWS, GCP, Azure) complete
-
-**IMPORTANT**: After adding Azure SDK deps, run:
-```bash
-cd /Users/zardoz/projects/bleepstore/golang
-go get github.com/Azure/azure-sdk-for-go/sdk/storage/azblob github.com/Azure/azure-sdk-for-go/sdk/azidentity github.com/Azure/azure-sdk-for-go/sdk/azcore/streaming
-go mod tidy
-go test -count=1 ./...
-./run_e2e.sh
-```
+- `go test -count=1 -race ./...` -- all unit tests pass (274 total)
+- `./run_e2e.sh` -- **86/86 pass**
+- SigV4 signing key and credential caching implemented
+- Batch DeleteObjects SQL implemented
+- Structured logging via log/slog implemented
+- Production config (shutdown timeout, max object size) implemented
 
 ## Next: Stage 12a -- Raft State Machine & Storage
 
@@ -40,9 +29,9 @@ github.com/hashicorp/raft-boltdb/v2
 ### Run Tests
 ```bash
 cd /Users/zardoz/projects/bleepstore/golang
-go test -count=1 ./...
+go test -count=1 -race ./...
 ./run_e2e.sh
 ```
 
 ## Known Issues
-- `test_missing_content_length`: Go's `net/http` returns 501 for `Transfer-Encoding: identity` at protocol level before handler code runs; test expects 400/411/403
+- None -- all 86 E2E tests pass

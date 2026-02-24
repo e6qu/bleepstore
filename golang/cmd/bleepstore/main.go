@@ -5,7 +5,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/bleepstore/bleepstore/internal/config"
+	"github.com/bleepstore/bleepstore/internal/logging"
 	"github.com/bleepstore/bleepstore/internal/metadata"
 	"github.com/bleepstore/bleepstore/internal/server"
 	"github.com/bleepstore/bleepstore/internal/storage"
@@ -23,6 +24,10 @@ func main() {
 	configPath := flag.String("config", "config.yaml", "path to configuration file")
 	port := flag.Int("port", 0, "override listening port (default: from config or 9000)")
 	host := flag.String("host", "", "override listening host (default: from config or 0.0.0.0)")
+	logLevel := flag.String("log-level", "", "log level: debug, info, warn, error (default: from config or info)")
+	logFormat := flag.String("log-format", "", "log format: text, json (default: from config or text)")
+	shutdownTimeout := flag.Int("shutdown-timeout", 0, "graceful shutdown timeout in seconds (default: from config or 30)")
+	maxObjectSize := flag.Int64("max-object-size", 0, "maximum object size in bytes (default: from config or 5368709120)")
 	flag.Parse()
 
 	cfg, err := config.Load(*configPath)
@@ -38,6 +43,21 @@ func main() {
 	if *host != "" {
 		cfg.Server.Host = *host
 	}
+	if *logLevel != "" {
+		cfg.Logging.Level = *logLevel
+	}
+	if *logFormat != "" {
+		cfg.Logging.Format = *logFormat
+	}
+	if *shutdownTimeout != 0 {
+		cfg.Server.ShutdownTimeout = *shutdownTimeout
+	}
+	if *maxObjectSize != 0 {
+		cfg.Server.MaxObjectSize = *maxObjectSize
+	}
+
+	// Initialize structured logging.
+	logging.Setup(cfg.Logging.Level, cfg.Logging.Format, os.Stderr)
 
 	// Crash-only design: every startup is recovery.
 	// No special recovery mode. Steps that would normally be "recovery" run on
@@ -87,7 +107,7 @@ func main() {
 			os.Exit(1)
 		}
 		storageBackend = awsBackend
-		log.Printf("Storage backend: aws (bucket=%s region=%s prefix=%q)", awsBucket, awsRegion, awsPrefix)
+		slog.Info("Storage backend initialized", "backend", "aws", "bucket", awsBucket, "region", awsRegion, "prefix", awsPrefix)
 	case "gcp":
 		gcpBucket := cfg.Storage.GCPBucket
 		gcpProject := cfg.Storage.GCPProject
@@ -102,7 +122,7 @@ func main() {
 			os.Exit(1)
 		}
 		storageBackend = gcpBackend
-		log.Printf("Storage backend: gcp (bucket=%s project=%s prefix=%q)", gcpBucket, gcpProject, gcpPrefix)
+		slog.Info("Storage backend initialized", "backend", "gcp", "bucket", gcpBucket, "project", gcpProject, "prefix", gcpPrefix)
 	case "azure":
 		azureContainer := cfg.Storage.AzureContainer
 		azureAccount := cfg.Storage.AzureAccount
@@ -126,7 +146,7 @@ func main() {
 			os.Exit(1)
 		}
 		storageBackend = azureBackend
-		log.Printf("Storage backend: azure (container=%s account=%s prefix=%q)", azureContainer, azureAccountURL, azurePrefix)
+		slog.Info("Storage backend initialized", "backend", "azure", "container", azureContainer, "account", azureAccountURL, "prefix", azurePrefix)
 	default:
 		// Default to local filesystem backend.
 		storageRoot := cfg.Storage.Local.RootDir
@@ -141,10 +161,10 @@ func main() {
 		}
 		// Crash-only recovery: clean orphan temp files from incomplete writes.
 		if err := localBackend.CleanTempFiles(); err != nil {
-			log.Printf("Warning: failed to clean temp files: %v", err)
+			slog.Warn("Failed to clean temp files", "error", err)
 		}
 		storageBackend = localBackend
-		log.Printf("Storage backend: local (%s)", storageRoot)
+		slog.Info("Storage backend initialized", "backend", "local", "root", storageRoot)
 	}
 
 	srv, err := server.New(cfg, metaStore, server.WithStorageBackend(storageBackend))
@@ -158,7 +178,7 @@ func main() {
 	// Start the server in a goroutine so we can handle shutdown signals.
 	errCh := make(chan error, 1)
 	go func() {
-		log.Printf("BleepStore listening on %s", addr)
+		slog.Info("BleepStore listening", "addr", addr)
 		if err := srv.ListenAndServe(addr); err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}
@@ -172,16 +192,16 @@ func main() {
 
 	select {
 	case sig := <-sigCh:
-		log.Printf("Received signal %v, shutting down...", sig)
+		slog.Info("Received signal, shutting down", "signal", sig)
 
-		// Give in-flight requests up to 30 seconds to complete.
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		// Give in-flight requests time to complete.
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Server.ShutdownTimeout)*time.Second)
 		defer cancel()
 
 		if err := srv.Shutdown(ctx); err != nil {
-			log.Printf("Shutdown error: %v", err)
+			slog.Error("Shutdown error", "error", err)
 		}
-		log.Printf("Server stopped.")
+		slog.Info("Server stopped")
 
 	case err := <-errCh:
 		if err != nil {
@@ -218,6 +238,6 @@ func seedDefaultCredentials(store *metadata.SQLiteStore, cfg *config.Config) err
 	if err := store.PutCredential(ctx, cred); err != nil {
 		return fmt.Errorf("seeding default credential: %w", err)
 	}
-	log.Printf("Seeded default credentials for access key %q", cfg.Auth.AccessKey)
+	slog.Info("Seeded default credentials", "access_key", cfg.Auth.AccessKey)
 	return nil
 }

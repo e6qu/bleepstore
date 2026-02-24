@@ -6,7 +6,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -20,19 +20,21 @@ import (
 
 // ObjectHandler contains handlers for S3 object-level operations.
 type ObjectHandler struct {
-	meta         metadata.MetadataStore
-	store        storage.StorageBackend
-	ownerID      string
-	ownerDisplay string
+	meta          metadata.MetadataStore
+	store         storage.StorageBackend
+	ownerID       string
+	ownerDisplay  string
+	maxObjectSize int64
 }
 
 // NewObjectHandler creates a new ObjectHandler with the given dependencies.
-func NewObjectHandler(meta metadata.MetadataStore, store storage.StorageBackend, ownerID, ownerDisplay string) *ObjectHandler {
+func NewObjectHandler(meta metadata.MetadataStore, store storage.StorageBackend, ownerID, ownerDisplay string, maxObjectSize int64) *ObjectHandler {
 	return &ObjectHandler{
-		meta:         meta,
-		store:        store,
-		ownerID:      ownerID,
-		ownerDisplay: ownerDisplay,
+		meta:          meta,
+		store:         store,
+		ownerID:       ownerID,
+		ownerDisplay:  ownerDisplay,
+		maxObjectSize: maxObjectSize,
 	}
 }
 
@@ -60,10 +62,16 @@ func (h *ObjectHandler) PutObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Enforce max object size.
+	if h.maxObjectSize > 0 && r.ContentLength > 0 && r.ContentLength > h.maxObjectSize {
+		xmlutil.WriteErrorResponse(w, r, s3err.ErrEntityTooLarge)
+		return
+	}
+
 	// Verify bucket exists.
 	bucket, err := h.meta.GetBucket(ctx, bucketName)
 	if err != nil {
-		log.Printf("PutObject GetBucket error: %v", err)
+		slog.Error("PutObject GetBucket error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -101,7 +109,7 @@ func (h *ObjectHandler) PutObject(w http.ResponseWriter, r *http.Request) {
 	// Write object data to storage backend (atomic: temp-fsync-rename).
 	bytesWritten, etag, err := h.store.PutObject(ctx, bucketName, key, r.Body, r.ContentLength)
 	if err != nil {
-		log.Printf("PutObject storage error: %v", err)
+		slog.Error("PutObject storage error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -126,7 +134,7 @@ func (h *ObjectHandler) PutObject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.meta.PutObject(ctx, objRecord); err != nil {
-		log.Printf("PutObject metadata error: %v", err)
+		slog.Error("PutObject metadata error", "error", err)
 		// Storage write succeeded but metadata failed. The orphan file on disk
 		// is safe (crash-only: storage is the data, metadata is the index).
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
@@ -155,7 +163,7 @@ func (h *ObjectHandler) GetObject(w http.ResponseWriter, r *http.Request) {
 	// Verify bucket exists.
 	bucket, err := h.meta.GetBucket(ctx, bucketName)
 	if err != nil {
-		log.Printf("GetObject GetBucket error: %v", err)
+		slog.Error("GetObject GetBucket error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -167,7 +175,7 @@ func (h *ObjectHandler) GetObject(w http.ResponseWriter, r *http.Request) {
 	// Get object metadata.
 	objMeta, err := h.meta.GetObject(ctx, bucketName, key)
 	if err != nil {
-		log.Printf("GetObject metadata error: %v", err)
+		slog.Error("GetObject metadata error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -192,7 +200,7 @@ func (h *ObjectHandler) GetObject(w http.ResponseWriter, r *http.Request) {
 	// Open object data from storage.
 	reader, _, _, err := h.store.GetObject(ctx, bucketName, key)
 	if err != nil {
-		log.Printf("GetObject storage error: %v", err)
+		slog.Error("GetObject storage error", "error", err)
 		// Metadata exists but file is missing: log error, return 500.
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
@@ -213,14 +221,14 @@ func (h *ObjectHandler) GetObject(w http.ResponseWriter, r *http.Request) {
 		// Seek to the start position.
 		if seeker, ok := reader.(io.ReadSeeker); ok {
 			if _, seekErr := seeker.Seek(start, io.SeekStart); seekErr != nil {
-				log.Printf("GetObject seek error: %v", seekErr)
+				slog.Error("GetObject seek error", "error", seekErr)
 				xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 				return
 			}
 		} else {
 			// Fall back to discarding bytes.
 			if _, discardErr := io.CopyN(io.Discard, reader, start); discardErr != nil {
-				log.Printf("GetObject discard error: %v", discardErr)
+				slog.Error("GetObject discard error", "error", discardErr)
 				xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 				return
 			}
@@ -263,7 +271,7 @@ func (h *ObjectHandler) HeadObject(w http.ResponseWriter, r *http.Request) {
 	// Verify bucket exists.
 	bucket, err := h.meta.GetBucket(ctx, bucketName)
 	if err != nil {
-		log.Printf("HeadObject GetBucket error: %v", err)
+		slog.Error("HeadObject GetBucket error", "error", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -275,7 +283,7 @@ func (h *ObjectHandler) HeadObject(w http.ResponseWriter, r *http.Request) {
 	// Get object metadata.
 	objMeta, err := h.meta.GetObject(ctx, bucketName, key)
 	if err != nil {
-		log.Printf("HeadObject metadata error: %v", err)
+		slog.Error("HeadObject metadata error", "error", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -314,7 +322,7 @@ func (h *ObjectHandler) DeleteObject(w http.ResponseWriter, r *http.Request) {
 	// Verify bucket exists.
 	bucket, err := h.meta.GetBucket(ctx, bucketName)
 	if err != nil {
-		log.Printf("DeleteObject GetBucket error: %v", err)
+		slog.Error("DeleteObject GetBucket error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -325,14 +333,14 @@ func (h *ObjectHandler) DeleteObject(w http.ResponseWriter, r *http.Request) {
 
 	// Delete metadata first (the authoritative record).
 	if err := h.meta.DeleteObject(ctx, bucketName, key); err != nil {
-		log.Printf("DeleteObject metadata error: %v", err)
+		slog.Error("DeleteObject metadata error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
 
 	// Delete the file from storage (best-effort; orphan files are safe).
 	if err := h.store.DeleteObject(ctx, bucketName, key); err != nil {
-		log.Printf("DeleteObject storage error: %v", err)
+		slog.Error("DeleteObject storage error", "error", err)
 		// Don't fail the request -- metadata is already deleted.
 	}
 
@@ -354,7 +362,7 @@ func (h *ObjectHandler) DeleteObjects(w http.ResponseWriter, r *http.Request) {
 	// Verify bucket exists.
 	bucket, err := h.meta.GetBucket(ctx, bucketName)
 	if err != nil {
-		log.Printf("DeleteObjects GetBucket error: %v", err)
+		slog.Error("DeleteObjects GetBucket error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -366,34 +374,48 @@ func (h *ObjectHandler) DeleteObjects(w http.ResponseWriter, r *http.Request) {
 	// Parse the Delete XML request body.
 	deleteReq, err := parseDeleteRequest(r.Body)
 	if err != nil {
-		log.Printf("DeleteObjects XML parse error: %v", err)
+		slog.Error("DeleteObjects XML parse error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrMalformedXML)
 		return
 	}
 
 	result := &xmlutil.DeleteResult{}
 
-	for _, obj := range deleteReq.Objects {
-		// Delete metadata first (authoritative record).
-		if err := h.meta.DeleteObject(ctx, bucketName, obj.Key); err != nil {
-			log.Printf("DeleteObjects metadata error for key %q: %v", obj.Key, err)
+	// Collect all keys for batch metadata delete.
+	allKeys := make([]string, len(deleteReq.Objects))
+	for i, obj := range deleteReq.Objects {
+		allKeys[i] = obj.Key
+	}
+
+	// Batch delete metadata (authoritative record).
+	deleted, errs := h.meta.DeleteObjectsMeta(ctx, bucketName, allKeys)
+	if len(errs) > 0 {
+		for _, e := range errs {
+			slog.Error("DeleteObjects metadata batch error", "error", e)
+		}
+		// On batch error, report all keys as errors.
+		for _, obj := range deleteReq.Objects {
 			result.Errors = append(result.Errors, xmlutil.DeleteError{
 				Key:     obj.Key,
 				Code:    "InternalError",
 				Message: "We encountered an internal error. Please try again.",
 			})
-			continue
 		}
+		xmlutil.RenderDeleteResult(w, result)
+		return
+	}
 
-		// Delete the file from storage (best-effort).
-		if err := h.store.DeleteObject(ctx, bucketName, obj.Key); err != nil {
-			log.Printf("DeleteObjects storage error for key %q: %v", obj.Key, err)
-			// Don't fail -- metadata is already deleted.
+	// Delete files from storage (best-effort, per-key).
+	for _, key := range deleted {
+		if err := h.store.DeleteObject(ctx, bucketName, key); err != nil {
+			slog.Error("DeleteObjects storage error", "key", key, "error", err)
 		}
+	}
 
-		// In quiet mode, do not report successful deletes.
-		if !deleteReq.Quiet {
-			result.Deleted = append(result.Deleted, xmlutil.DeletedItem{Key: obj.Key})
+	// Report successful deletes (unless quiet mode).
+	if !deleteReq.Quiet {
+		for _, key := range deleted {
+			result.Deleted = append(result.Deleted, xmlutil.DeletedItem{Key: key})
 		}
 	}
 
@@ -429,7 +451,7 @@ func (h *ObjectHandler) CopyObject(w http.ResponseWriter, r *http.Request) {
 	// Verify destination bucket exists.
 	dstBucketRec, err := h.meta.GetBucket(ctx, dstBucket)
 	if err != nil {
-		log.Printf("CopyObject GetBucket (dst) error: %v", err)
+		slog.Error("CopyObject GetBucket (dst) error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -441,7 +463,7 @@ func (h *ObjectHandler) CopyObject(w http.ResponseWriter, r *http.Request) {
 	// Verify source bucket exists.
 	srcBucketRec, err := h.meta.GetBucket(ctx, srcBucket)
 	if err != nil {
-		log.Printf("CopyObject GetBucket (src) error: %v", err)
+		slog.Error("CopyObject GetBucket (src) error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -453,7 +475,7 @@ func (h *ObjectHandler) CopyObject(w http.ResponseWriter, r *http.Request) {
 	// Get source object metadata.
 	srcObj, err := h.meta.GetObject(ctx, srcBucket, srcKey)
 	if err != nil {
-		log.Printf("CopyObject GetObject (src) error: %v", err)
+		slog.Error("CopyObject GetObject (src) error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -465,7 +487,7 @@ func (h *ObjectHandler) CopyObject(w http.ResponseWriter, r *http.Request) {
 	// Copy file data via storage backend (atomic).
 	newETag, err := h.store.CopyObject(ctx, srcBucket, srcKey, dstBucket, dstKey)
 	if err != nil {
-		log.Printf("CopyObject storage error: %v", err)
+		slog.Error("CopyObject storage error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -535,7 +557,7 @@ func (h *ObjectHandler) CopyObject(w http.ResponseWriter, r *http.Request) {
 
 	// Commit metadata for the destination object.
 	if err := h.meta.PutObject(ctx, dstObj); err != nil {
-		log.Printf("CopyObject metadata error: %v", err)
+		slog.Error("CopyObject metadata error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -563,7 +585,7 @@ func (h *ObjectHandler) ListObjectsV2(w http.ResponseWriter, r *http.Request) {
 	// Verify bucket exists.
 	bucket, err := h.meta.GetBucket(ctx, bucketName)
 	if err != nil {
-		log.Printf("ListObjectsV2 GetBucket error: %v", err)
+		slog.Error("ListObjectsV2 GetBucket error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -596,7 +618,7 @@ func (h *ObjectHandler) ListObjectsV2(w http.ResponseWriter, r *http.Request) {
 
 	listResult, err := h.meta.ListObjects(ctx, bucketName, opts)
 	if err != nil {
-		log.Printf("ListObjectsV2 ListObjects error: %v", err)
+		slog.Error("ListObjectsV2 ListObjects error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -663,7 +685,7 @@ func (h *ObjectHandler) ListObjects(w http.ResponseWriter, r *http.Request) {
 	// Verify bucket exists.
 	bucket, err := h.meta.GetBucket(ctx, bucketName)
 	if err != nil {
-		log.Printf("ListObjects GetBucket error: %v", err)
+		slog.Error("ListObjects GetBucket error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -693,7 +715,7 @@ func (h *ObjectHandler) ListObjects(w http.ResponseWriter, r *http.Request) {
 
 	listResult, err := h.meta.ListObjects(ctx, bucketName, opts)
 	if err != nil {
-		log.Printf("ListObjects ListObjects error: %v", err)
+		slog.Error("ListObjects ListObjects error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -751,7 +773,7 @@ func (h *ObjectHandler) GetObjectAcl(w http.ResponseWriter, r *http.Request) {
 	// Verify bucket exists.
 	bucket, err := h.meta.GetBucket(ctx, bucketName)
 	if err != nil {
-		log.Printf("GetObjectAcl GetBucket error: %v", err)
+		slog.Error("GetObjectAcl GetBucket error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -763,7 +785,7 @@ func (h *ObjectHandler) GetObjectAcl(w http.ResponseWriter, r *http.Request) {
 	// Get object metadata.
 	objMeta, err := h.meta.GetObject(ctx, bucketName, key)
 	if err != nil {
-		log.Printf("GetObjectAcl GetObject error: %v", err)
+		slog.Error("GetObjectAcl GetObject error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -803,7 +825,7 @@ func (h *ObjectHandler) PutObjectAcl(w http.ResponseWriter, r *http.Request) {
 	// Verify bucket exists.
 	bucket, err := h.meta.GetBucket(ctx, bucketName)
 	if err != nil {
-		log.Printf("PutObjectAcl GetBucket error: %v", err)
+		slog.Error("PutObjectAcl GetBucket error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -815,7 +837,7 @@ func (h *ObjectHandler) PutObjectAcl(w http.ResponseWriter, r *http.Request) {
 	// Verify object exists.
 	objMeta, err := h.meta.GetObject(ctx, bucketName, key)
 	if err != nil {
-		log.Printf("PutObjectAcl GetObject error: %v", err)
+		slog.Error("PutObjectAcl GetObject error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}
@@ -854,7 +876,7 @@ func (h *ObjectHandler) PutObjectAcl(w http.ResponseWriter, r *http.Request) {
 	// Store the ACL.
 	aclJSON := aclToJSON(acp)
 	if err := h.meta.UpdateObjectAcl(ctx, bucketName, key, aclJSON); err != nil {
-		log.Printf("PutObjectAcl update error: %v", err)
+		slog.Error("PutObjectAcl update error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
 		return
 	}

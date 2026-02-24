@@ -20,7 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"strings"
 
 	gcs "cloud.google.com/go/storage"
@@ -173,7 +173,7 @@ func NewGCPGatewayBackend(ctx context.Context, bucket, project, prefix string) (
 		return nil, fmt.Errorf("cannot access upstream GCS bucket %q: %w", bucket, err)
 	}
 
-	log.Printf("GCP gateway backend initialized: bucket=%s project=%s prefix=%q", bucket, project, prefix)
+	slog.Info("GCP gateway backend initialized", "bucket", bucket, "project", project, "prefix", prefix)
 	return b, nil
 }
 
@@ -358,7 +358,7 @@ func (b *GCPGatewayBackend) AssembleParts(ctx context.Context, bucket, key, uplo
 		// Clean up intermediate composite objects.
 		for _, name := range intermediates {
 			if delErr := b.client.Delete(ctx, b.Bucket, name); delErr != nil {
-				log.Printf("Warning: failed to clean up intermediate: %s: %v", name, delErr)
+				slog.Warn("Failed to clean up intermediate", "name", name, "error", delErr)
 			}
 		}
 	}

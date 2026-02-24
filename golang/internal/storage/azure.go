@@ -25,7 +25,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"strings"
 )
 
@@ -89,7 +89,7 @@ func NewAzureGatewayBackend(ctx context.Context, container, accountURL, prefix s
 		return nil, fmt.Errorf("cannot access upstream Azure container %q: %w", container, err)
 	}
 
-	log.Printf("Azure gateway backend initialized: container=%s account=%s prefix=%q", container, accountURL, prefix)
+	slog.Info("Azure gateway backend initialized", "container", container, "account", accountURL, "prefix", prefix)
 	return b, nil
 }
 
