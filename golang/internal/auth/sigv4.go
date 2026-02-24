@@ -110,8 +110,8 @@ type SigV4Verifier struct {
 	Region string
 
 	// signingKeys caches derived signing keys. Key format: "secretKey\x00dateStr\x00region\x00service".
-	signingKeyMu   sync.RWMutex
-	signingKeys    map[string]signingKeyCacheEntry
+	signingKeyMu sync.RWMutex
+	signingKeys  map[string]signingKeyCacheEntry
 
 	// credCache caches credential lookups by access key ID.
 	credCacheMu sync.RWMutex
