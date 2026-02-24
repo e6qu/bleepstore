@@ -287,6 +287,11 @@ pub async fn upload_part(
         });
     }
 
+    // Check max object size for part.
+    if body.len() as u64 > state.config.server.max_object_size {
+        return Err(S3Error::EntityTooLarge);
+    }
+
     // Check that the multipart upload exists.
     let upload = state
         .metadata

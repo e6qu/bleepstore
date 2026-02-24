@@ -8,6 +8,8 @@ use std::sync::Arc;
 
 use clap::Parser;
 use tracing::info;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 /// Command-line arguments for the BleepStore server.
 #[derive(Parser, Debug)]
@@ -24,22 +26,64 @@ struct Cli {
     /// Override the bind address (host:port).
     #[arg(short, long)]
     bind: Option<String>,
+
+    /// Log level: trace, debug, info, warn, error.
+    #[arg(long)]
+    log_level: Option<String>,
+
+    /// Log format: text or json.
+    #[arg(long)]
+    log_format: Option<String>,
+
+    /// Graceful shutdown timeout in seconds.
+    #[arg(long)]
+    shutdown_timeout: Option<u64>,
+
+    /// Maximum object size in bytes.
+    #[arg(long)]
+    max_object_size: Option<u64>,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Initialize tracing / logging.
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
-
     let cli = Cli::parse();
 
+    // Load configuration, then apply CLI overrides before initializing logging.
+    let mut config = bleepstore::config::load_config(&cli.config)?;
+
+    // CLI overrides for logging.
+    if let Some(level) = &cli.log_level {
+        config.logging.level = level.clone();
+    }
+    if let Some(format) = &cli.log_format {
+        config.logging.format = format.clone();
+    }
+
+    // CLI overrides for server settings.
+    if let Some(timeout) = cli.shutdown_timeout {
+        config.server.shutdown_timeout = timeout;
+    }
+    if let Some(max_size) = cli.max_object_size {
+        config.server.max_object_size = max_size;
+    }
+
+    // Initialize tracing / logging.
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&config.logging.level));
+
+    if config.logging.format == "json" {
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(tracing_subscriber::fmt::layer().json())
+            .init();
+    } else {
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(tracing_subscriber::fmt::layer())
+            .init();
+    }
+
     info!("Loading configuration from {}", cli.config);
-    let config = bleepstore::config::load_config(&cli.config)?;
 
     let bind_addr = cli
         .bind
@@ -139,6 +183,7 @@ async fn main() -> anyhow::Result<()> {
         config: config.clone(),
         metadata,
         storage,
+        auth_cache: bleepstore::auth::AuthCache::new(),
     });
 
     let app = bleepstore::server::app(state);
@@ -149,9 +194,11 @@ async fn main() -> anyhow::Result<()> {
     // Graceful shutdown: on SIGTERM/SIGINT, stop accepting new connections,
     // wait for in-flight requests to complete (with timeout), then exit.
     // No cleanup -- crash-only design means next startup handles recovery.
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    let shutdown_timeout = config.server.shutdown_timeout;
+    let server = axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal_with_timeout(shutdown_timeout));
+
+    server.await?;
 
     info!("BleepStore shut down");
 
@@ -159,7 +206,9 @@ async fn main() -> anyhow::Result<()> {
 }
 
 /// Wait for SIGTERM or SIGINT (Ctrl+C), then return to trigger graceful shutdown.
-async fn shutdown_signal() {
+/// Spawns a background task that will force-exit after `timeout_secs` to enforce
+/// a hard shutdown deadline.
+async fn shutdown_signal_with_timeout(timeout_secs: u64) {
     let ctrl_c = async {
         tokio::signal::ctrl_c()
             .await
@@ -185,4 +234,11 @@ async fn shutdown_signal() {
             tracing::info!("Received SIGTERM, shutting down");
         },
     }
+
+    // Spawn a hard shutdown deadline: if graceful drain takes too long, force exit.
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(timeout_secs)).await;
+        tracing::warn!("Shutdown timeout ({timeout_secs}s) exceeded, forcing exit");
+        std::process::exit(1);
+    });
 }

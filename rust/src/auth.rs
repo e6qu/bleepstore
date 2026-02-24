@@ -12,8 +12,12 @@
 
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::RwLock;
+use std::time::Instant;
 use subtle::ConstantTimeEq;
+
+use crate::metadata::store::CredentialRecord;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -26,6 +30,114 @@ const MAX_PRESIGNED_EXPIRES: u64 = 604800;
 /// SHA-256 of the empty string.
 #[allow(dead_code)]
 const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+/// Maximum entries in each cache before a full clear.
+const CACHE_MAX_ENTRIES: usize = 1000;
+
+/// TTL for signing key cache entries (24 hours).
+const SIGNING_KEY_TTL_SECS: u64 = 86400;
+
+/// TTL for credential cache entries (60 seconds).
+const CREDENTIAL_TTL_SECS: u64 = 60;
+
+// ── Auth cache ──────────────────────────────────────────────────────
+
+struct SigningKeyCacheEntry {
+    key: Vec<u8>,
+    expires: Instant,
+}
+
+struct CredCacheEntry {
+    cred: CredentialRecord,
+    expires: Instant,
+}
+
+/// Cache for SigV4 signing keys and credential lookups.
+pub struct AuthCache {
+    signing_keys: RwLock<HashMap<String, SigningKeyCacheEntry>>,
+    credentials: RwLock<HashMap<String, CredCacheEntry>>,
+}
+
+impl AuthCache {
+    /// Create a new empty cache.
+    pub fn new() -> Self {
+        Self {
+            signing_keys: RwLock::new(HashMap::new()),
+            credentials: RwLock::new(HashMap::new()),
+        }
+    }
+
+    /// Look up a cached signing key.
+    pub fn get_signing_key(
+        &self,
+        secret: &str,
+        date: &str,
+        region: &str,
+        service: &str,
+    ) -> Option<Vec<u8>> {
+        let cache_key = format!("{secret}\0{date}\0{region}\0{service}");
+        let map = self.signing_keys.read().ok()?;
+        let entry = map.get(&cache_key)?;
+        if Instant::now() < entry.expires {
+            Some(entry.key.clone())
+        } else {
+            None
+        }
+    }
+
+    /// Store a signing key in the cache.
+    pub fn put_signing_key(
+        &self,
+        secret: &str,
+        date: &str,
+        region: &str,
+        service: &str,
+        key: Vec<u8>,
+    ) {
+        let cache_key = format!("{secret}\0{date}\0{region}\0{service}");
+        if let Ok(mut map) = self.signing_keys.write() {
+            if map.len() >= CACHE_MAX_ENTRIES {
+                map.clear();
+            }
+            map.insert(
+                cache_key,
+                SigningKeyCacheEntry {
+                    key,
+                    expires: Instant::now()
+                        + std::time::Duration::from_secs(SIGNING_KEY_TTL_SECS),
+                },
+            );
+        }
+    }
+
+    /// Look up a cached credential.
+    pub fn get_credential(&self, access_key_id: &str) -> Option<CredentialRecord> {
+        let map = self.credentials.read().ok()?;
+        let entry = map.get(access_key_id)?;
+        if Instant::now() < entry.expires {
+            Some(entry.cred.clone())
+        } else {
+            None
+        }
+    }
+
+    /// Store a credential in the cache.
+    pub fn put_credential(&self, access_key_id: &str, cred: CredentialRecord) {
+        if let Ok(mut map) = self.credentials.write() {
+            if map.len() >= CACHE_MAX_ENTRIES {
+                map.clear();
+            }
+            map.insert(
+                access_key_id.to_string(),
+                CredCacheEntry {
+                    cred,
+                    expires: Instant::now()
+                        + std::time::Duration::from_secs(CREDENTIAL_TTL_SECS),
+                },
+            );
+        }
+    }
+}
 
 // ── Parsed types ────────────────────────────────────────────────────
 
@@ -669,6 +781,11 @@ fn find_header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<
         .iter()
         .find(|(n, _)| n == name)
         .map(|(_, v)| v.as_str())
+}
+
+/// Public version of find_header_value for use in auth middleware.
+pub fn find_header_value_pub<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    find_header_value(headers, name)
 }
 
 /// Parse an X-Amz-Date string (YYYYMMDDTHHMMSSZ) into Unix timestamp.

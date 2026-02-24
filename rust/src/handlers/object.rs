@@ -420,6 +420,11 @@ pub async fn put_object(
         return Err(S3Error::KeyTooLongError);
     }
 
+    // Check max object size.
+    if body.len() as u64 > state.config.server.max_object_size {
+        return Err(S3Error::EntityTooLarge);
+    }
+
     let data = bytes::Bytes::copy_from_slice(body);
     let size = data.len() as u64;
 
@@ -811,26 +816,28 @@ pub async fn delete_objects(
         return Err(S3Error::MalformedXML);
     }
 
-    // Delete each object from storage + metadata.
+    // Batch delete from metadata (single SQL statement per batch).
     let mut deleted_keys: Vec<String> = Vec::new();
     let mut error_keys: Vec<String> = Vec::new();
     let mut error_messages: Vec<String> = Vec::new();
 
-    for key in &keys {
-        // Delete from storage (best-effort, idempotent).
-        let storage_key = format!("{bucket}/{key}");
-        let _ = state.storage.delete(&storage_key).await;
-
-        // Delete from metadata (idempotent).
-        match state.metadata.delete_object(bucket, key).await {
-            Ok(_) => {
-                deleted_keys.push(key.clone());
-            }
-            Err(e) => {
+    match state.metadata.delete_objects(bucket, &keys).await {
+        Ok(deleted) => {
+            deleted_keys = deleted;
+        }
+        Err(e) => {
+            // If batch delete fails, report all keys as errors.
+            for key in &keys {
                 error_keys.push(key.clone());
                 error_messages.push(e.to_string());
             }
         }
+    }
+
+    // Delete from storage (best-effort, idempotent) — loop only for file deletion.
+    for key in &deleted_keys {
+        let storage_key = format!("{bucket}/{key}");
+        let _ = state.storage.delete(&storage_key).await;
     }
 
     // Build response XML.
