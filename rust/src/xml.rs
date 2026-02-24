@@ -110,6 +110,7 @@ pub struct ObjectEntry<'a> {
 }
 
 /// Render `<ListBucketResult>` for ListObjectsV2.
+#[allow(clippy::too_many_arguments)]
 pub fn render_list_objects_result(
     bucket: &str,
     prefix: &str,
@@ -196,6 +197,7 @@ pub fn render_list_objects_result(
 // ── ListBucketResult (v1) ───────────────────────────────────────────
 
 /// Render `<ListBucketResult>` for ListObjectsV1.
+#[allow(clippy::too_many_arguments)]
 pub fn render_list_objects_result_v1(
     bucket: &str,
     prefix: &str,
@@ -559,6 +561,7 @@ pub struct UploadEntry<'a> {
 }
 
 /// Render `<ListMultipartUploadsResult>` for ListMultipartUploads.
+#[allow(clippy::too_many_arguments)]
 pub fn render_list_multipart_uploads_result(
     bucket: &str,
     key_marker: &str,
@@ -649,6 +652,7 @@ pub struct PartEntry<'a> {
 }
 
 /// Render `<ListPartsResult>` for ListParts.
+#[allow(clippy::too_many_arguments)]
 pub fn render_list_parts_result(
     bucket: &str,
     key: &str,

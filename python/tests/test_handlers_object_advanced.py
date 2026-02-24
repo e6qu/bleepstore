@@ -9,9 +9,7 @@ via httpx AsyncClient. Each test class creates its own fresh stores
 to avoid state leaks between tests.
 """
 
-import email.utils
 import hashlib
-import time
 import xml.etree.ElementTree as ET
 
 import pytest

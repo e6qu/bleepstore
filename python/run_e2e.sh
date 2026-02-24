@@ -38,6 +38,9 @@ uv pip install -e ".[dev]" --quiet
 lsof -ti:$PORT 2>/dev/null | xargs kill -9 2>/dev/null || true
 sleep 0.5
 
+# Ensure data directories exist (config uses ./data/metadata.db and ./data/objects)
+mkdir -p "$SCRIPT_DIR/data/objects"
+
 # Start the server in background
 echo "Starting BleepStore Python on port $PORT..."
 bleepstore --config "$PROJECT_ROOT/bleepstore.example.yaml" --port $PORT \
@@ -47,24 +50,32 @@ SERVER_PID=$!
 # Cleanup on exit
 cleanup() {
     echo "Stopping server (PID $SERVER_PID)..."
-    kill $SERVER_PID 2>/dev/null || true
+    kill -9 $SERVER_PID 2>/dev/null || true
     wait $SERVER_PID 2>/dev/null || true
 }
 trap cleanup EXIT
 
 # Wait for server to be ready
 echo "Waiting for server..."
+SERVER_READY=false
 for i in $(seq 1 30); do
     if curl -s "http://localhost:$PORT/" >/dev/null 2>&1; then
         echo "Server ready."
+        SERVER_READY=true
         break
     fi
     if ! kill -0 $SERVER_PID 2>/dev/null; then
-        echo "Server failed to start. Check $SERVER_LOG"
+        echo "Server failed to start. Log output:"
+        cat "$SERVER_LOG" 2>/dev/null || true
         exit 1
     fi
     sleep 0.5
 done
+if [ "$SERVER_READY" = false ]; then
+    echo "Server did not become ready within 15s. Log output:"
+    cat "$SERVER_LOG" 2>/dev/null || true
+    exit 1
+fi
 
 # Run E2E tests
 echo ""

@@ -1,9 +1,13 @@
 # Go-specific
-bleepstore
+/bleepstore
 vendor/
 
 # Logs
 logs/
 
 # Data (runtime)
-data/
+data/*
+!data/.gitkeep
+!data/objects/
+data/objects/*
+!data/objects/.gitkeep

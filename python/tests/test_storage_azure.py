@@ -176,7 +176,7 @@ class TestPut:
 
     async def test_put_uses_correct_blob_name(self):
         backend = _make_backend(prefix="pfx/")
-        blob = _setup_blob_client(backend)
+        _setup_blob_client(backend)
 
         await backend.put("b", "k", b"data")
 
@@ -342,7 +342,7 @@ class TestPutPart:
 
     async def test_put_part_returns_md5(self):
         backend = _make_backend()
-        blob = _setup_blob_client(backend)
+        _setup_blob_client(backend)
         data = b"part data"
         expected_md5 = hashlib.md5(data).hexdigest()
 
@@ -363,7 +363,7 @@ class TestPutPart:
     async def test_put_part_uses_final_blob_name(self):
         """put_part stages blocks on the final blob, not a temp object."""
         backend = _make_backend(prefix="pfx/")
-        blob = _setup_blob_client(backend)
+        _setup_blob_client(backend)
 
         await backend.put_part("b", "k", "uid", 1, b"data")
 

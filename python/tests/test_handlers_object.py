@@ -7,7 +7,6 @@ to avoid state leaks between tests.
 """
 
 import hashlib
-import json
 
 import pytest
 from httpx import ASGITransport, AsyncClient

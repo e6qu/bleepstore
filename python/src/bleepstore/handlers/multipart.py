@@ -461,9 +461,9 @@ class MultipartHandler:
             stored = stored_by_number.get(pn)
             if stored is None:
                 raise InvalidPart(
-                    f"One or more of the specified parts could not be found. "
-                    f"The part may not have been uploaded, or the specified "
-                    f"entity tag may not have matched the part's entity tag."
+                    "One or more of the specified parts could not be found. "
+                    "The part may not have been uploaded, or the specified "
+                    "entity tag may not have matched the part's entity tag."
                 )
 
             # Normalize ETags for comparison (strip quotes if present)
@@ -471,9 +471,9 @@ class MultipartHandler:
             stored_etag = stored["etag"].strip('"')
             if requested_etag != stored_etag:
                 raise InvalidPart(
-                    f"One or more of the specified parts could not be found. "
-                    f"The part may not have been uploaded, or the specified "
-                    f"entity tag may not have matched the part's entity tag."
+                    "One or more of the specified parts could not be found. "
+                    "The part may not have been uploaded, or the specified "
+                    "entity tag may not have matched the part's entity tag."
                 )
 
             validated_parts.append(stored)

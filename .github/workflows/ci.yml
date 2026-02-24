@@ -6,6 +6,7 @@ on:
 jobs:
   python:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
@@ -17,14 +18,16 @@ jobs:
       - run: make -C python lint
       - run: make -C python test-unit
       - run: make -C python test-e2e
+        timeout-minutes: 5
 
   golang:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: "1.25"
           cache-dependency-path: golang/go.sum
       - uses: astral-sh/setup-uv@v4
       - uses: actions/setup-python@v5
@@ -34,9 +37,11 @@ jobs:
       - run: make -C golang build
       - run: make -C golang test-unit
       - run: make -C golang test-e2e
+        timeout-minutes: 5
 
   rust:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -54,9 +59,11 @@ jobs:
       - run: make -C rust build
       - run: make -C rust test-unit
       - run: make -C rust test-e2e
+        timeout-minutes: 5
 
   zig:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
@@ -70,3 +77,4 @@ jobs:
       - run: make -C zig build
       - run: make -C zig test-unit
       - run: make -C zig test-e2e
+        timeout-minutes: 5

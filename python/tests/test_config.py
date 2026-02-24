@@ -13,7 +13,9 @@ class TestLoadConfig:
 
     def test_load_example_config(self):
         """Loading the example config file populates all fields."""
-        config = load_config(Path("/Users/zardoz/projects/bleepstore/bleepstore.example.yaml"))
+        config = load_config(
+            Path(__file__).resolve().parent.parent.parent / "bleepstore.example.yaml"
+        )
         assert config.server.host == "0.0.0.0"
         assert config.server.port == 9000
         assert config.server.region == "us-east-1"

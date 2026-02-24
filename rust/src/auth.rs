@@ -205,7 +205,7 @@ fn parse_presigned_params(params: &BTreeMap<String, String>) -> Result<ParsedPre
         .get("X-Amz-Algorithm")
         .ok_or("Missing X-Amz-Algorithm")?;
     if algorithm != "AWS4-HMAC-SHA256" {
-        return Err(format!("Unsupported algorithm: {}", algorithm));
+        return Err(format!("Unsupported algorithm: {algorithm}"));
     }
 
     let credential_raw = params
@@ -232,8 +232,7 @@ fn parse_presigned_params(params: &BTreeMap<String, String>) -> Result<ParsedPre
         .map_err(|_| "Invalid X-Amz-Expires value")?;
     if expires == 0 || expires > MAX_PRESIGNED_EXPIRES {
         return Err(format!(
-            "X-Amz-Expires must be between 1 and {}",
-            MAX_PRESIGNED_EXPIRES
+            "X-Amz-Expires must be between 1 and {MAX_PRESIGNED_EXPIRES}"
         ));
     }
 
@@ -319,8 +318,7 @@ pub fn build_canonical_request(
     }
 
     format!(
-        "{}\n{}\n{}\n{}\n{}\n{}",
-        method, canonical_uri, canonical_query, canonical_headers, signed_headers_str, payload_hash
+        "{method}\n{canonical_uri}\n{canonical_query}\n{canonical_headers}\n{signed_headers_str}\n{payload_hash}"
     )
 }
 
@@ -373,7 +371,7 @@ pub fn build_canonical_query_string(query_string: &str) -> String {
 
     params
         .iter()
-        .map(|(k, v)| format!("{}={}", k, v))
+        .map(|(k, v)| format!("{k}={v}"))
         .collect::<Vec<_>>()
         .join("&")
 }
@@ -394,10 +392,7 @@ pub fn build_string_to_sign(
     canonical_request: &str,
 ) -> String {
     let hash = hex::encode(Sha256::digest(canonical_request.as_bytes()));
-    format!(
-        "AWS4-HMAC-SHA256\n{}\n{}\n{}",
-        timestamp, credential_scope, hash
-    )
+    format!("AWS4-HMAC-SHA256\n{timestamp}\n{credential_scope}\n{hash}")
 }
 
 // ── Signing key derivation ──────────────────────────────────────────
@@ -416,7 +411,7 @@ pub fn derive_signing_key(
     region: &str,
     service: &str,
 ) -> Vec<u8> {
-    let k_secret = format!("AWS4{}", secret_key);
+    let k_secret = format!("AWS4{secret_key}");
     let k_date = hmac_sha256(k_secret.as_bytes(), date_stamp.as_bytes());
     let k_region = hmac_sha256(&k_date, region.as_bytes());
     let k_service = hmac_sha256(&k_region, service.as_bytes());
@@ -482,7 +477,7 @@ pub fn verify_header_auth(
         .unwrap_or_default();
 
     let string_to_sign =
-        build_string_to_sign(&timestamp, &parsed.credential_scope, &canonical_request);
+        build_string_to_sign(timestamp, &parsed.credential_scope, &canonical_request);
 
     let signing_key = derive_signing_key(
         secret_key,
@@ -572,11 +567,7 @@ pub fn check_clock_skew(amz_date: &str) -> bool {
         .unwrap_or_default()
         .as_secs();
 
-    let diff = if now > req_time {
-        now - req_time
-    } else {
-        req_time - now
-    };
+    let diff = now.abs_diff(req_time);
 
     diff <= CLOCK_SKEW_SECONDS
 }
@@ -599,7 +590,7 @@ pub fn s3_uri_encode(input: &str, encode_slash: bool) -> String {
         } else {
             // Percent-encode each byte of the UTF-8 representation.
             for byte in ch.to_string().as_bytes() {
-                encoded.push_str(&format!("%{:02X}", byte));
+                encoded.push_str(&format!("%{byte:02X}"));
             }
         }
     }
@@ -627,7 +618,7 @@ pub fn s3_uri_encode_path(raw_path: &str) -> String {
     if result.starts_with('/') {
         result
     } else {
-        format!("/{}", result)
+        format!("/{result}")
     }
 }
 
@@ -702,8 +693,8 @@ fn parse_amz_date(date: &str) -> Option<u64> {
     }
     // Days from month.
     let month_days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    for m in 0..(month as usize - 1) {
-        days += month_days[m] as u64;
+    for (m, &md) in month_days.iter().enumerate().take(month as usize - 1) {
+        days += md as u64;
         if m == 1 && is_leap_year(year) {
             days += 1;
         }
@@ -716,7 +707,7 @@ fn parse_amz_date(date: &str) -> Option<u64> {
 
 /// Check if a year is a leap year.
 fn is_leap_year(year: u64) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+    (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
 }
 
 /// Simple percent-decoding.
@@ -1041,7 +1032,7 @@ mod tests {
         let canonical_request =
             build_canonical_request("GET", "/", "", &headers, signed_headers, payload_hash);
 
-        let credential_scope = format!("{}/{}/{}/aws4_request", date_stamp, region, service);
+        let credential_scope = format!("{date_stamp}/{region}/{service}/aws4_request");
         let string_to_sign = build_string_to_sign(timestamp, &credential_scope, &canonical_request);
         let signing_key = derive_signing_key(secret, date_stamp, region, service);
         let signature = compute_signature(&signing_key, &string_to_sign);
@@ -1085,7 +1076,7 @@ mod tests {
         let signed_headers = "host;x-amz-content-sha256;x-amz-date";
         let canonical_request =
             build_canonical_request("GET", "/", "", &headers, signed_headers, payload_hash);
-        let credential_scope = format!("{}/{}/{}/aws4_request", date_stamp, region, service);
+        let credential_scope = format!("{date_stamp}/{region}/{service}/aws4_request");
         let string_to_sign = build_string_to_sign(timestamp, &credential_scope, &canonical_request);
         let signing_key = derive_signing_key(secret, date_stamp, region, service);
         let signature = compute_signature(&signing_key, &string_to_sign);
@@ -1136,10 +1127,10 @@ mod tests {
         let signed_headers = "host";
 
         // Build the query string for signing (without X-Amz-Signature).
-        let credential = format!("AKID/{}/{}/{}/aws4_request", date_stamp, region, service);
+        let credential = format!("AKID/{date_stamp}/{region}/{service}/aws4_request");
         let qs = format!(
-            "X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential={}&X-Amz-Date={}&X-Amz-Expires=3600&X-Amz-SignedHeaders={}",
-            s3_uri_encode(&credential, true), timestamp, signed_headers
+            "X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential={}&X-Amz-Date={timestamp}&X-Amz-Expires=3600&X-Amz-SignedHeaders={signed_headers}",
+            s3_uri_encode(&credential, true)
         );
 
         let canonical_request = build_canonical_request(
@@ -1151,13 +1142,13 @@ mod tests {
             "UNSIGNED-PAYLOAD",
         );
 
-        let credential_scope = format!("{}/{}/{}/aws4_request", date_stamp, region, service);
+        let credential_scope = format!("{date_stamp}/{region}/{service}/aws4_request");
         let string_to_sign = build_string_to_sign(timestamp, &credential_scope, &canonical_request);
         let signing_key = derive_signing_key(secret, date_stamp, region, service);
         let signature = compute_signature(&signing_key, &string_to_sign);
 
         // Now verify with the full query string (including X-Amz-Signature).
-        let full_qs = format!("{}&X-Amz-Signature={}", qs, signature);
+        let full_qs = format!("{qs}&X-Amz-Signature={signature}");
 
         let parsed = ParsedPresigned {
             access_key_id: "AKID".to_string(),

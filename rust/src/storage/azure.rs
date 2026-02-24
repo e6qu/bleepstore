@@ -75,9 +75,9 @@ impl AzureGatewayBackend {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(300))
             .build()
-            .map_err(|e| anyhow::anyhow!("Failed to create HTTP client: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to create HTTP client: {e}"))?;
 
-        let base_url = format!("https://{}.blob.core.windows.net", account);
+        let base_url = format!("https://{account}.blob.core.windows.net");
 
         // Resolve credentials from environment.
         let auth = Self::resolve_auth()?;
@@ -102,7 +102,7 @@ impl AzureGatewayBackend {
         // 1. Try AZURE_STORAGE_KEY
         if let Ok(key) = std::env::var("AZURE_STORAGE_KEY") {
             let key_bytes = BASE64_STANDARD.decode(&key).map_err(|e| {
-                anyhow::anyhow!("Invalid AZURE_STORAGE_KEY (not valid base64): {}", e)
+                anyhow::anyhow!("Invalid AZURE_STORAGE_KEY (not valid base64): {e}")
             })?;
             return Ok(AzureAuth::SharedKey { key_bytes });
         }
@@ -112,7 +112,7 @@ impl AzureGatewayBackend {
             for part in conn_str.split(';') {
                 if let Some(key_val) = part.strip_prefix("AccountKey=") {
                     let key_bytes = BASE64_STANDARD.decode(key_val).map_err(|e| {
-                        anyhow::anyhow!("Invalid AccountKey in connection string: {}", e)
+                        anyhow::anyhow!("Invalid AccountKey in connection string: {e}")
                     })?;
                     return Ok(AzureAuth::SharedKey { key_bytes });
                 }
@@ -121,8 +121,8 @@ impl AzureGatewayBackend {
 
         // 3. Try AZURE_STORAGE_SAS_TOKEN
         if let Ok(sas) = std::env::var("AZURE_STORAGE_SAS_TOKEN") {
-            let token = if sas.starts_with('?') {
-                sas[1..].to_string()
+            let token = if let Some(stripped) = sas.strip_prefix('?') {
+                stripped.to_string()
             } else {
                 sas
             };
@@ -146,7 +146,7 @@ impl AzureGatewayBackend {
     /// in a blob. Includes upload_id to avoid collisions between concurrent
     /// multipart uploads to the same key.
     fn block_id(upload_id: &str, part_number: u32) -> String {
-        let raw = format!("{}:{:05}", upload_id, part_number);
+        let raw = format!("{upload_id}:{part_number:05}");
         BASE64_STANDARD.encode(raw.as_bytes())
     }
 
@@ -191,6 +191,7 @@ impl AzureGatewayBackend {
     /// CanonicalizedHeaders\n
     /// CanonicalizedResource
     /// ```
+    #[allow(clippy::too_many_arguments)]
     fn sign_request(
         &self,
         method: &str,
@@ -229,7 +230,7 @@ impl AzureGatewayBackend {
 
         let canonicalized_headers: String = ms_headers
             .iter()
-            .map(|(k, v)| format!("{}:{}", k, v))
+            .map(|(k, v)| format!("{k}:{v}"))
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -249,14 +250,13 @@ impl AzureGatewayBackend {
 
         // Build string to sign.
         let string_to_sign = format!(
-            "{}\n\n\n{}\n\n{}\n\n\n\n\n\n\n{}\n{}",
-            method, content_length_str, content_type, canonicalized_headers, canonicalized_resource
+            "{method}\n\n\n{content_length_str}\n\n{content_type}\n\n\n\n\n\n\n{canonicalized_headers}\n{canonicalized_resource}"
         );
 
         // HMAC-SHA256 sign.
         type HmacSha256 = Hmac<Sha256>;
         let mut mac = HmacSha256::new_from_slice(key_bytes)
-            .map_err(|e| anyhow::anyhow!("HMAC key error: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("HMAC key error: {e}"))?;
         mac.update(string_to_sign.as_bytes());
         let signature = BASE64_STANDARD.encode(mac.finalize().into_bytes());
 
@@ -274,9 +274,9 @@ impl AzureGatewayBackend {
         match &self.auth {
             AzureAuth::SasToken { token } => {
                 if url.contains('?') {
-                    format!("{}&{}", url, token)
+                    format!("{url}&{token}")
                 } else {
-                    format!("{}?{}", url, token)
+                    format!("{url}?{token}")
                 }
             }
             AzureAuth::SharedKey { .. } => url.to_string(),
@@ -290,7 +290,7 @@ impl AzureGatewayBackend {
 
     /// Map an Azure HTTP error to an anyhow error with context.
     fn map_azure_error(context: &str, status: StatusCode, body: &str) -> anyhow::Error {
-        anyhow::anyhow!("Azure {}: HTTP {} - {}", context, status, body)
+        anyhow::anyhow!("Azure {context}: HTTP {status} - {body}")
     }
 
     // -- Azure Blob REST API operations ----------------------------------------
@@ -305,7 +305,7 @@ impl AzureGatewayBackend {
 
         let mut req = self
             .client
-            .put(&self.maybe_append_sas(&url))
+            .put(self.maybe_append_sas(&url))
             .header("x-ms-date", &date)
             .header("x-ms-version", AZURE_API_VERSION)
             .header("x-ms-blob-type", "BlockBlob")
@@ -328,7 +328,7 @@ impl AzureGatewayBackend {
         let resp = req
             .send()
             .await
-            .map_err(|e| anyhow::anyhow!("Azure upload request failed: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Azure upload request failed: {e}"))?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -346,7 +346,7 @@ impl AzureGatewayBackend {
 
         let mut req = self
             .client
-            .get(&self.maybe_append_sas(&url))
+            .get(self.maybe_append_sas(&url))
             .header("x-ms-date", &date)
             .header("x-ms-version", AZURE_API_VERSION);
 
@@ -358,14 +358,13 @@ impl AzureGatewayBackend {
         let resp = req
             .send()
             .await
-            .map_err(|e| anyhow::anyhow!("Azure download request failed: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Azure download request failed: {e}"))?;
 
         if !resp.status().is_success() {
             let status = resp.status();
             if Self::is_not_found(status) {
                 return Err(anyhow::anyhow!(
-                    "Object not found at storage key: {}",
-                    blob_name
+                    "Object not found at storage key: {blob_name}"
                 ));
             }
             let body = resp.text().await.unwrap_or_default();
@@ -375,7 +374,7 @@ impl AzureGatewayBackend {
         let body = resp
             .bytes()
             .await
-            .map_err(|e| anyhow::anyhow!("Azure download body read failed: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Azure download body read failed: {e}"))?;
 
         Ok(body)
     }
@@ -387,7 +386,7 @@ impl AzureGatewayBackend {
 
         let mut req = self
             .client
-            .delete(&self.maybe_append_sas(&url))
+            .delete(self.maybe_append_sas(&url))
             .header("x-ms-date", &date)
             .header("x-ms-version", AZURE_API_VERSION);
 
@@ -399,7 +398,7 @@ impl AzureGatewayBackend {
         let resp = req
             .send()
             .await
-            .map_err(|e| anyhow::anyhow!("Azure delete request failed: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Azure delete request failed: {e}"))?;
 
         if !resp.status().is_success() && !Self::is_not_found(resp.status()) {
             let status = resp.status();
@@ -417,7 +416,7 @@ impl AzureGatewayBackend {
 
         let mut req = self
             .client
-            .head(&self.maybe_append_sas(&url))
+            .head(self.maybe_append_sas(&url))
             .header("x-ms-date", &date)
             .header("x-ms-version", AZURE_API_VERSION);
 
@@ -429,7 +428,7 @@ impl AzureGatewayBackend {
         let resp = req
             .send()
             .await
-            .map_err(|e| anyhow::anyhow!("Azure exists check failed: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Azure exists check failed: {e}"))?;
 
         if resp.status().is_success() {
             Ok(true)
@@ -453,7 +452,7 @@ impl AzureGatewayBackend {
         data: &[u8],
     ) -> anyhow::Result<()> {
         let base_url = self.blob_url(blob_name);
-        let url = format!("{}?comp=block&blockid={}", base_url, block_id);
+        let url = format!("{base_url}?comp=block&blockid={block_id}");
         let date = Self::rfc1123_date();
         let content_type = "application/octet-stream";
 
@@ -464,7 +463,7 @@ impl AzureGatewayBackend {
 
         let mut req = self
             .client
-            .put(&self.maybe_append_sas(&url))
+            .put(self.maybe_append_sas(&url))
             .header("x-ms-date", &date)
             .header("x-ms-version", AZURE_API_VERSION)
             .header("Content-Type", content_type)
@@ -486,7 +485,7 @@ impl AzureGatewayBackend {
         let resp = req
             .send()
             .await
-            .map_err(|e| anyhow::anyhow!("Azure put_block request failed: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Azure put_block request failed: {e}"))?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -506,14 +505,14 @@ impl AzureGatewayBackend {
         block_ids: &[String],
     ) -> anyhow::Result<()> {
         let base_url = self.blob_url(blob_name);
-        let url = format!("{}?comp=blocklist", base_url);
+        let url = format!("{base_url}?comp=blocklist");
         let date = Self::rfc1123_date();
         let content_type = "application/xml";
 
         // Build the XML body for Put Block List.
         let mut xml = String::from("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<BlockList>\n");
         for id in block_ids {
-            xml.push_str(&format!("  <Latest>{}</Latest>\n", id));
+            xml.push_str(&format!("  <Latest>{id}</Latest>\n"));
         }
         xml.push_str("</BlockList>");
 
@@ -522,7 +521,7 @@ impl AzureGatewayBackend {
 
         let mut req = self
             .client
-            .put(&self.maybe_append_sas(&url))
+            .put(self.maybe_append_sas(&url))
             .header("x-ms-date", &date)
             .header("x-ms-version", AZURE_API_VERSION)
             .header("Content-Type", content_type)
@@ -544,7 +543,7 @@ impl AzureGatewayBackend {
         let resp = req
             .send()
             .await
-            .map_err(|e| anyhow::anyhow!("Azure put_block_list request failed: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Azure put_block_list request failed: {e}"))?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -567,7 +566,7 @@ impl AzureGatewayBackend {
 
         let mut req = self
             .client
-            .put(&self.maybe_append_sas(&dst_url))
+            .put(self.maybe_append_sas(&dst_url))
             .header("x-ms-date", &date)
             .header("x-ms-version", AZURE_API_VERSION)
             .header("x-ms-copy-source", &src_url);
@@ -588,12 +587,12 @@ impl AzureGatewayBackend {
         let resp = req
             .send()
             .await
-            .map_err(|e| anyhow::anyhow!("Azure copy request failed: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Azure copy request failed: {e}"))?;
 
         if !resp.status().is_success() {
             let status = resp.status();
             if Self::is_not_found(status) {
-                return Err(anyhow::anyhow!("Source blob not found: {}", src_blob_name));
+                return Err(anyhow::anyhow!("Source blob not found: {src_blob_name}"));
             }
             let body = resp.text().await.unwrap_or_default();
             return Err(Self::map_azure_error("copy", status, &body));
@@ -624,7 +623,7 @@ impl StorageBackend for AzureGatewayBackend {
 
             // Compute MD5 locally for consistent ETag.
             let md5_hex = Self::compute_md5(&data);
-            let etag = format!("\"{}\"", md5_hex);
+            let etag = format!("\"{md5_hex}\"");
 
             debug!("Azure put: container={} blob={}", self.container, blob_name);
 
@@ -700,8 +699,8 @@ impl StorageBackend for AzureGatewayBackend {
         dst_bucket: &str,
         dst_key: &str,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + Send + '_>> {
-        let src_storage_key = format!("{}/{}", bucket, src_key);
-        let dst_storage_key = format!("{}/{}", dst_bucket, dst_key);
+        let src_storage_key = format!("{bucket}/{src_key}");
+        let dst_storage_key = format!("{dst_bucket}/{dst_key}");
         Box::pin(async move {
             let src_blob_name = self.blob_name(&src_storage_key);
             let dst_blob_name = self.blob_name(&dst_storage_key);
@@ -714,7 +713,7 @@ impl StorageBackend for AzureGatewayBackend {
             // Download the destination to compute MD5 for consistent ETag.
             let data = self.azure_download(&dst_blob_name).await?;
             let md5_hex = Self::compute_md5(&data);
-            let etag = format!("\"{}\"", md5_hex);
+            let etag = format!("\"{md5_hex}\"");
 
             Ok(etag)
         })
@@ -739,7 +738,7 @@ impl StorageBackend for AzureGatewayBackend {
 
             // Compute MD5 locally for consistent ETag.
             let md5_hex = Self::compute_md5(&data);
-            let etag = format!("\"{}\"", md5_hex);
+            let etag = format!("\"{md5_hex}\"");
 
             debug!(
                 "Azure put_part: container={} blob={} (upload={} part={})",
@@ -765,7 +764,7 @@ impl StorageBackend for AzureGatewayBackend {
         let upload_id = upload_id.to_string();
         let parts = parts.to_vec();
         Box::pin(async move {
-            let final_blob_name = self.blob_name(&format!("{}/{}", bucket, key));
+            let final_blob_name = self.blob_name(&format!("{bucket}/{key}"));
 
             debug!(
                 "Azure assemble_parts: container={} blob={} upload_id={} parts={}",
@@ -819,7 +818,7 @@ impl StorageBackend for AzureGatewayBackend {
                 // Fallback: download assembled blob and compute MD5.
                 let data = self.azure_download(&final_blob_name).await?;
                 let md5_hex = Self::compute_md5(&data);
-                Ok(format!("\"{}\"", md5_hex))
+                Ok(format!("\"{md5_hex}\""))
             }
         })
     }
@@ -918,7 +917,7 @@ impl AzureGatewayBackend {
             );
 
             if let Some(ref m) = marker {
-                url.push_str(&format!("&marker={}", m));
+                url.push_str(&format!("&marker={m}"));
             }
 
             let date = Self::rfc1123_date();
@@ -936,7 +935,7 @@ impl AzureGatewayBackend {
 
             let mut req = self
                 .client
-                .get(&self.maybe_append_sas(&url))
+                .get(self.maybe_append_sas(&url))
                 .header("x-ms-date", &date)
                 .header("x-ms-version", AZURE_API_VERSION);
 
@@ -949,7 +948,7 @@ impl AzureGatewayBackend {
             let resp = req
                 .send()
                 .await
-                .map_err(|e| anyhow::anyhow!("Azure list_blobs request failed: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("Azure list_blobs request failed: {e}"))?;
 
             if !resp.status().is_success() {
                 let status = resp.status();
@@ -1017,7 +1016,7 @@ impl AzureGatewayBackend {
             }
         };
 
-        let ms_headers = format!("x-ms-date:{}\nx-ms-version:{}", date, AZURE_API_VERSION);
+        let ms_headers = format!("x-ms-date:{date}\nx-ms-version:{AZURE_API_VERSION}");
 
         // For container-level operations, canonicalized resource is /{account}/{container}.
         let mut canonicalized_resource = format!("/{}/{}", self.account, self.container);
@@ -1031,14 +1030,12 @@ impl AzureGatewayBackend {
             }
         }
 
-        let string_to_sign = format!(
-            "{}\n\n\n\n\n\n\n\n\n\n\n\n{}\n{}",
-            method, ms_headers, canonicalized_resource
-        );
+        let string_to_sign =
+            format!("{method}\n\n\n\n\n\n\n\n\n\n\n\n{ms_headers}\n{canonicalized_resource}");
 
         type HmacSha256 = Hmac<Sha256>;
         let mut mac = HmacSha256::new_from_slice(key_bytes)
-            .map_err(|e| anyhow::anyhow!("HMAC key error: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("HMAC key error: {e}"))?;
         mac.update(string_to_sign.as_bytes());
         let signature = BASE64_STANDARD.encode(mac.finalize().into_bytes());
 
@@ -1058,7 +1055,7 @@ mod tests {
         let prefix = "bleepstore/";
         let storage_key = "my-bucket/my-key.txt";
         let expected = "bleepstore/my-bucket/my-key.txt";
-        assert_eq!(format!("{}{}", prefix, storage_key), expected);
+        assert_eq!(format!("{prefix}{storage_key}"), expected);
     }
 
     #[test]
@@ -1066,7 +1063,7 @@ mod tests {
         let prefix = "";
         let storage_key = "my-bucket/my-key.txt";
         let expected = "my-bucket/my-key.txt";
-        assert_eq!(format!("{}{}", prefix, storage_key), expected);
+        assert_eq!(format!("{prefix}{storage_key}"), expected);
     }
 
     #[test]
@@ -1168,7 +1165,7 @@ mod tests {
         let prefix = "data/";
         let storage_key = "mybucket/path/to/deep/object.txt";
         let expected = "data/mybucket/path/to/deep/object.txt";
-        assert_eq!(format!("{}{}", prefix, storage_key), expected);
+        assert_eq!(format!("{prefix}{storage_key}"), expected);
     }
 
     #[test]
@@ -1176,7 +1173,7 @@ mod tests {
         let prefix = "bleepstore/";
         let storage_key = "mybucket/key with spaces.txt";
         let expected = "bleepstore/mybucket/key with spaces.txt";
-        assert_eq!(format!("{}{}", prefix, storage_key), expected);
+        assert_eq!(format!("{prefix}{storage_key}"), expected);
     }
 
     #[test]
@@ -1223,7 +1220,7 @@ mod tests {
 
         let mut xml = String::from("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<BlockList>\n");
         for id in &block_ids {
-            xml.push_str(&format!("  <Latest>{}</Latest>\n", id));
+            xml.push_str(&format!("  <Latest>{id}</Latest>\n"));
         }
         xml.push_str("</BlockList>");
 
@@ -1249,7 +1246,7 @@ mod tests {
         let part_number: u32 = 5;
         let expected = "bleepstore/.parts/abc-123/5";
         assert_eq!(
-            format!("{}.parts/{}/{}", prefix, upload_id, part_number),
+            format!("{prefix}.parts/{upload_id}/{part_number}"),
             expected
         );
     }
@@ -1258,8 +1255,8 @@ mod tests {
     fn test_sas_token_prefix_stripped() {
         // SAS tokens with leading '?' should have it stripped.
         let sas = "?sv=2023-11-03&ss=b&srt=sco&sp=rwdlacupiytfx&se=2026-12-31&sig=xxx";
-        let token = if sas.starts_with('?') {
-            sas[1..].to_string()
+        let token = if let Some(stripped) = sas.strip_prefix('?') {
+            stripped.to_string()
         } else {
             sas.to_string()
         };
@@ -1270,8 +1267,8 @@ mod tests {
     #[test]
     fn test_sas_token_no_prefix() {
         let sas = "sv=2023-11-03&ss=b&srt=sco";
-        let token = if sas.starts_with('?') {
-            sas[1..].to_string()
+        let token = if let Some(stripped) = sas.strip_prefix('?') {
+            stripped.to_string()
         } else {
             sas.to_string()
         };

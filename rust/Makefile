@@ -1,7 +1,7 @@
 .PHONY: build test-unit test-e2e test run clean lint fmt fmt-check
 
 build:
-	cargo build --release
+	cargo build
 
 test-unit:
 	cargo test

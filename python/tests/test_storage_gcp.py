@@ -6,7 +6,7 @@ backend._client to bypass session creation.
 """
 
 import hashlib
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 

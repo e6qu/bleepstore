@@ -44,9 +44,9 @@ fn parse_range_header(range_str: &str) -> Option<ByteRange> {
             return None;
         }
         Some(ByteRange::Suffix(n))
-    } else if spec.ends_with('-') {
+    } else if let Some(stripped) = spec.strip_suffix('-') {
         // bytes=N- (open-ended range)
-        let start: u64 = spec[..spec.len() - 1].parse().ok()?;
+        let start: u64 = stripped.parse().ok()?;
         Some(ByteRange::StartOpen(start))
     } else if let Some((start_s, end_s)) = spec.split_once('-') {
         // bytes=start-end
@@ -224,10 +224,7 @@ fn now_iso8601() -> String {
 
     let (year, month, day) = days_to_ymd(days);
 
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
-        year, month, day, hours, minutes, seconds, millis
-    )
+    format!("{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}.{millis:03}Z")
 }
 
 /// Convert days since Unix epoch to (year, month, day).
@@ -320,7 +317,7 @@ fn canned_acl_to_json(canned: &str, owner_id: &str, display_name: &str) -> Resul
         }
         _ => {
             return Err(S3Error::InvalidArgument {
-                message: format!("Invalid canned ACL: {}", canned),
+                message: format!("Invalid canned ACL: {canned}"),
             });
         }
     }
@@ -382,8 +379,8 @@ fn ymd_to_days(year: i32, month: u32, day: u32) -> i64 {
     let yoe = (y - era * 400) as u64;
     let doy = (153 * m as u64 + 2) / 5 + day as u64 - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = era as i64 * 146097 + doe as i64 - 719468;
-    days
+
+    era * 146097 + doe as i64 - 719468
 }
 
 // -- Handlers -----------------------------------------------------------------
@@ -461,7 +458,7 @@ pub async fn put_object(
     };
 
     // Storage key = bucket/key.
-    let storage_key = format!("{}/{}", bucket, key);
+    let storage_key = format!("{bucket}/{key}");
 
     // Write to storage backend (crash-only: temp-fsync-rename).
     let etag = state.storage.put(&storage_key, data).await?;
@@ -543,7 +540,7 @@ pub async fn get_object(
     evaluate_conditions(headers, &record, true)?;
 
     // Read from storage backend.
-    let storage_key = format!("{}/{}", bucket, key);
+    let storage_key = format!("{bucket}/{key}");
     let stored = state.storage.get(&storage_key).await?;
     let full_data = stored.data;
     let total_size = full_data.len() as u64;
@@ -555,7 +552,7 @@ pub async fn get_object(
                 if let Some((start, end)) = resolve_range(&byte_range, total_size) {
                     let slice = full_data.slice(start as usize..(end + 1) as usize);
                     let slice_len = slice.len() as u64;
-                    let content_range = format!("bytes {}-{}/{}", start, end, total_size);
+                    let content_range = format!("bytes {start}-{end}/{total_size}");
                     (
                         StatusCode::PARTIAL_CONTENT,
                         slice.to_vec(),
@@ -772,7 +769,7 @@ pub async fn delete_object(
     }
 
     // Delete from storage backend (best-effort; idempotent).
-    let storage_key = format!("{}/{}", bucket, key);
+    let storage_key = format!("{bucket}/{key}");
     let _ = state.storage.delete(&storage_key).await;
 
     // Delete from metadata store (idempotent: no error if not found).
@@ -821,7 +818,7 @@ pub async fn delete_objects(
 
     for key in &keys {
         // Delete from storage (best-effort, idempotent).
-        let storage_key = format!("{}/{}", bucket, key);
+        let storage_key = format!("{bucket}/{key}");
         let _ = state.storage.delete(&storage_key).await;
 
         // Delete from metadata (idempotent).
@@ -962,7 +959,7 @@ pub async fn copy_object(
         source_path
             .split_once('/')
             .ok_or_else(|| S3Error::InvalidArgument {
-                message: format!("Invalid x-amz-copy-source: {}", copy_source),
+                message: format!("Invalid x-amz-copy-source: {copy_source}"),
             })?;
 
     // Check source bucket exists.
@@ -1234,10 +1231,8 @@ pub async fn list_objects_v1(
             // NextMarker is the key of the last returned entry (object or common prefix).
             if let Some(last_obj) = entries.last() {
                 Some(last_obj.key.to_string())
-            } else if let Some(last_cp) = common_prefix_refs.last() {
-                Some(last_cp.to_string())
             } else {
-                None
+                common_prefix_refs.last().map(|last_cp| last_cp.to_string())
             }
         } else {
             // Without delimiter, NextMarker is not required (client uses last key as marker).

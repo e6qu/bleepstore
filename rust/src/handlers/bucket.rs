@@ -23,7 +23,7 @@ use crate::AppState;
 pub fn validate_bucket_name(name: &str) -> Result<(), S3Error> {
     let len = name.len();
 
-    if len < 3 || len > 63 {
+    if !(3..=63).contains(&len) {
         return Err(S3Error::InvalidBucketName {
             name: name.to_string(),
         });
@@ -137,7 +137,7 @@ fn canned_acl_to_json(canned: &str, owner_id: &str, display_name: &str) -> Resul
         }
         _ => {
             return Err(S3Error::InvalidArgument {
-                message: format!("Invalid canned ACL: {}", canned),
+                message: format!("Invalid canned ACL: {canned}"),
             });
         }
     }
@@ -171,10 +171,7 @@ fn now_iso8601() -> String {
 
     let (year, month, day) = days_to_ymd(days);
 
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
-        year, month, day, hours, minutes, seconds, millis
-    )
+    format!("{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}.{millis:03}Z")
 }
 
 /// Convert days since Unix epoch to (year, month, day).
@@ -262,7 +259,7 @@ pub async fn create_bucket(
         default_acl_json(&owner_id, &owner_display)
     };
 
-    let location = format!("/{}", bucket);
+    let location = format!("/{bucket}");
 
     // Check if bucket already exists.
     if let Some(existing) = state.metadata.get_bucket(bucket).await? {

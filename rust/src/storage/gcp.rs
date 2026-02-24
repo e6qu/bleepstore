@@ -115,7 +115,7 @@ impl GcpGatewayBackend {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(300))
             .build()
-            .map_err(|e| anyhow::anyhow!("Failed to create HTTP client: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to create HTTP client: {e}"))?;
 
         info!(
             "GCP gateway backend initialized: bucket={} project={} prefix='{}'",
@@ -205,13 +205,10 @@ impl GcpGatewayBackend {
     /// Get the path to gcloud application-default credentials.
     fn application_default_credentials_path() -> String {
         if let Ok(config_dir) = std::env::var("CLOUDSDK_CONFIG") {
-            return format!("{}/application_default_credentials.json", config_dir);
+            return format!("{config_dir}/application_default_credentials.json");
         }
         if let Ok(home) = std::env::var("HOME") {
-            return format!(
-                "{}/.config/gcloud/application_default_credentials.json",
-                home
-            );
+            return format!("{home}/.config/gcloud/application_default_credentials.json");
         }
         // Fallback (unlikely to work but try anyway)
         ".config/gcloud/application_default_credentials.json".to_string()
@@ -219,12 +216,12 @@ impl GcpGatewayBackend {
 
     /// Obtain an access token from a service account JSON key file.
     async fn token_from_service_account(&self, creds_path: &str) -> anyhow::Result<(String, u64)> {
-        let contents = tokio::fs::read_to_string(creds_path).await.map_err(|e| {
-            anyhow::anyhow!("Failed to read service account key {}: {}", creds_path, e)
-        })?;
+        let contents = tokio::fs::read_to_string(creds_path)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to read service account key {creds_path}: {e}"))?;
 
         let creds: serde_json::Value = serde_json::from_str(&contents)
-            .map_err(|e| anyhow::anyhow!("Failed to parse service account key: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to parse service account key: {e}"))?;
 
         let cred_type = creds.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
@@ -264,9 +261,7 @@ impl GcpGatewayBackend {
             .await
         } else {
             Err(anyhow::anyhow!(
-                "Unsupported credential type in {}: {}",
-                creds_path,
-                cred_type
+                "Unsupported credential type in {creds_path}: {cred_type}"
             ))
         }
     }
@@ -275,10 +270,10 @@ impl GcpGatewayBackend {
     async fn token_from_adc_file(&self, adc_path: &str) -> anyhow::Result<(String, u64)> {
         let contents = tokio::fs::read_to_string(adc_path)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to read ADC file {}: {}", adc_path, e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to read ADC file {adc_path}: {e}"))?;
 
         let creds: serde_json::Value = serde_json::from_str(&contents)
-            .map_err(|e| anyhow::anyhow!("Failed to parse ADC file: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to parse ADC file: {e}"))?;
 
         let cred_type = creds.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
@@ -302,8 +297,7 @@ impl GcpGatewayBackend {
             self.token_from_service_account(adc_path).await
         } else {
             Err(anyhow::anyhow!(
-                "Unsupported credential type in ADC file: {}",
-                cred_type
+                "Unsupported credential type in ADC file: {cred_type}"
             ))
         }
     }
@@ -326,16 +320,12 @@ impl GcpGatewayBackend {
             ])
             .send()
             .await
-            .map_err(|e| anyhow::anyhow!("Token refresh request failed: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Token refresh request failed: {e}"))?;
 
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!(
-                "Token refresh failed ({}): {}",
-                status,
-                body
-            ));
+            return Err(anyhow::anyhow!("Token refresh failed ({status}): {body}"));
         }
 
         let token_resp: serde_json::Value = resp.json().await?;
@@ -391,9 +381,9 @@ impl GcpGatewayBackend {
             .timeout(std::time::Duration::from_secs(5))
             .send()
             .await
-            .map_err(|e| anyhow::anyhow!("Metadata server request failed: {}. \
+            .map_err(|e| anyhow::anyhow!("Metadata server request failed: {e}. \
                 Set GOOGLE_APPLICATION_CREDENTIALS, run 'gcloud auth application-default login', \
-                or set GOOGLE_OAUTH_ACCESS_TOKEN env var.", e))?;
+                or set GOOGLE_OAUTH_ACCESS_TOKEN env var."))?;
 
         if !resp.status().is_success() {
             return Err(anyhow::anyhow!(
@@ -423,8 +413,8 @@ impl GcpGatewayBackend {
         let mut headers = HeaderMap::new();
         headers.insert(
             AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {}", token))
-                .map_err(|e| anyhow::anyhow!("Invalid auth header value: {}", e))?,
+            HeaderValue::from_str(&format!("Bearer {token}"))
+                .map_err(|e| anyhow::anyhow!("Invalid auth header value: {e}"))?,
         );
         Ok(headers)
     }
@@ -447,7 +437,7 @@ impl GcpGatewayBackend {
                 );
             }
         }
-        anyhow::anyhow!("GCS {}: HTTP {} - {}", context, status, body)
+        anyhow::anyhow!("GCS {context}: HTTP {status} - {body}")
     }
 
     /// Check if a GCS error response indicates "not found" (404).
@@ -477,7 +467,7 @@ impl GcpGatewayBackend {
             .body(data.to_vec())
             .send()
             .await
-            .map_err(|e| anyhow::anyhow!("GCS upload request failed: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("GCS upload request failed: {e}"))?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -506,14 +496,13 @@ impl GcpGatewayBackend {
             .headers(auth)
             .send()
             .await
-            .map_err(|e| anyhow::anyhow!("GCS download request failed: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("GCS download request failed: {e}"))?;
 
         if !resp.status().is_success() {
             let status = resp.status();
             if Self::is_not_found(status) {
                 return Err(anyhow::anyhow!(
-                    "Object not found at storage key: {}",
-                    object_name
+                    "Object not found at storage key: {object_name}"
                 ));
             }
             let body = resp.text().await.unwrap_or_default();
@@ -523,7 +512,7 @@ impl GcpGatewayBackend {
         let body = resp
             .bytes()
             .await
-            .map_err(|e| anyhow::anyhow!("GCS download body read failed: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("GCS download body read failed: {e}"))?;
 
         Ok(body)
     }
@@ -546,7 +535,7 @@ impl GcpGatewayBackend {
             .headers(auth)
             .send()
             .await
-            .map_err(|e| anyhow::anyhow!("GCS delete request failed: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("GCS delete request failed: {e}"))?;
 
         if !resp.status().is_success() && !Self::is_not_found(resp.status()) {
             let status = resp.status();
@@ -576,7 +565,7 @@ impl GcpGatewayBackend {
             .query(&[("fields", "name")])
             .send()
             .await
-            .map_err(|e| anyhow::anyhow!("GCS exists check failed: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("GCS exists check failed: {e}"))?;
 
         if resp.status().is_success() {
             Ok(true)
@@ -598,8 +587,7 @@ impl GcpGatewayBackend {
 
         // GCS rewrite API handles large objects transparently.
         let url = format!(
-            "{}/storage/v1/b/{}/o/{}/rewriteTo/b/{}/o/{}",
-            GCS_API_BASE, encoded_bucket, encoded_src, encoded_bucket, encoded_dst
+            "{GCS_API_BASE}/storage/v1/b/{encoded_bucket}/o/{encoded_src}/rewriteTo/b/{encoded_bucket}/o/{encoded_dst}"
         );
 
         // Rewrite may require multiple calls for large objects.
@@ -617,12 +605,12 @@ impl GcpGatewayBackend {
             let resp = req
                 .send()
                 .await
-                .map_err(|e| anyhow::anyhow!("GCS rewrite request failed: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("GCS rewrite request failed: {e}"))?;
 
             if !resp.status().is_success() {
                 let status = resp.status();
                 if Self::is_not_found(status) {
-                    return Err(anyhow::anyhow!("Source object not found: {}", src_object));
+                    return Err(anyhow::anyhow!("Source object not found: {src_object}"));
                 }
                 let body = resp.text().await.unwrap_or_default();
                 return Err(Self::map_gcs_error("rewrite", status, &body));
@@ -658,10 +646,7 @@ impl GcpGatewayBackend {
         let encoded_dst = Self::url_encode_object_name(destination_name);
         let encoded_bucket = Self::url_encode_object_name(&self.bucket);
 
-        let url = format!(
-            "{}/storage/v1/b/{}/o/{}/compose",
-            GCS_API_BASE, encoded_bucket, encoded_dst
-        );
+        let url = format!("{GCS_API_BASE}/storage/v1/b/{encoded_bucket}/o/{encoded_dst}/compose");
 
         let compose_req = ComposeRequest {
             source_objects: source_names
@@ -680,7 +665,7 @@ impl GcpGatewayBackend {
             .json(&compose_req)
             .send()
             .await
-            .map_err(|e| anyhow::anyhow!("GCS compose request failed: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("GCS compose request failed: {e}"))?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -699,7 +684,7 @@ impl GcpGatewayBackend {
         let mut page_token: Option<String> = None;
 
         loop {
-            let url = format!("{}/storage/v1/b/{}/o", GCS_API_BASE, encoded_bucket);
+            let url = format!("{GCS_API_BASE}/storage/v1/b/{encoded_bucket}/o");
 
             let mut req = self
                 .client
@@ -714,7 +699,7 @@ impl GcpGatewayBackend {
             let resp = req
                 .send()
                 .await
-                .map_err(|e| anyhow::anyhow!("GCS list request failed: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("GCS list request failed: {e}"))?;
 
             if !resp.status().is_success() {
                 let status = resp.status();
@@ -775,8 +760,7 @@ impl GcpGatewayBackend {
                     batch_idx * MAX_COMPOSE_SOURCES
                 );
 
-                self.gcs_compose(&chunk.to_vec(), &intermediate_name)
-                    .await?;
+                self.gcs_compose(chunk, &intermediate_name).await?;
 
                 next_sources.push(intermediate_name.clone());
                 all_intermediates.push(intermediate_name);
@@ -805,7 +789,7 @@ impl StorageBackend for GcpGatewayBackend {
 
             // Compute MD5 locally for consistent ETag.
             let md5_hex = Self::compute_md5(&data);
-            let etag = format!("\"{}\"", md5_hex);
+            let etag = format!("\"{md5_hex}\"");
 
             debug!("GCS put: bucket={} name={}", self.bucket, gcs_name);
 
@@ -876,8 +860,8 @@ impl StorageBackend for GcpGatewayBackend {
         dst_bucket: &str,
         dst_key: &str,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + Send + '_>> {
-        let src_storage_key = format!("{}/{}", bucket, src_key);
-        let dst_storage_key = format!("{}/{}", dst_bucket, dst_key);
+        let src_storage_key = format!("{bucket}/{src_key}");
+        let dst_storage_key = format!("{dst_bucket}/{dst_key}");
         Box::pin(async move {
             let src_gcs_name = self.gcs_name(&src_storage_key);
             let dst_gcs_name = self.gcs_name(&dst_storage_key);
@@ -890,7 +874,7 @@ impl StorageBackend for GcpGatewayBackend {
             // Download the result to compute MD5 for consistent ETag.
             let data = self.gcs_download(&dst_gcs_name).await?;
             let md5_hex = Self::compute_md5(&data);
-            let etag = format!("\"{}\"", md5_hex);
+            let etag = format!("\"{md5_hex}\"");
 
             Ok(etag)
         })
@@ -909,7 +893,7 @@ impl StorageBackend for GcpGatewayBackend {
 
             // Compute MD5 locally for consistent ETag.
             let md5_hex = Self::compute_md5(&data);
-            let etag = format!("\"{}\"", md5_hex);
+            let etag = format!("\"{md5_hex}\"");
 
             debug!(
                 "GCS put_part: bucket={} name={} (upload={} part={})",
@@ -935,7 +919,7 @@ impl StorageBackend for GcpGatewayBackend {
         let upload_id = upload_id.to_string();
         let parts = parts.to_vec();
         Box::pin(async move {
-            let final_name = self.gcs_name(&format!("{}/{}", bucket, key));
+            let final_name = self.gcs_name(&format!("{bucket}/{key}"));
 
             debug!(
                 "GCS assemble_parts: bucket={} name={} upload_id={} parts={}",
@@ -989,7 +973,7 @@ impl StorageBackend for GcpGatewayBackend {
                 ))
             } else {
                 // Fallback: use MD5 of full assembled data.
-                Ok(format!("\"{}\"", md5_hex))
+                Ok(format!("\"{md5_hex}\""))
             }
         })
     }
@@ -1066,7 +1050,7 @@ mod tests {
         let prefix = "bleepstore/";
         let storage_key = "my-bucket/my-key.txt";
         let expected = "bleepstore/my-bucket/my-key.txt";
-        assert_eq!(format!("{}{}", prefix, storage_key), expected);
+        assert_eq!(format!("{prefix}{storage_key}"), expected);
     }
 
     #[test]
@@ -1074,7 +1058,7 @@ mod tests {
         let prefix = "";
         let storage_key = "my-bucket/my-key.txt";
         let expected = "my-bucket/my-key.txt";
-        assert_eq!(format!("{}{}", prefix, storage_key), expected);
+        assert_eq!(format!("{prefix}{storage_key}"), expected);
     }
 
     #[test]
@@ -1084,7 +1068,7 @@ mod tests {
         let part_number: u32 = 5;
         let expected = "bleepstore/.parts/abc-123/5";
         assert_eq!(
-            format!("{}.parts/{}/{}", prefix, upload_id, part_number),
+            format!("{prefix}.parts/{upload_id}/{part_number}"),
             expected
         );
     }
@@ -1152,7 +1136,7 @@ mod tests {
         let prefix = "data/";
         let storage_key = "mybucket/path/to/deep/object.txt";
         let expected = "data/mybucket/path/to/deep/object.txt";
-        assert_eq!(format!("{}{}", prefix, storage_key), expected);
+        assert_eq!(format!("{prefix}{storage_key}"), expected);
     }
 
     #[test]
@@ -1160,7 +1144,7 @@ mod tests {
         let prefix = "bleepstore/";
         let storage_key = "mybucket/key with spaces.txt";
         let expected = "bleepstore/mybucket/key with spaces.txt";
-        assert_eq!(format!("{}{}", prefix, storage_key), expected);
+        assert_eq!(format!("{prefix}{storage_key}"), expected);
     }
 
     #[test]
@@ -1207,8 +1191,8 @@ mod tests {
         // With 65 sources and MAX_COMPOSE_SOURCES=32:
         // Round 1: 3 batches (32, 32, 1) -> 3 intermediates (2 composed, 1 passthrough)
         // Round 2: 3 <= 32, final compose
-        let num_sources = 65;
-        let num_batches_round1 = (num_sources + MAX_COMPOSE_SOURCES - 1) / MAX_COMPOSE_SOURCES;
+        let num_sources: usize = 65;
+        let num_batches_round1 = num_sources.div_ceil(MAX_COMPOSE_SOURCES);
         assert_eq!(num_batches_round1, 3);
         // After round 1 we have 3 sources, which is <= 32, so final compose
         assert!(num_batches_round1 <= MAX_COMPOSE_SOURCES);
@@ -1223,7 +1207,7 @@ mod tests {
         let mut count = 1025usize;
         let mut rounds = 0;
         while count > MAX_COMPOSE_SOURCES {
-            count = (count + MAX_COMPOSE_SOURCES - 1) / MAX_COMPOSE_SOURCES;
+            count = count.div_ceil(MAX_COMPOSE_SOURCES);
             rounds += 1;
         }
         assert_eq!(rounds, 2); // 2 intermediate rounds before final

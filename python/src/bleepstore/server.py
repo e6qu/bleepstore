@@ -13,7 +13,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from bleepstore.auth import SigV4Authenticator
 from bleepstore.config import BleepStoreConfig
-from bleepstore.errors import InvalidArgument, NotImplementedS3Error, S3Error
+from bleepstore.errors import NotImplementedS3Error, S3Error
 from bleepstore.handlers.bucket import BucketHandler
 from bleepstore.handlers.multipart import MultipartHandler
 from bleepstore.handlers.object import ObjectHandler
