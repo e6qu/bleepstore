@@ -5,6 +5,7 @@ import email.utils
 import hashlib
 import logging
 import secrets
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
@@ -95,6 +96,12 @@ def create_app(config: BleepStoreConfig) -> FastAPI:
             owner_id=owner_id,
             display_name=access_key,
         )
+        # Create SigV4 authenticator once so signing-key cache persists
+        app.state.authenticator = SigV4Authenticator(
+            metadata=metadata,
+            region=config.server.region,
+        )
+
         logger.info("Metadata store initialized, credentials seeded")
         logger.info("Storage backend initialized: %s", config.storage.backend)
 
@@ -296,13 +303,34 @@ def _register_middleware(app: FastAPI) -> None:
         """
         request_id = secrets.token_hex(8).upper()
         request.state.request_id = request_id
+        start = time.monotonic()
 
         response = await call_next(request)
+
+        duration_ms = round((time.monotonic() - start) * 1000, 2)
 
         response.headers["x-amz-request-id"] = request_id
         response.headers["x-amz-id-2"] = base64.b64encode(secrets.token_bytes(24)).decode()
         response.headers["Date"] = email.utils.formatdate(usegmt=True)
         response.headers["Server"] = "BleepStore"
+
+        # Per-request structured log (skip /metrics and /health to reduce noise)
+        if request.url.path not in ("/metrics", "/health"):
+            logger.info(
+                "%s %s %d %.2fms",
+                request.method,
+                request.url.path,
+                response.status_code,
+                duration_ms,
+                extra={
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status": response.status_code,
+                    "duration_ms": duration_ms,
+                    "request_id": request_id,
+                },
+            )
+
         return response
 
     @app.middleware("http")
@@ -335,10 +363,13 @@ def _register_middleware(app: FastAPI) -> None:
 
         # Perform SigV4 verification -- catch auth errors and render as S3 XML
         try:
-            authenticator = SigV4Authenticator(
-                metadata=metadata,
-                region=cfg.server.region,
-            )
+            authenticator = getattr(app.state, "authenticator", None)
+            if authenticator is None:
+                # Fallback: create per-request (shouldn't happen in production)
+                authenticator = SigV4Authenticator(
+                    metadata=metadata,
+                    region=cfg.server.region,
+                )
             credential_info = await authenticator.verify_request(request)
         except S3Error as exc:
             request_id = getattr(request.state, "request_id", "")

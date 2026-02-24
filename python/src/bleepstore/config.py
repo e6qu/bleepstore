@@ -13,6 +13,10 @@ class ServerConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 9000
     region: str = "us-east-1"
+    log_level: str = "INFO"
+    log_format: str = "text"
+    shutdown_timeout: int = 30
+    max_object_size: int = 5 * 1024 * 1024 * 1024 * 1024  # 5 TB
 
 
 class AuthConfig(BaseModel):
@@ -73,6 +77,10 @@ def _parse_server(data: dict[str, Any] | None) -> dict[str, Any]:
         "host": data.get("host", "0.0.0.0"),
         "port": data.get("port", 9000),
         "region": data.get("region", "us-east-1"),
+        "log_level": data.get("log_level", "INFO"),
+        "log_format": data.get("log_format", "text"),
+        "shutdown_timeout": data.get("shutdown_timeout", 30),
+        "max_object_size": data.get("max_object_size", 5 * 1024 * 1024 * 1024 * 1024),
     }
 
 

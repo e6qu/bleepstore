@@ -5,10 +5,13 @@ All tables use CREATE TABLE IF NOT EXISTS for schema idempotency.
 ACL and user_metadata fields are stored as JSON text.
 """
 
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
 import aiosqlite
+
+logger = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
@@ -55,8 +58,18 @@ class SQLiteMetadataStore:
         await self._create_tables()
 
     async def _create_tables(self) -> None:
-        """Create all tables and indexes if they do not already exist."""
+        """Create all tables and indexes if they do not already exist.
+
+        Checks sqlite_master first to skip DDL on warm starts.
+        """
         assert self._db is not None
+
+        # Fast path: if schema_version table exists, schema is already set up
+        async with self._db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_version'"
+        ) as cursor:
+            if await cursor.fetchone() is not None:
+                return
 
         await self._db.executescript("""
             CREATE TABLE IF NOT EXISTS buckets (
@@ -310,30 +323,34 @@ class SQLiteMetadataStore:
             user_metadata: JSON-serialized user metadata.
         """
         assert self._db is not None
-        await self._db.execute(
-            """INSERT OR REPLACE INTO objects
-               (bucket, key, size, etag, content_type, content_encoding,
-                content_language, content_disposition, cache_control, expires,
-                storage_class, acl, user_metadata, last_modified)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                bucket,
-                key,
-                size,
-                etag,
-                content_type,
-                content_encoding,
-                content_language,
-                content_disposition,
-                cache_control,
-                expires,
-                storage_class,
-                acl,
-                user_metadata,
-                _now_iso(),
-            ),
-        )
-        await self._db.commit()
+        try:
+            await self._db.execute(
+                """INSERT OR REPLACE INTO objects
+                   (bucket, key, size, etag, content_type, content_encoding,
+                    content_language, content_disposition, cache_control, expires,
+                    storage_class, acl, user_metadata, last_modified)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    bucket,
+                    key,
+                    size,
+                    etag,
+                    content_type,
+                    content_encoding,
+                    content_language,
+                    content_disposition,
+                    cache_control,
+                    expires,
+                    storage_class,
+                    acl,
+                    user_metadata,
+                    _now_iso(),
+                ),
+            )
+            await self._db.commit()
+        except aiosqlite.OperationalError:
+            logger.exception("SQLite error in put_object %s/%s", bucket, key)
+            raise
 
     async def object_exists(self, bucket: str, key: str) -> bool:
         """Check whether an object exists.
@@ -390,6 +407,8 @@ class SQLiteMetadataStore:
     async def delete_objects_meta(self, bucket: str, keys: list[str]) -> list[str]:
         """Delete multiple object metadata records in a batch.
 
+        Uses batch SQL (IN clause) to reduce 2N queries to 2 queries.
+
         Args:
             bucket: The bucket name.
             keys: List of object keys to delete.
@@ -398,19 +417,25 @@ class SQLiteMetadataStore:
             List of keys that were actually deleted (had existing rows).
         """
         assert self._db is not None
-        deleted: list[str] = []
-        for key in keys:
-            # Check existence first so we can report which were actually deleted
-            async with self._db.execute(
-                "SELECT 1 FROM objects WHERE bucket = ? AND key = ?", (bucket, key)
-            ) as cursor:
-                row = await cursor.fetchone()
-            if row is not None:
-                await self._db.execute(
-                    "DELETE FROM objects WHERE bucket = ? AND key = ?", (bucket, key)
-                )
-                deleted.append(key)
-        await self._db.commit()
+        if not keys:
+            return []
+
+        # Build parameterised IN clause
+        placeholders = ",".join("?" for _ in keys)
+
+        # 1. Find which keys exist (single SELECT)
+        sql_select = f"SELECT key FROM objects WHERE bucket = ? AND key IN ({placeholders})"
+        async with self._db.execute(sql_select, (bucket, *keys)) as cursor:
+            rows = await cursor.fetchall()
+        deleted = [row["key"] for row in rows]
+
+        if deleted:
+            # 2. Delete them all (single DELETE)
+            del_placeholders = ",".join("?" for _ in deleted)
+            sql_delete = f"DELETE FROM objects WHERE bucket = ? AND key IN ({del_placeholders})"
+            await self._db.execute(sql_delete, (bucket, *deleted))
+            await self._db.commit()
+
         return deleted
 
     async def update_object_acl(self, bucket: str, key: str, acl: str) -> None:
@@ -471,10 +496,10 @@ class SQLiteMetadataStore:
         # Determine the start-after key
         start_after = continuation_token or marker or ""
 
-        # Build the query. We fetch extra rows to handle delimiter grouping
-        # and to determine if results are truncated.
-        # We over-fetch because delimiter grouping can collapse multiple rows
-        # into a single CommonPrefix, so we need more rows than max_keys.
+        # Build the query. Fetch max_keys+1 rows for the non-delimiter case
+        # to detect truncation without a separate query. For the delimiter case,
+        # we over-fetch because grouping can collapse multiple rows into a
+        # single CommonPrefix.
         sql_parts = [
             "SELECT key, size, etag, last_modified, storage_class, user_metadata"
             " FROM objects WHERE bucket = ?"
@@ -491,8 +516,6 @@ class SQLiteMetadataStore:
 
         sql_parts.append("ORDER BY key")
 
-        # Fetch enough rows to fill max_keys results after grouping.
-        # We fetch a generous amount to account for prefix collapsing.
         fetch_limit = max_keys * 3 + 100 if delimiter else max_keys + 1
         sql_parts.append(f"LIMIT {fetch_limit}")
 
@@ -505,12 +528,13 @@ class SQLiteMetadataStore:
         contents: list[dict[str, Any]] = []
         common_prefixes: list[str] = []
         seen_prefixes: set[str] = set()
+        rows_consumed = 0
 
         for row in rows:
+            rows_consumed += 1
             row_key: str = row["key"]
 
             if delimiter:
-                # Check if this key should be grouped into a CommonPrefix
                 suffix = row_key[len(prefix) :]
                 delim_pos = suffix.find(delimiter)
                 if delim_pos >= 0:
@@ -518,7 +542,6 @@ class SQLiteMetadataStore:
                     if cp not in seen_prefixes:
                         seen_prefixes.add(cp)
                         common_prefixes.append(cp)
-                        # Count toward max_keys
                         if len(contents) + len(common_prefixes) >= max_keys:
                             break
                     continue
@@ -528,40 +551,10 @@ class SQLiteMetadataStore:
                 break
 
         total_returned = len(contents) + len(common_prefixes)
-        # Determine if there are more results
-        # If we hit the max_keys limit, there may be more rows
-        is_truncated = total_returned >= max_keys and len(rows) > total_returned
 
-        # Actually, a more reliable way: if we consumed exactly max_keys entries
-        # and there are still more rows in the fetch, it's truncated.
-        # Also, if our fetch itself was limited and we consumed all of them.
-        if total_returned >= max_keys:
-            # Check if there would be more data after these results
-            # The simplest approach: if our fetched rows had more to process
-            is_truncated = len(rows) > 0 and total_returned >= max_keys
-            # Refine: run a quick check if there's at least one more row
-            if is_truncated:
-                last_key = ""
-                if contents:
-                    last_key = contents[-1]["key"]
-                elif common_prefixes:
-                    # Need the last key that was part of the last common prefix
-                    last_key = common_prefixes[-1]
-
-                if last_key:
-                    check_sql_parts = ["SELECT 1 FROM objects WHERE bucket = ? AND key > ?"]
-                    check_params: list[Any] = [bucket, last_key]
-                    if prefix:
-                        check_sql_parts.append("AND key LIKE ? || '%'")
-                        check_params.append(prefix)
-                    check_sql_parts.append("LIMIT 1")
-                    check_sql = " ".join(check_sql_parts)
-                    async with self._db.execute(check_sql, tuple(check_params)) as cursor:
-                        is_truncated = (await cursor.fetchone()) is not None
-                else:
-                    is_truncated = False
-        else:
-            is_truncated = False
+        # Detect truncation: if we hit max_keys and there are unconsumed rows,
+        # results are truncated. No separate SELECT needed.
+        is_truncated = total_returned >= max_keys and rows_consumed < len(rows)
 
         # Build pagination tokens
         next_continuation_token: str | None = None

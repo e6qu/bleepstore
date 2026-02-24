@@ -8,6 +8,7 @@ from pathlib import Path
 import uvicorn
 
 from bleepstore.config import load_config
+from bleepstore.logging_config import configure_logging
 from bleepstore.server import create_app
 
 
@@ -42,6 +43,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Port to listen on (overrides config)",
     )
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        default=None,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Log level (overrides config, default: INFO)",
+    )
+    parser.add_argument(
+        "--log-format",
+        type=str,
+        default=None,
+        choices=["text", "json"],
+        help="Log format: 'text' (human-readable) or 'json' (structured)",
+    )
+    parser.add_argument(
+        "--shutdown-timeout",
+        type=int,
+        default=None,
+        help="Graceful shutdown timeout in seconds (default: 30)",
+    )
     return parser.parse_args(argv)
 
 
@@ -57,15 +78,11 @@ def main(argv: list[str] | None = None) -> None:
     """
     args = parse_args(argv)
 
-    # Configure logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        stream=sys.stderr,
-    )
+    # Load configuration first (logging depends on config values)
+    # Use a basic stderr logger for config-loading errors
+    logging.basicConfig(level=logging.INFO, stream=sys.stderr)
     logger = logging.getLogger("bleepstore")
 
-    # Load configuration
     try:
         config = load_config(args.config)
     except FileNotFoundError:
@@ -80,6 +97,18 @@ def main(argv: list[str] | None = None) -> None:
         config.server.host = args.host
     if args.port is not None:
         config.server.port = args.port
+    if args.log_level is not None:
+        config.server.log_level = args.log_level
+    if args.log_format is not None:
+        config.server.log_format = args.log_format
+    if args.shutdown_timeout is not None:
+        config.server.shutdown_timeout = args.shutdown_timeout
+
+    # Configure structured logging (replaces basicConfig)
+    configure_logging(
+        level=config.server.log_level,
+        fmt=config.server.log_format,
+    )
 
     logger.info(
         "Starting BleepStore on %s:%d (region=%s)",
@@ -92,12 +121,13 @@ def main(argv: list[str] | None = None) -> None:
     app = create_app(config)
 
     # Run with uvicorn (crash-only: every startup is recovery)
-    # uvicorn handles SIGTERM/SIGINT graceful shutdown natively
     uvicorn.run(
         app,
         host=config.server.host,
         port=config.server.port,
-        log_level="info",
+        log_level=config.server.log_level.lower(),
+        timeout_graceful_shutdown=config.server.shutdown_timeout,
+        timeout_keep_alive=5,
     )
 
 

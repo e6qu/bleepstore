@@ -366,10 +366,6 @@ class ObjectHandler:
         # Validate the object key
         validate_object_key(key)
 
-        # Read the full body
-        data = await request.body()
-        size = len(data)
-
         # Extract content type (default to application/octet-stream)
         content_type = request.headers.get("content-type", "application/octet-stream")
 
@@ -399,8 +395,36 @@ class ObjectHandler:
 
                 raise InvalidArgument(f"Invalid canned ACL: {canned_acl}")
 
-        # Write data to storage (atomic: temp-fsync-rename)
-        md5_hex = await self.storage.put(bucket, key, data)
+        # Reject uploads exceeding max_object_size early if Content-Length is known
+        max_size = self.config.server.max_object_size
+        content_length_hdr = request.headers.get("content-length")
+        if content_length_hdr:
+            try:
+                if int(content_length_hdr) > max_size:
+                    from bleepstore.errors import EntityTooLarge
+
+                    raise EntityTooLarge()
+            except ValueError:
+                pass
+
+        # Use streaming write to avoid buffering the entire body in memory.
+        # Check if the body has already been consumed (e.g. by auth middleware
+        # reading body for SigV4 payload hash) — if _body is set on the
+        # request, body was already read.
+        if hasattr(request, "_body") and request._body is not None:
+            # Body was already read (cached by Starlette) — use buffered put
+            data = await request.body()
+            size = len(data)
+            md5_hex = await self.storage.put(bucket, key, data)
+        else:
+            # Stream the body directly to storage
+            cl_int = int(content_length_hdr) if content_length_hdr else None
+            md5_hex, size = await self.storage.put_stream(
+                bucket,
+                key,
+                request.stream(),
+                content_length=cl_int,
+            )
 
         # Quote the ETag: S3 ETags are always quoted
         etag = f'"{md5_hex}"'

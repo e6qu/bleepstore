@@ -1,10 +1,10 @@
 # BleepStore Python -- Do Next
 
-## Current State: Stage 11b COMPLETE (Azure Gateway Backend) — 86/86 E2E Tests Passing
+## Current State: Stage 15 COMPLETE (Performance Optimization) — 86/86 E2E Tests Passing
 
-- `uv run pytest tests/ -v` — 582/582 pass (40 new Azure backend tests)
+- `uv run pytest tests/ -v` — 582/582 pass
 - `./run_e2e.sh` — **86/86 pass**
-- All three cloud gateway backends complete: AWS (Stage 10), GCP (Stage 11a), Azure (Stage 11b)
+- Stage 15 complete: streaming I/O, structured logging, graceful shutdown, batch SQL, startup optimization
 
 ## Next: Stage 12 — Raft Consensus / Clustering
 
@@ -24,3 +24,10 @@ cd /Users/zardoz/projects/bleepstore/python
 
 ## Known Issues
 - None — all 86 E2E tests pass
+
+## Stage 15 Notes
+- Streaming write uses `request.stream()` when body hasn't been pre-consumed by auth
+- SigV4 authenticator cache is on `app.state.authenticator` — persist across requests
+- JSON logging enabled via `--log-format json`
+- Graceful shutdown via `--shutdown-timeout N` (default 30s)
+- max_object_size configurable in config (server.max_object_size, default 5TB)
