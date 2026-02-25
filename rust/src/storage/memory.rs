@@ -19,6 +19,9 @@ use std::sync::Arc;
 
 use super::backend::{StorageBackend, StoredObject};
 
+/// Map from storage key to (data, etag).
+type EntryMap = HashMap<String, (Bytes, String)>;
+
 /// In-memory storage backend.
 ///
 /// Stores all object and part data in hash maps protected by async
@@ -26,9 +29,9 @@ use super::backend::{StorageBackend, StoredObject};
 /// configurable interval and at shutdown.
 pub struct MemoryBackend {
     /// Main object store: storage_key -> (data, etag).
-    objects: tokio::sync::RwLock<HashMap<String, (Bytes, String)>>,
+    objects: tokio::sync::RwLock<EntryMap>,
     /// Part store: "upload_id/part_number" -> (data, etag).
-    parts: tokio::sync::RwLock<HashMap<String, (Bytes, String)>>,
+    parts: tokio::sync::RwLock<EntryMap>,
     /// Current total bytes stored (objects + parts).
     current_size: tokio::sync::RwLock<u64>,
     /// Maximum bytes allowed.  0 means unlimited.
@@ -224,16 +227,10 @@ impl MemoryBackend {
     /// Returns `(objects_map, parts_map, total_size)`.  This is a pure
     /// function that does not touch any `tokio::sync` primitives, so it is
     /// safe to call from both sync and async contexts.
-    fn read_snapshot_into_maps(
-        snapshot_path: &str,
-    ) -> anyhow::Result<(
-        HashMap<String, (Bytes, String)>,
-        HashMap<String, (Bytes, String)>,
-        u64,
-    )> {
+    fn read_snapshot_into_maps(snapshot_path: &str) -> anyhow::Result<(EntryMap, EntryMap, u64)> {
         let conn = Connection::open(snapshot_path)?;
-        let mut objects_map: HashMap<String, (Bytes, String)> = HashMap::new();
-        let mut parts_map: HashMap<String, (Bytes, String)> = HashMap::new();
+        let mut objects_map: EntryMap = HashMap::new();
+        let mut parts_map: EntryMap = HashMap::new();
         let mut total_size: u64 = 0;
 
         // Load objects.
