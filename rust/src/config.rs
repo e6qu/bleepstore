@@ -185,13 +185,17 @@ impl Default for SqliteConfig {
 /// Object storage backend configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct StorageConfig {
-    /// Backend type: `local`, `aws`, `gcp`, `azure`.
+    /// Backend type: `local`, `memory`, `sqlite`, `aws`, `gcp`, `azure`.
     #[serde(default = "default_storage_backend")]
     pub backend: String,
 
     /// Local storage configuration.
     #[serde(default)]
     pub local: LocalStorageConfig,
+
+    /// Memory storage configuration.
+    #[serde(default)]
+    pub memory: Option<MemoryStorageConfig>,
 
     /// AWS S3 gateway configuration.
     #[serde(default)]
@@ -211,6 +215,7 @@ impl Default for StorageConfig {
         Self {
             backend: default_storage_backend(),
             local: LocalStorageConfig::default(),
+            memory: None,
             aws: None,
             gcp: None,
             azure: None,
@@ -234,6 +239,23 @@ impl Default for LocalStorageConfig {
     }
 }
 
+/// Memory storage backend configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct MemoryStorageConfig {
+    /// Maximum total size in bytes (0 = unlimited).
+    #[serde(default)]
+    pub max_size_bytes: u64,
+    /// Persistence mode: "none" or "snapshot".
+    #[serde(default = "default_persistence_none")]
+    pub persistence: String,
+    /// File path for snapshot persistence.
+    #[serde(default = "default_snapshot_path")]
+    pub snapshot_path: String,
+    /// Interval between periodic snapshots in seconds (0 = only on shutdown).
+    #[serde(default = "default_snapshot_interval")]
+    pub snapshot_interval_seconds: u64,
+}
+
 /// AWS S3 gateway configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct AwsStorageConfig {
@@ -245,6 +267,18 @@ pub struct AwsStorageConfig {
     /// Key prefix in the backing bucket.
     #[serde(default)]
     pub prefix: String,
+    /// Custom S3-compatible endpoint (e.g. MinIO, LocalStack).
+    #[serde(default)]
+    pub endpoint_url: String,
+    /// Force path-style URL addressing.
+    #[serde(default)]
+    pub use_path_style: bool,
+    /// Explicit AWS access key (falls back to env/credential chain).
+    #[serde(default)]
+    pub access_key_id: String,
+    /// Explicit AWS secret key (falls back to env/credential chain).
+    #[serde(default)]
+    pub secret_access_key: String,
 }
 
 /// GCP Cloud Storage gateway configuration.
@@ -258,6 +292,9 @@ pub struct GcpStorageConfig {
     /// Key prefix in the backing bucket.
     #[serde(default)]
     pub prefix: String,
+    /// Path to a service account JSON file.
+    #[serde(default)]
+    pub credentials_file: String,
 }
 
 /// Azure Blob Storage gateway configuration.
@@ -270,6 +307,12 @@ pub struct AzureStorageConfig {
     /// Key prefix in the backing container.
     #[serde(default)]
     pub prefix: String,
+    /// Alternative to account-based auth.
+    #[serde(default)]
+    pub connection_string: String,
+    /// Enable Azure managed identity auth.
+    #[serde(default)]
+    pub use_managed_identity: bool,
 }
 
 /// Cluster / replication configuration.
@@ -327,6 +370,18 @@ fn default_storage_backend() -> String {
 
 fn default_storage_root() -> String {
     "./data/objects".to_string()
+}
+
+fn default_persistence_none() -> String {
+    "none".to_string()
+}
+
+fn default_snapshot_path() -> String {
+    "./data/memory.snap".to_string()
+}
+
+fn default_snapshot_interval() -> u64 {
+    300
 }
 
 fn default_shutdown_timeout() -> u64 {

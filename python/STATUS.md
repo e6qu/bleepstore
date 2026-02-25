@@ -40,5 +40,18 @@
 ## Known Test Issues
 - None — all 86 E2E tests pass
 
+## Storage Backends
+- **Local filesystem** (`storage/local.py`): Default backend, stores objects as files on disk
+- **Memory** (`storage/memory.py`): In-memory dict-based storage with optional SQLite snapshot persistence. Supports `max_size_bytes` limit and `persistence: "none"|"snapshot"` modes.
+- **SQLite** (`storage/sqlite.py`): Object BLOBs stored in the same SQLite database as metadata. Tables: `object_data`, `part_data`. Uses aiosqlite with WAL mode.
+- **AWS S3 gateway** (`storage/aws.py`): Proxies to upstream AWS S3
+- **GCP Cloud Storage gateway** (`storage/gcp.py`): Proxies to upstream GCS
+- **Azure Blob Storage gateway** (`storage/azure.py`): Proxies to upstream Azure container
+
+Cloud backends now support enhanced configuration:
+- **AWS**: `endpoint_url`, `use_path_style`, `access_key_id`, `secret_access_key`
+- **GCP**: `credentials_file`
+- **Azure**: `connection_string`, `use_managed_identity`
+
 ## Next Steps
 - Stage 12: Raft Consensus / Clustering

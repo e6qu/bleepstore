@@ -1,6 +1,6 @@
 # BleepStore Go -- Do Next
 
-## Current State: Stage 15 COMPLETE (Performance Optimization & Production Readiness) -- 86/86 E2E Tests Passing
+## Current State: Stage 15 COMPLETE + Pluggable Storage Backends COMPLETE -- 86/86 E2E Tests Passing
 
 - `go test -count=1 -race ./...` -- all unit tests pass (274 total)
 - `./run_e2e.sh` -- **86/86 pass**
@@ -8,6 +8,8 @@
 - Batch DeleteObjects SQL implemented
 - Structured logging via log/slog implemented
 - Production config (shutdown timeout, max object size) implemented
+- **Pluggable storage backends done**: memory, sqlite, cloud config enhancements (AWS/GCP/Azure)
+- Test new backends: `./run_e2e.sh --backend memory` or `./run_e2e.sh --backend sqlite`
 
 ## Next: Stage 12a -- Raft State Machine & Storage
 

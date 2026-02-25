@@ -1,10 +1,22 @@
 # BleepStore Python -- Do Next
 
-## Current State: Stage 15 COMPLETE (Performance Optimization) — 86/86 E2E Tests Passing
+## Current State: Stage 15 COMPLETE + Pluggable Storage Backends — 86/86 E2E Tests Passing
 
 - `uv run pytest tests/ -v` — 582/582 pass
 - `./run_e2e.sh` — **86/86 pass**
 - Stage 15 complete: streaming I/O, structured logging, graceful shutdown, batch SQL, startup optimization
+- Pluggable storage backends complete: memory, sqlite, cloud config enhancements
+
+## Storage Backends Done
+
+Memory and SQLite backends are implemented alongside the existing local filesystem and cloud gateway backends. Test them with:
+
+```bash
+cd /Users/zardoz/projects/bleepstore/python
+./run_e2e.sh --backend memory
+./run_e2e.sh --backend sqlite
+./run_e2e.sh              # default: local filesystem
+```
 
 ## Next: Stage 12 — Raft Consensus / Clustering
 

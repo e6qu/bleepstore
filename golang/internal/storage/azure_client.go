@@ -17,8 +17,31 @@ type realAzureClient struct {
 	client *azblob.Client
 }
 
-// newRealAzureClient creates a real Azure Blob client using DefaultAzureCredential.
-func newRealAzureClient(accountURL string) (*realAzureClient, error) {
+// newRealAzureClient creates a real Azure Blob client. If connectionString is
+// non-empty, it uses connection string auth. If useManagedIdentity is true, it
+// uses managed identity credentials. Otherwise it falls back to
+// DefaultAzureCredential.
+func newRealAzureClient(accountURL, connectionString string, useManagedIdentity bool) (*realAzureClient, error) {
+	if connectionString != "" {
+		client, err := azblob.NewClientFromConnectionString(connectionString, nil)
+		if err != nil {
+			return nil, fmt.Errorf("creating Azure Blob client from connection string: %w", err)
+		}
+		return &realAzureClient{client: client}, nil
+	}
+
+	if useManagedIdentity {
+		cred, err := azidentity.NewManagedIdentityCredential(nil)
+		if err != nil {
+			return nil, fmt.Errorf("creating Azure managed identity credential: %w", err)
+		}
+		client, err := azblob.NewClient(accountURL, cred, nil)
+		if err != nil {
+			return nil, fmt.Errorf("creating Azure Blob client with managed identity: %w", err)
+		}
+		return &realAzureClient{client: client}, nil
+	}
+
 	cred, err := azidentity.NewDefaultAzureCredential(nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating Azure credential: %w", err)

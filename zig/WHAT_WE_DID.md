@@ -1152,3 +1152,27 @@ Python E2E tests (run by the user) showed 66/86 passing with 20 failures. Analyz
 56. httpz auto-sets Content-Length from `res.body.len` when body is non-empty. Never set Content-Length explicitly on responses with a body (only on HEAD where body is empty).
 57. SigV4 canonical query string and URI must decode-then-encode to avoid double-encoding. httpz provides raw (percent-encoded) URLs unlike Python's FastAPI which provides decoded paths.
 58. `uriDecodeSegment` decodes %XX sequences but NOT `+` as space (path encoding). `uriDecodeInPlace` decodes `+` as space (query/form encoding).
+
+---
+
+## Session 25 — 2026-02-25
+
+### Pluggable Storage Backends (memory, sqlite, cloud enhancements)
+
+**New storage backends:**
+- **Memory backend** (`src/storage/memory.zig`): In-memory StringHashMap-based storage with std.Thread.Mutex. Supports `max_size_bytes` limit, MD5 etag computation. 16 unit tests.
+- **SQLite backend** (`src/storage/sqlite_backend.zig`): Object BLOBs stored in the same SQLite database as metadata. Tables: `object_data`, `part_data`. Uses @cImport SQLite C API with vtable pattern. 14 unit tests.
+
+**Cloud config enhancements:**
+- AWS: `endpoint_url`, `use_path_style`
+- GCP: `credentials_file`
+- Azure: `connection_string`, `use_managed_identity`
+
+**Config + factory:**
+- Extended `config.zig` StorageBackendType enum with `.memory`/`.sqlite`
+- Added memory_* and cloud enhancement fields with `applyConfigValue()` branches
+- Updated `main.zig` switch with `.memory` and `.sqlite` cases
+- Updated cloud backend constructors with new parameters
+
+**E2E:**
+- Updated `run_e2e.sh` with `--backend` flag (e.g., `./run_e2e.sh --backend memory`)

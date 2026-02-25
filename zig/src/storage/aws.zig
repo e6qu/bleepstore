@@ -29,9 +29,11 @@ pub const AwsGatewayBackend = struct {
     prefix: []const u8,
     access_key_id: []const u8,
     secret_access_key: []const u8,
-    /// The HTTPS host for S3 requests: `s3.{region}.amazonaws.com`
+    /// The HTTPS host for S3 requests: `s3.{region}.amazonaws.com` or custom endpoint.
     host: []const u8,
     http_client: std.http.Client,
+    /// True if host was allocated by us and must be freed on deinit.
+    host_owned: bool,
 
     const Self = @This();
 
@@ -42,10 +44,15 @@ pub const AwsGatewayBackend = struct {
         prefix: []const u8,
         access_key_id: []const u8,
         secret_access_key: []const u8,
+        endpoint_url: []const u8,
     ) !Self {
-        // Build the S3 host: s3.{region}.amazonaws.com
-        const host = try std.fmt.allocPrint(allocator, "s3.{s}.amazonaws.com", .{region});
-        errdefer allocator.free(host);
+        // Use custom endpoint if provided, otherwise build the default S3 host.
+        const host_owned = endpoint_url.len == 0;
+        const host = if (endpoint_url.len > 0)
+            endpoint_url
+        else
+            try std.fmt.allocPrint(allocator, "s3.{s}.amazonaws.com", .{region});
+        errdefer if (host_owned) allocator.free(host);
 
         var client = std.http.Client{ .allocator = allocator };
         // Zig's std.http.Client manages TLS and connection pooling internally.
@@ -94,12 +101,15 @@ pub const AwsGatewayBackend = struct {
             .secret_access_key = secret_access_key,
             .host = host,
             .http_client = client,
+            .host_owned = host_owned,
         };
     }
 
     pub fn deinit(self: *Self) void {
         self.http_client.deinit();
-        self.allocator.free(self.host);
+        if (self.host_owned) {
+            self.allocator.free(self.host);
+        }
     }
 
     /// Map a BleepStore bucket/key to an upstream S3 key.

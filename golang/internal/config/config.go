@@ -68,31 +68,71 @@ type SQLiteConfig struct {
 
 // StorageConfig holds object storage backend settings.
 type StorageConfig struct {
-	// Backend is the storage backend type (e.g., "local", "aws", "gcp", "azure").
-	Backend string      `yaml:"backend"`
-	Local   LocalConfig `yaml:"local"`
-	// AWSBucket is the S3 bucket name for the AWS gateway backend.
-	AWSBucket string `yaml:"aws_bucket"`
-	// AWSRegion is the AWS region for the AWS gateway backend.
-	AWSRegion string `yaml:"aws_region"`
-	// AWSPrefix is the optional key prefix for all objects in the upstream AWS bucket.
-	AWSPrefix string `yaml:"aws_prefix"`
-	// GCPBucket is the GCS bucket name for the GCP gateway backend.
-	GCPBucket string `yaml:"gcp_bucket"`
-	// GCPProject is the GCP project ID for the GCP gateway backend.
-	GCPProject string `yaml:"gcp_project"`
-	// GCPPrefix is the optional key prefix for all objects in the upstream GCS bucket.
-	GCPPrefix string `yaml:"gcp_prefix"`
-	// AzureContainer is the container name for the Azure gateway backend.
-	AzureContainer string `yaml:"azure_container"`
-	// AzureAccount is the storage account name for the Azure gateway backend.
-	// Used to construct the account URL: https://{account}.blob.core.windows.net
-	AzureAccount string `yaml:"azure_account"`
-	// AzureAccountURL is the full Azure storage account URL. If empty, it is
-	// constructed from AzureAccount as https://{account}.blob.core.windows.net.
-	AzureAccountURL string `yaml:"azure_account_url"`
-	// AzurePrefix is the optional key prefix for all objects in the upstream Azure container.
-	AzurePrefix string `yaml:"azure_prefix"`
+	// Backend is the storage backend type (e.g., "local", "memory", "sqlite", "aws", "gcp", "azure").
+	Backend string       `yaml:"backend"`
+	Local   LocalConfig  `yaml:"local"`
+	Memory  MemoryConfig `yaml:"memory"`
+	AWS     AWSConfig    `yaml:"aws"`
+	GCP     GCPConfig    `yaml:"gcp"`
+	Azure   AzureConfig  `yaml:"azure"`
+}
+
+// MemoryConfig holds in-memory storage backend settings.
+type MemoryConfig struct {
+	// MaxSizeBytes is the maximum total size in bytes (0 = unlimited).
+	MaxSizeBytes int64 `yaml:"max_size_bytes"`
+	// Persistence mode: "none" or "snapshot".
+	Persistence string `yaml:"persistence"`
+	// SnapshotPath is the file path for snapshot persistence.
+	SnapshotPath string `yaml:"snapshot_path"`
+	// SnapshotIntervalSeconds is the interval between periodic snapshots (0 = only on shutdown).
+	SnapshotIntervalSeconds int `yaml:"snapshot_interval_seconds"`
+}
+
+// AWSConfig holds AWS S3 gateway backend settings.
+type AWSConfig struct {
+	// Bucket is the S3 bucket name.
+	Bucket string `yaml:"bucket"`
+	// Region is the AWS region.
+	Region string `yaml:"region"`
+	// Prefix is the optional key prefix for all objects.
+	Prefix string `yaml:"prefix"`
+	// EndpointURL is a custom S3-compatible endpoint (e.g. MinIO, LocalStack).
+	EndpointURL string `yaml:"endpoint_url"`
+	// UsePathStyle forces path-style URL addressing.
+	UsePathStyle bool `yaml:"use_path_style"`
+	// AccessKeyID is an explicit AWS access key (falls back to env/credential chain).
+	AccessKeyID string `yaml:"access_key_id"`
+	// SecretAccessKey is an explicit AWS secret key (falls back to env/credential chain).
+	SecretAccessKey string `yaml:"secret_access_key"`
+}
+
+// GCPConfig holds GCP Cloud Storage gateway backend settings.
+type GCPConfig struct {
+	// Bucket is the GCS bucket name.
+	Bucket string `yaml:"bucket"`
+	// Project is the GCP project ID.
+	Project string `yaml:"project"`
+	// Prefix is the optional key prefix for all objects.
+	Prefix string `yaml:"prefix"`
+	// CredentialsFile is the path to a service account JSON file.
+	CredentialsFile string `yaml:"credentials_file"`
+}
+
+// AzureConfig holds Azure Blob Storage gateway backend settings.
+type AzureConfig struct {
+	// Container is the Azure container name.
+	Container string `yaml:"container"`
+	// Account is the Azure storage account name.
+	Account string `yaml:"account"`
+	// AccountURL is the full Azure storage account URL.
+	AccountURL string `yaml:"account_url"`
+	// Prefix is the optional key prefix for all objects.
+	Prefix string `yaml:"prefix"`
+	// ConnectionString is an alternative to account-based auth.
+	ConnectionString string `yaml:"connection_string"`
+	// UseManagedIdentity enables Azure managed identity auth.
+	UseManagedIdentity bool `yaml:"use_managed_identity"`
 }
 
 // LocalConfig holds local filesystem storage backend settings.
@@ -174,6 +214,14 @@ func defaultConfig() *Config {
 			Local: LocalConfig{
 				RootDir: "./data/objects",
 			},
+			Memory: MemoryConfig{
+				Persistence:             "none",
+				SnapshotPath:            "./data/memory.snap",
+				SnapshotIntervalSeconds: 300,
+			},
+			AWS: AWSConfig{
+				Region: "us-east-1",
+			},
 		},
 		Observability: ObservabilityConfig{
 			Metrics:     true,
@@ -217,5 +265,17 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Storage.Local.RootDir == "" {
 		cfg.Storage.Local.RootDir = "./data/objects"
+	}
+	if cfg.Storage.Memory.Persistence == "" {
+		cfg.Storage.Memory.Persistence = "none"
+	}
+	if cfg.Storage.Memory.SnapshotPath == "" {
+		cfg.Storage.Memory.SnapshotPath = "./data/memory.snap"
+	}
+	if cfg.Storage.Memory.SnapshotIntervalSeconds == 0 && cfg.Storage.Memory.Persistence == "none" {
+		cfg.Storage.Memory.SnapshotIntervalSeconds = 300
+	}
+	if cfg.Storage.AWS.Region == "" {
+		cfg.Storage.AWS.Region = "us-east-1"
 	}
 }

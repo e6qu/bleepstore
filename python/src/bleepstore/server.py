@@ -214,6 +214,19 @@ def _create_storage_backend(config: BleepStoreConfig) -> StorageBackend:
     backend = config.storage.backend
     if backend == "local":
         return LocalStorageBackend(config.storage.local_root)
+    elif backend == "memory":
+        from bleepstore.storage.memory import MemoryStorageBackend
+
+        return MemoryStorageBackend(
+            max_size_bytes=config.storage.memory_max_size_bytes,
+            persistence=config.storage.memory_persistence,
+            snapshot_path=config.storage.memory_snapshot_path,
+            snapshot_interval_seconds=config.storage.memory_snapshot_interval_seconds,
+        )
+    elif backend == "sqlite":
+        from bleepstore.storage.sqlite import SQLiteStorageBackend
+
+        return SQLiteStorageBackend(db_path=config.metadata.sqlite_path)
     elif backend == "aws":
         if not config.storage.aws_bucket:
             raise ValueError("storage.aws.bucket is required when backend is 'aws'")
@@ -228,6 +241,10 @@ def _create_storage_backend(config: BleepStoreConfig) -> StorageBackend:
             bucket_name=config.storage.aws_bucket,
             region=config.storage.aws_region,
             prefix=config.storage.aws_prefix,
+            endpoint_url=config.storage.aws_endpoint_url,
+            use_path_style=config.storage.aws_use_path_style,
+            access_key_id=config.storage.aws_access_key_id,
+            secret_access_key=config.storage.aws_secret_access_key,
         )
     elif backend == "gcp":
         if not config.storage.gcp_bucket:
@@ -243,6 +260,7 @@ def _create_storage_backend(config: BleepStoreConfig) -> StorageBackend:
             bucket_name=config.storage.gcp_bucket,
             project=config.storage.gcp_project,
             prefix=config.storage.gcp_prefix,
+            credentials_file=config.storage.gcp_credentials_file,
         )
     elif backend == "azure":
         if not config.storage.azure_container:
@@ -258,6 +276,8 @@ def _create_storage_backend(config: BleepStoreConfig) -> StorageBackend:
             container_name=config.storage.azure_container,
             account_url=config.storage.azure_account,
             prefix=config.storage.azure_prefix,
+            connection_string=config.storage.azure_connection_string,
+            use_managed_identity=config.storage.azure_use_managed_identity,
         )
     else:
         raise ValueError(f"Unknown storage backend: {backend}")

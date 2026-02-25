@@ -92,62 +92,80 @@ func main() {
 	var storageBackend storage.StorageBackend
 	switch cfg.Storage.Backend {
 	case "aws":
-		awsBucket := cfg.Storage.AWSBucket
-		awsRegion := cfg.Storage.AWSRegion
-		awsPrefix := cfg.Storage.AWSPrefix
-		if awsBucket == "" {
-			fmt.Fprintf(os.Stderr, "storage.aws_bucket is required when backend is 'aws'\n")
+		awsCfg := cfg.Storage.AWS
+		if awsCfg.Bucket == "" {
+			fmt.Fprintf(os.Stderr, "storage.aws.bucket is required when backend is 'aws'\n")
 			os.Exit(1)
 		}
+		awsRegion := awsCfg.Region
 		if awsRegion == "" {
 			awsRegion = "us-east-1"
 		}
-		awsBackend, awsErr := storage.NewAWSGatewayBackend(context.Background(), awsBucket, awsRegion, awsPrefix)
+		awsBackend, awsErr := storage.NewAWSGatewayBackend(context.Background(), awsCfg.Bucket, awsRegion, awsCfg.Prefix, awsCfg.EndpointURL, awsCfg.UsePathStyle, awsCfg.AccessKeyID, awsCfg.SecretAccessKey)
 		if awsErr != nil {
 			fmt.Fprintf(os.Stderr, "failed to initialize AWS storage backend: %v\n", awsErr)
 			os.Exit(1)
 		}
 		storageBackend = awsBackend
-		slog.Info("Storage backend initialized", "backend", "aws", "bucket", awsBucket, "region", awsRegion, "prefix", awsPrefix)
+		slog.Info("Storage backend initialized", "backend", "aws", "bucket", awsCfg.Bucket, "region", awsRegion, "prefix", awsCfg.Prefix)
 	case "gcp":
-		gcpBucket := cfg.Storage.GCPBucket
-		gcpProject := cfg.Storage.GCPProject
-		gcpPrefix := cfg.Storage.GCPPrefix
-		if gcpBucket == "" {
-			fmt.Fprintf(os.Stderr, "storage.gcp_bucket is required when backend is 'gcp'\n")
+		gcpCfg := cfg.Storage.GCP
+		if gcpCfg.Bucket == "" {
+			fmt.Fprintf(os.Stderr, "storage.gcp.bucket is required when backend is 'gcp'\n")
 			os.Exit(1)
 		}
-		gcpBackend, gcpErr := storage.NewGCPGatewayBackend(context.Background(), gcpBucket, gcpProject, gcpPrefix)
+		gcpBackend, gcpErr := storage.NewGCPGatewayBackend(context.Background(), gcpCfg.Bucket, gcpCfg.Project, gcpCfg.Prefix, gcpCfg.CredentialsFile)
 		if gcpErr != nil {
 			fmt.Fprintf(os.Stderr, "failed to initialize GCP storage backend: %v\n", gcpErr)
 			os.Exit(1)
 		}
 		storageBackend = gcpBackend
-		slog.Info("Storage backend initialized", "backend", "gcp", "bucket", gcpBucket, "project", gcpProject, "prefix", gcpPrefix)
+		slog.Info("Storage backend initialized", "backend", "gcp", "bucket", gcpCfg.Bucket, "project", gcpCfg.Project, "prefix", gcpCfg.Prefix)
 	case "azure":
-		azureContainer := cfg.Storage.AzureContainer
-		azureAccount := cfg.Storage.AzureAccount
-		azureAccountURL := cfg.Storage.AzureAccountURL
-		azurePrefix := cfg.Storage.AzurePrefix
-		if azureContainer == "" {
-			fmt.Fprintf(os.Stderr, "storage.azure_container is required when backend is 'azure'\n")
+		azureCfg := cfg.Storage.Azure
+		if azureCfg.Container == "" {
+			fmt.Fprintf(os.Stderr, "storage.azure.container is required when backend is 'azure'\n")
 			os.Exit(1)
 		}
-		// Construct account URL from account name if not explicitly set.
+		azureAccountURL := azureCfg.AccountURL
 		if azureAccountURL == "" {
-			if azureAccount == "" {
-				fmt.Fprintf(os.Stderr, "storage.azure_account or storage.azure_account_url is required when backend is 'azure'\n")
+			if azureCfg.Account == "" {
+				fmt.Fprintf(os.Stderr, "storage.azure.account or storage.azure.account_url is required when backend is 'azure'\n")
 				os.Exit(1)
 			}
-			azureAccountURL = fmt.Sprintf("https://%s.blob.core.windows.net", azureAccount)
+			azureAccountURL = fmt.Sprintf("https://%s.blob.core.windows.net", azureCfg.Account)
 		}
-		azureBackend, azureErr := storage.NewAzureGatewayBackend(context.Background(), azureContainer, azureAccountURL, azurePrefix)
+		azureBackend, azureErr := storage.NewAzureGatewayBackend(context.Background(), azureCfg.Container, azureAccountURL, azureCfg.Prefix, azureCfg.ConnectionString, azureCfg.UseManagedIdentity)
 		if azureErr != nil {
 			fmt.Fprintf(os.Stderr, "failed to initialize Azure storage backend: %v\n", azureErr)
 			os.Exit(1)
 		}
 		storageBackend = azureBackend
-		slog.Info("Storage backend initialized", "backend", "azure", "container", azureContainer, "account", azureAccountURL, "prefix", azurePrefix)
+		slog.Info("Storage backend initialized", "backend", "azure", "container", azureCfg.Container, "account", azureAccountURL, "prefix", azureCfg.Prefix)
+	case "memory":
+		memCfg := cfg.Storage.Memory
+		memBackend, memErr := storage.NewMemoryBackend(
+			memCfg.MaxSizeBytes,
+			memCfg.Persistence,
+			memCfg.SnapshotPath,
+			memCfg.SnapshotIntervalSeconds,
+		)
+		if memErr != nil {
+			fmt.Fprintf(os.Stderr, "failed to initialize memory storage backend: %v\n", memErr)
+			os.Exit(1)
+		}
+		storageBackend = memBackend
+		slog.Info("Storage backend initialized", "backend", "memory",
+			"max_size_bytes", memCfg.MaxSizeBytes,
+			"persistence", memCfg.Persistence)
+	case "sqlite":
+		sqliteBackend, sqliteErr := storage.NewSQLiteBackend(cfg.Metadata.SQLite.Path)
+		if sqliteErr != nil {
+			fmt.Fprintf(os.Stderr, "failed to initialize SQLite storage backend: %v\n", sqliteErr)
+			os.Exit(1)
+		}
+		storageBackend = sqliteBackend
+		slog.Info("Storage backend initialized", "backend", "sqlite", "path", cfg.Metadata.SQLite.Path)
 	default:
 		// Default to local filesystem backend.
 		storageRoot := cfg.Storage.Local.RootDir

@@ -45,13 +45,45 @@ pub const GcpGatewayBackend = struct {
         gcp_bucket: []const u8,
         project: []const u8,
         prefix: []const u8,
+        credentials_file: []const u8,
     ) !Self {
-        // Resolve access token from environment.
-        const token_result = std.process.getEnvVarOwned(allocator, "GCS_ACCESS_TOKEN") catch |err| blk: {
-            // Try GOOGLE_ACCESS_TOKEN as alternative
-            break :blk std.process.getEnvVarOwned(allocator, "GOOGLE_ACCESS_TOKEN") catch {
-                std.log.err("GCP backend requires GCS_ACCESS_TOKEN or GOOGLE_ACCESS_TOKEN env var: {}", .{err});
+        // Resolve access token: credentials file > environment variables.
+        const token_result = if (credentials_file.len > 0) blk: {
+            // Try to read access token from the credentials file.
+            const file = std.fs.cwd().openFile(credentials_file, .{}) catch |err| {
+                std.log.err("GCP backend: failed to open credentials file '{s}': {}", .{ credentials_file, err });
                 return error.InvalidConfiguration;
+            };
+            defer file.close();
+            const contents = file.readToEndAlloc(allocator, 1024 * 1024) catch |err| {
+                std.log.err("GCP backend: failed to read credentials file '{s}': {}", .{ credentials_file, err });
+                return error.InvalidConfiguration;
+            };
+            // Trim whitespace (file may contain just the token with a trailing newline).
+            const trimmed = std.mem.trim(u8, contents, " \t\r\n");
+            if (trimmed.len == 0) {
+                allocator.free(contents);
+                std.log.err("GCP backend: credentials file '{s}' is empty", .{credentials_file});
+                return error.InvalidConfiguration;
+            }
+            // If trimmed is a sub-slice of contents, dupe the trimmed portion and free the original.
+            if (trimmed.ptr == contents.ptr and trimmed.len == contents.len) {
+                break :blk contents;
+            }
+            const token = allocator.dupe(u8, trimmed) catch |err| {
+                allocator.free(contents);
+                return err;
+            };
+            allocator.free(contents);
+            break :blk token;
+        } else blk: {
+            // Fall back to environment variables.
+            break :blk std.process.getEnvVarOwned(allocator, "GCS_ACCESS_TOKEN") catch |err| inner: {
+                // Try GOOGLE_ACCESS_TOKEN as alternative
+                break :inner std.process.getEnvVarOwned(allocator, "GOOGLE_ACCESS_TOKEN") catch {
+                    std.log.err("GCP backend requires GCS_ACCESS_TOKEN or GOOGLE_ACCESS_TOKEN env var: {}", .{err});
+                    return error.InvalidConfiguration;
+                };
             };
         };
 

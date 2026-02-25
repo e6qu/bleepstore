@@ -1,10 +1,13 @@
 # BleepStore Rust -- Do Next
 
-## Current State: Stage 15 COMPLETE (Performance Optimization & Production Readiness)
+## Current State: Stage 15 COMPLETE + Pluggable Storage Backends COMPLETE
 
 All performance and production hardening changes are verified.
-- `cargo test` -- 194 pass
-- `./run_e2e.sh` -- 86/86 pass
+Pluggable storage backends (memory, sqlite, cloud config enhancements) are implemented.
+- `cargo test` -- all pass
+- `./run_e2e.sh` -- 86/86 pass (local backend)
+- `./run_e2e.sh --backend memory` -- test memory backend
+- `./run_e2e.sh --backend sqlite` -- test sqlite backend
 
 ## Next: Stage 12 -- Raft State Machine & Storage
 

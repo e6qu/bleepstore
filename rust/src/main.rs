@@ -131,11 +131,29 @@ async fn main() -> anyhow::Result<()> {
                         "storage.backend is 'aws' but storage.aws config section is missing"
                     )
                 })?;
+                let endpoint_url = if aws_config.endpoint_url.is_empty() {
+                    None
+                } else {
+                    Some(aws_config.endpoint_url.clone())
+                };
+                let access_key = if aws_config.access_key_id.is_empty() {
+                    None
+                } else {
+                    Some(aws_config.access_key_id.clone())
+                };
+                let secret_key = if aws_config.secret_access_key.is_empty() {
+                    None
+                } else {
+                    Some(aws_config.secret_access_key.clone())
+                };
                 let backend = bleepstore::storage::aws::AwsGatewayBackend::new(
                     aws_config.bucket.clone(),
                     aws_config.region.clone(),
                     aws_config.prefix.clone(),
-                    None,
+                    endpoint_url,
+                    aws_config.use_path_style,
+                    access_key,
+                    secret_key,
                 )
                 .await?;
                 info!(
@@ -150,10 +168,16 @@ async fn main() -> anyhow::Result<()> {
                         "storage.backend is 'gcp' but storage.gcp config section is missing"
                     )
                 })?;
+                let credentials_file = if gcp_config.credentials_file.is_empty() {
+                    None
+                } else {
+                    Some(gcp_config.credentials_file.clone())
+                };
                 let backend = bleepstore::storage::gcp::GcpGatewayBackend::new(
                     gcp_config.bucket.clone(),
                     gcp_config.project.clone(),
                     gcp_config.prefix.clone(),
+                    credentials_file,
                 )
                 .await?;
                 info!(
@@ -168,16 +192,52 @@ async fn main() -> anyhow::Result<()> {
                         "storage.backend is 'azure' but storage.azure config section is missing"
                     )
                 })?;
+                let connection_string = if azure_config.connection_string.is_empty() {
+                    None
+                } else {
+                    Some(azure_config.connection_string.clone())
+                };
                 let backend = bleepstore::storage::azure::AzureGatewayBackend::new(
                     azure_config.container.clone(),
                     azure_config.account.clone(),
                     azure_config.prefix.clone(),
+                    connection_string,
+                    azure_config.use_managed_identity,
                 )
                 .await?;
                 info!(
                 "Azure gateway storage backend initialized: container={} account={} prefix='{}'",
                 azure_config.container, azure_config.account, azure_config.prefix
             );
+                Arc::new(backend)
+            }
+            "memory" => {
+                let mem_config = config.storage.memory.as_ref();
+                let (max_size, persistence, snap_path, snap_interval) = match mem_config {
+                    Some(mc) => (
+                        mc.max_size_bytes,
+                        mc.persistence.as_str(),
+                        mc.snapshot_path.as_str(),
+                        mc.snapshot_interval_seconds,
+                    ),
+                    None => (0, "none", "./data/memory.snap", 300),
+                };
+                let backend = bleepstore::storage::memory::MemoryBackend::new(
+                    max_size,
+                    persistence,
+                    snap_path,
+                    snap_interval,
+                )?;
+                info!(
+                    "Memory storage backend initialized (max_size={}, persistence={})",
+                    max_size, persistence
+                );
+                Arc::new(backend)
+            }
+            "sqlite" => {
+                let db_path = &config.metadata.sqlite.path;
+                let backend = bleepstore::storage::sqlite::SqliteBackend::new(db_path)?;
+                info!("SQLite storage backend initialized at {}", db_path);
                 Arc::new(backend)
             }
             _ => {

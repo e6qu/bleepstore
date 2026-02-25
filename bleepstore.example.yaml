@@ -21,28 +21,40 @@ metadata:
     path: "./data/metadata.db"
 
 storage:
-  backend: "local"             # "local", "aws", "gcp", "azure"
+  backend: "local"             # "local", "memory", "sqlite", "aws", "gcp", "azure"
 
   local:
     root_dir: "./data/objects"
+
+  # memory:
+  #   max_size_bytes: 0                # 0 = unlimited
+  #   persistence: "none"              # "none" | "snapshot"
+  #   snapshot_path: "./data/memory.snap"
+  #   snapshot_interval_seconds: 300   # 0 = snapshot only on shutdown
+
+  # sqlite: no config needed — uses metadata.sqlite.path (same database)
 
   # aws:
   #   bucket: "my-backing-bucket"
   #   region: "us-east-1"
   #   prefix: "bleepstore/"
-  #   # Uses standard AWS credential chain (env vars, ~/.aws/credentials, IAM role)
+  #   endpoint_url: ""                 # custom S3-compatible endpoint (e.g. MinIO)
+  #   use_path_style: false
+  #   access_key_id: ""                # falls back to AWS_ACCESS_KEY_ID env
+  #   secret_access_key: ""            # falls back to AWS_SECRET_ACCESS_KEY env
 
   # gcp:
   #   bucket: "my-backing-bucket"
   #   project: "my-project"
   #   prefix: "bleepstore/"
-  #   # Uses Application Default Credentials
+  #   credentials_file: ""             # falls back to GOOGLE_APPLICATION_CREDENTIALS env
 
   # azure:
   #   container: "my-container"
   #   account: "my-account"
   #   prefix: "bleepstore/"
-  #   # Uses DefaultAzureCredential chain
+  #   connection_string: ""            # alternative to account-based auth
+  #   use_managed_identity: false
 
 # observability:
 #   metrics: true        # Prometheus /metrics endpoint

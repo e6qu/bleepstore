@@ -25,6 +25,7 @@ import (
 
 	gcs "cloud.google.com/go/storage"
 	"google.golang.org/api/iterator"
+	"google.golang.org/api/option"
 )
 
 // maxComposeSources is the GCS limit on the number of source objects per
@@ -153,9 +154,14 @@ type GCPGatewayBackend struct {
 
 // NewGCPGatewayBackend creates a new GCPGatewayBackend configured to proxy
 // to the specified GCS bucket. It initializes the GCS client using
-// Application Default Credentials.
-func NewGCPGatewayBackend(ctx context.Context, bucket, project, prefix string) (*GCPGatewayBackend, error) {
-	client, err := gcs.NewClient(ctx)
+// Application Default Credentials, or a service account JSON file if
+// credentialsFile is non-empty.
+func NewGCPGatewayBackend(ctx context.Context, bucket, project, prefix, credentialsFile string) (*GCPGatewayBackend, error) {
+	var clientOpts []option.ClientOption
+	if credentialsFile != "" {
+		clientOpts = append(clientOpts, option.WithCredentialsFile(credentialsFile))
+	}
+	client, err := gcs.NewClient(ctx, clientOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("creating GCS client: %w", err)
 	}

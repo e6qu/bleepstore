@@ -9,3 +9,5 @@ pub mod azure;
 pub mod backend;
 pub mod gcp;
 pub mod local;
+pub mod memory;
+pub mod sqlite;

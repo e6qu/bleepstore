@@ -4,6 +4,8 @@ const server_mod = @import("server.zig");
 const metrics_mod = @import("metrics.zig");
 const SqliteMetadataStore = @import("metadata/sqlite.zig").SqliteMetadataStore;
 const LocalBackend = @import("storage/local.zig").LocalBackend;
+const MemoryBackend = @import("storage/memory.zig").MemoryBackend;
+const SqliteBackend = @import("storage/sqlite_backend.zig").SqliteBackend;
 const AwsGatewayBackend = @import("storage/aws.zig").AwsGatewayBackend;
 const GcpGatewayBackend = @import("storage/gcp.zig").GcpGatewayBackend;
 const AzureGatewayBackend = @import("storage/azure.zig").AzureGatewayBackend;
@@ -23,6 +25,8 @@ pub const metadata = struct {
 pub const storage = struct {
     pub const backend = @import("storage/backend.zig");
     pub const local = @import("storage/local.zig");
+    pub const memory = @import("storage/memory.zig");
+    pub const sqlite_backend = @import("storage/sqlite_backend.zig");
     pub const aws = @import("storage/aws.zig");
     pub const gcp = @import("storage/gcp.zig");
     pub const azure = @import("storage/azure.zig");
@@ -279,6 +283,8 @@ pub fn main() !void {
     // Step 5: Initialize storage backend based on configuration.
     // Crash-only: LocalBackend.init cleans stale temp files on startup.
     var local_backend: ?LocalBackend = null;
+    var memory_backend: ?MemoryBackend = null;
+    var sqlite_storage_backend: ?SqliteBackend = null;
     var aws_backend: ?AwsGatewayBackend = null;
     var gcp_backend: ?GcpGatewayBackend = null;
     var azure_backend: ?AzureGatewayBackend = null;
@@ -327,6 +333,7 @@ pub fn main() !void {
                 cfg.storage.aws_prefix,
                 aws_key,
                 aws_secret,
+                cfg.storage.aws_endpoint_url,
             ) catch |err| {
                 std.log.err("failed to initialize AWS gateway backend: {}", .{err});
                 std.process.exit(1);
@@ -347,6 +354,7 @@ pub fn main() !void {
                 cfg.storage.gcp_bucket,
                 cfg.storage.gcp_project,
                 cfg.storage.gcp_prefix,
+                cfg.storage.gcp_credentials_file,
             ) catch |err| {
                 std.log.err("failed to initialize GCP gateway backend: {}", .{err});
                 std.process.exit(1);
@@ -371,6 +379,7 @@ pub fn main() !void {
                 cfg.storage.azure_container,
                 cfg.storage.azure_account,
                 cfg.storage.azure_prefix,
+                cfg.storage.azure_connection_string,
             ) catch |err| {
                 std.log.err("failed to initialize Azure gateway backend: {}", .{err});
                 std.process.exit(1);
@@ -380,9 +389,27 @@ pub fn main() !void {
                 cfg.storage.azure_container, cfg.storage.azure_account,
             });
         },
+        .memory => {
+            memory_backend = MemoryBackend.init(allocator, cfg.storage.memory_max_size_bytes) catch |err| {
+                std.log.err("failed to initialize memory storage backend: {}", .{err});
+                std.process.exit(1);
+            };
+            storage_backend = memory_backend.?.storageBackend();
+            std.log.info("memory storage backend initialized (max_size_bytes={})", .{cfg.storage.memory_max_size_bytes});
+        },
+        .sqlite => {
+            sqlite_storage_backend = SqliteBackend.init(allocator, cfg.metadata.sqlite_path) catch |err| {
+                std.log.err("failed to initialize SQLite storage backend: {}", .{err});
+                std.process.exit(1);
+            };
+            storage_backend = sqlite_storage_backend.?.storageBackend();
+            std.log.info("SQLite storage backend initialized at: {s}", .{cfg.metadata.sqlite_path});
+        },
     }
     defer {
         if (local_backend) |*lb| lb.deinit();
+        if (memory_backend) |*mb| mb.deinit();
+        if (sqlite_storage_backend) |*sb| sb.deinit();
         if (aws_backend) |*ab| ab.deinit();
         if (gcp_backend) |*gb| gb.deinit();
         if (azure_backend) |*azb| azb.deinit();

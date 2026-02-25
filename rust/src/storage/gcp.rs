@@ -111,7 +111,19 @@ impl GcpGatewayBackend {
     ///
     /// Initializes the reqwest HTTP client. Credentials are resolved
     /// lazily on first API call via Application Default Credentials.
-    pub async fn new(bucket: String, project: String, prefix: String) -> anyhow::Result<Self> {
+    pub async fn new(
+        bucket: String,
+        project: String,
+        prefix: String,
+        credentials_file: Option<String>,
+    ) -> anyhow::Result<Self> {
+        // If an explicit credentials file is provided, set the env var so that
+        // Application Default Credentials (ADC) picks it up when resolving tokens.
+        if let Some(ref creds_path) = credentials_file {
+            info!("Setting GOOGLE_APPLICATION_CREDENTIALS={}", creds_path);
+            std::env::set_var("GOOGLE_APPLICATION_CREDENTIALS", creds_path);
+        }
+
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(300))
             .build()
