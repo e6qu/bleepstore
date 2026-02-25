@@ -78,6 +78,10 @@ pub fn describe_metrics() {
     describe_counter!(BYTES_SENT_TOTAL, "Total bytes sent (response bodies)");
     describe_histogram!(HTTP_REQUEST_SIZE_BYTES, "HTTP request body size in bytes");
     describe_histogram!(HTTP_RESPONSE_SIZE_BYTES, "HTTP response body size in bytes");
+
+    // Initialize S3OperationsTotal so it appears in /metrics output
+    // even before any S3 operations have been performed.
+    counter!(S3_OPERATIONS_TOTAL, "operation" => "ListBuckets", "status" => "success").increment(0);
 }
 
 // -- Metrics middleware -------------------------------------------------------
