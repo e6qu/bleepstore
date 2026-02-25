@@ -544,10 +544,8 @@ pub async fn put_object(
 
     // If-None-Match: * — fail if object already exists (conditional PUT).
     if let Some(if_none_match) = headers.get("if-none-match").and_then(|v| v.to_str().ok()) {
-        if if_none_match.trim() == "*" {
-            if state.metadata.object_exists(bucket, key).await? {
-                return Err(S3Error::PreconditionFailed);
-            }
+        if if_none_match.trim() == "*" && state.metadata.object_exists(bucket, key).await? {
+            return Err(S3Error::PreconditionFailed);
         }
     }
 

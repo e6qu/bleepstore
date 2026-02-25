@@ -701,10 +701,8 @@ fn parse_acl_xml_body(
                         "URI" => grantee_uri = text,
                         _ => {}
                     }
-                } else if in_grant {
-                    if tag == "Permission" {
-                        grant_permission = text;
-                    }
+                } else if in_grant && tag == "Permission" {
+                    grant_permission = text;
                 }
             }
             Ok(Event::Eof) => break,

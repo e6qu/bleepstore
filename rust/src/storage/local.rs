@@ -50,10 +50,8 @@ impl LocalBackend {
         let mut count = 0u64;
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() {
-                if std::fs::remove_file(&path).is_ok() {
-                    count += 1;
-                }
+            if path.is_file() && std::fs::remove_file(&path).is_ok() {
+                count += 1;
             }
         }
 

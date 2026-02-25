@@ -163,6 +163,9 @@ fn handleHealthz(res: *tk.Response) void {
     res.status = 200;
     res.body = "";
     observeHandlerMetrics(start_us, 0, 0);
+    // Flush now to prevent tokamak's auto-send from overriding 200 → 204
+    // when body is empty (tokamak treats void-return + empty body as 204).
+    res.write() catch {};
 }
 
 fn handleReadyz(res: *tk.Response) void {
@@ -199,6 +202,9 @@ fn handleReadyz(res: *tk.Response) void {
     res.status = 200;
     res.body = "";
     observeHandlerMetrics(start_us, 0, 0);
+    // Flush now to prevent tokamak's auto-send from overriding 200 → 204
+    // when body is empty (tokamak treats void-return + empty body as 204).
+    res.write() catch {};
 }
 
 fn handleMetrics(res: *tk.Response) void {
