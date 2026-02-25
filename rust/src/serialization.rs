@@ -21,7 +21,14 @@ const BOOL_FIELDS: &[&str] = &["delete_marker", "active"];
 const TABLE_COLUMNS: &[(&str, &[&str])] = &[
     (
         "buckets",
-        &["name", "region", "owner_id", "owner_display", "acl", "created_at"],
+        &[
+            "name",
+            "region",
+            "owner_id",
+            "owner_display",
+            "acl",
+            "created_at",
+        ],
     ),
     (
         "objects",
@@ -65,13 +72,7 @@ const TABLE_COLUMNS: &[(&str, &[&str])] = &[
     ),
     (
         "multipart_parts",
-        &[
-            "upload_id",
-            "part_number",
-            "size",
-            "etag",
-            "last_modified",
-        ],
+        &["upload_id", "part_number", "size", "etag", "last_modified"],
     ),
     (
         "credentials",
@@ -123,14 +124,9 @@ impl Default for ExportOptions {
     }
 }
 
+#[derive(Default)]
 pub struct ImportOptions {
     pub replace: bool,
-}
-
-impl Default for ImportOptions {
-    fn default() -> Self {
-        Self { replace: false }
-    }
 }
 
 pub struct ImportResult {
@@ -224,7 +220,7 @@ pub fn export_metadata(db_path: &str, opts: &ExportOptions) -> anyhow::Result<St
             None => continue,
         };
         let order_by = get_order_by(table);
-        let query = format!("SELECT * FROM {} ORDER BY {}", table, order_by);
+        let query = format!("SELECT * FROM {table} ORDER BY {order_by}");
         let mut stmt = conn.prepare(&query)?;
 
         let mut rows_out: Vec<Value> = Vec::new();
@@ -235,7 +231,10 @@ pub fn export_metadata(db_path: &str, opts: &ExportOptions) -> anyhow::Result<St
                 obj.insert(col.to_string(), read_column(row, i, col));
             }
             if table == "credentials" && !opts.include_credentials {
-                obj.insert("secret_key".to_string(), Value::String("REDACTED".to_string()));
+                obj.insert(
+                    "secret_key".to_string(),
+                    Value::String("REDACTED".to_string()),
+                );
             }
             rows_out.push(Value::Object(obj));
         }
@@ -263,7 +262,7 @@ pub fn import_metadata(
         .and_then(|v| v.as_i64())
         .unwrap_or(0);
     if version < 1 || version > EXPORT_VERSION {
-        anyhow::bail!("unsupported export version: {}", version);
+        anyhow::bail!("unsupported export version: {version}");
     }
 
     let conn = Connection::open(db_path)?;
@@ -280,7 +279,7 @@ pub fn import_metadata(
     if opts.replace {
         for table in DELETE_ORDER {
             if data.contains_key(*table) {
-                tx.execute(&format!("DELETE FROM {}", table), [])?;
+                tx.execute(&format!("DELETE FROM {table}"), [])?;
             }
         }
     }
@@ -315,10 +314,9 @@ pub fn import_metadata(
                             .get("access_key_id")
                             .and_then(|v| v.as_str())
                             .unwrap_or("?");
-                        result.warnings.push(format!(
-                            "Skipped credential '{}': REDACTED secret_key",
-                            ak
-                        ));
+                        result
+                            .warnings
+                            .push(format!("Skipped credential '{ak}': REDACTED secret_key"));
                         continue;
                     }
                 }
@@ -329,12 +327,9 @@ pub fn import_metadata(
             let ph = placeholders.join(", ");
 
             let sql = if opts.replace {
-                format!("INSERT INTO {} ({}) VALUES ({})", table, col_names, ph)
+                format!("INSERT INTO {table} ({col_names}) VALUES ({ph})")
             } else {
-                format!(
-                    "INSERT OR IGNORE INTO {} ({}) VALUES ({})",
-                    table, col_names, ph
-                )
+                format!("INSERT OR IGNORE INTO {table} ({col_names}) VALUES ({ph})")
             };
 
             let values: Vec<Box<dyn rusqlite::types::ToSql>> = columns
@@ -350,9 +345,7 @@ pub fn import_metadata(
                 Ok(_) => skipped += 1,
                 Err(e) => {
                     skipped += 1;
-                    result
-                        .warnings
-                        .push(format!("Skipped {} row: {}", table, e));
+                    result.warnings.push(format!("Skipped {table} row: {e}"));
                 }
             }
         }
@@ -411,10 +404,7 @@ fn chrono_now() -> String {
 
     // Simple date calculation from days since epoch (1970-01-01).
     let (year, month, day) = days_to_date(days as i64);
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.000Z",
-        year, month, day, hours, minutes, seconds
-    )
+    format!("{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}.000Z")
 }
 
 fn days_to_date(days: i64) -> (i64, i64, i64) {
@@ -493,11 +483,15 @@ CREATE TABLE IF NOT EXISTS credentials (
             conn.execute(
                 "INSERT INTO buckets VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
-                    "test-bucket", "us-east-1", "bleepstore", "bleepstore",
+                    "test-bucket",
+                    "us-east-1",
+                    "bleepstore",
+                    "bleepstore",
                     r#"{"owner":{"id":"bleepstore"},"grants":[]}"#,
                     "2026-02-25T12:00:00.000Z"
                 ],
-            ).unwrap();
+            )
+            .unwrap();
             conn.execute(
                 "INSERT INTO objects VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                 params![
@@ -522,18 +516,26 @@ CREATE TABLE IF NOT EXISTS credentials (
             conn.execute(
                 "INSERT INTO multipart_parts VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
-                    "upload-abc123", 1i64, 5242880i64,
+                    "upload-abc123",
+                    1i64,
+                    5242880i64,
                     r#""098f6bcd4621d373cade4e832627b4f6""#,
                     "2026-02-25T13:05:00.000Z"
                 ],
-            ).unwrap();
+            )
+            .unwrap();
             conn.execute(
                 "INSERT INTO credentials VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
-                    "bleepstore", "bleepstore-secret", "bleepstore", "bleepstore",
-                    1i64, "2026-02-25T12:00:00.000Z"
+                    "bleepstore",
+                    "bleepstore-secret",
+                    "bleepstore",
+                    "bleepstore",
+                    1i64,
+                    "2026-02-25T12:00:00.000Z"
                 ],
-            ).unwrap();
+            )
+            .unwrap();
         }
     }
 
@@ -641,7 +643,8 @@ CREATE TABLE IF NOT EXISTS credentials (
             ..ExportOptions::default()
         };
         let exported = export_metadata(db1.to_str().unwrap(), &opts).unwrap();
-        let result = import_metadata(db2.to_str().unwrap(), &exported, &ImportOptions::default()).unwrap();
+        let result =
+            import_metadata(db2.to_str().unwrap(), &exported, &ImportOptions::default()).unwrap();
 
         assert_eq!(*result.counts.get("buckets").unwrap(), 1);
         assert_eq!(*result.counts.get("objects").unwrap(), 1);
@@ -665,7 +668,8 @@ CREATE TABLE IF NOT EXISTS credentials (
             ..ExportOptions::default()
         };
         let exported = export_metadata(db.to_str().unwrap(), &opts).unwrap();
-        let result = import_metadata(db.to_str().unwrap(), &exported, &ImportOptions::default()).unwrap();
+        let result =
+            import_metadata(db.to_str().unwrap(), &exported, &ImportOptions::default()).unwrap();
 
         assert_eq!(*result.counts.get("buckets").unwrap(), 0);
     }
@@ -679,7 +683,8 @@ CREATE TABLE IF NOT EXISTS credentials (
         create_test_db(db2.to_str().unwrap(), false);
 
         let exported = export_metadata(db1.to_str().unwrap(), &ExportOptions::default()).unwrap();
-        let result = import_metadata(db2.to_str().unwrap(), &exported, &ImportOptions::default()).unwrap();
+        let result =
+            import_metadata(db2.to_str().unwrap(), &exported, &ImportOptions::default()).unwrap();
 
         assert_eq!(*result.skipped.get("credentials").unwrap(), 1);
         assert_eq!(result.warnings.len(), 1);
@@ -707,7 +712,7 @@ CREATE TABLE IF NOT EXISTS credentials (
         let fixture_data = match std::fs::read_to_string(&fixture_path) {
             Ok(d) => d,
             Err(_) => {
-                eprintln!("Skipping: reference fixture not found at {:?}", fixture_path);
+                eprintln!("Skipping: reference fixture not found at {fixture_path:?}");
                 return;
             }
         };
@@ -716,7 +721,12 @@ CREATE TABLE IF NOT EXISTS credentials (
         let db = dir.path().join("test.db");
         create_test_db(db.to_str().unwrap(), false);
 
-        let result = import_metadata(db.to_str().unwrap(), &fixture_data, &ImportOptions::default()).unwrap();
+        let result = import_metadata(
+            db.to_str().unwrap(),
+            &fixture_data,
+            &ImportOptions::default(),
+        )
+        .unwrap();
         assert_eq!(*result.counts.get("buckets").unwrap(), 2);
         assert_eq!(*result.counts.get("objects").unwrap(), 3);
 
@@ -733,8 +743,7 @@ CREATE TABLE IF NOT EXISTS credentials (
             assert_eq!(
                 ref_data.get(*table),
                 rust_data.get(*table),
-                "table {} mismatch",
-                table
+                "table {table} mismatch"
             );
         }
     }

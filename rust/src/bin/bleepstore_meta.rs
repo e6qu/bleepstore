@@ -7,7 +7,10 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "bleepstore-meta", about = "BleepStore metadata export/import tool")]
+#[command(
+    name = "bleepstore-meta",
+    about = "BleepStore metadata export/import tool"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -85,7 +88,7 @@ fn run_export(
     include_credentials: bool,
 ) -> i32 {
     if format != "json" {
-        eprintln!("Error: unsupported format: {}", format);
+        eprintln!("Error: unsupported format: {format}");
         return 1;
     }
 
@@ -94,7 +97,7 @@ fn run_export(
         None => match resolve_db_path(&config) {
             Ok(p) => p,
             Err(e) => {
-                eprintln!("Error reading config: {}", e);
+                eprintln!("Error reading config: {e}");
                 return 1;
             }
         },
@@ -105,7 +108,7 @@ fn run_export(
             let list: Vec<String> = t.split(',').map(|s| s.trim().to_string()).collect();
             for name in &list {
                 if !ALL_TABLES.contains(&name.as_str()) {
-                    eprintln!("Error: invalid table name: {}", name);
+                    eprintln!("Error: invalid table name: {name}");
                     return 1;
                 }
             }
@@ -122,18 +125,18 @@ fn run_export(
     match export_metadata(&db_path, &opts) {
         Ok(result) => {
             if output == "-" {
-                println!("{}", result);
+                println!("{result}");
             } else {
-                if let Err(e) = std::fs::write(&output, format!("{}\n", result)) {
-                    eprintln!("Error writing output: {}", e);
+                if let Err(e) = std::fs::write(&output, format!("{result}\n")) {
+                    eprintln!("Error writing output: {e}");
                     return 1;
                 }
-                eprintln!("Exported to {}", output);
+                eprintln!("Exported to {output}");
             }
             0
         }
         Err(e) => {
-            eprintln!("Error exporting: {}", e);
+            eprintln!("Error exporting: {e}");
             1
         }
     }
@@ -145,7 +148,7 @@ fn run_import(config: PathBuf, db: Option<String>, input: String, replace: bool)
         None => match resolve_db_path(&config) {
             Ok(p) => p,
             Err(e) => {
-                eprintln!("Error reading config: {}", e);
+                eprintln!("Error reading config: {e}");
                 return 1;
             }
         },
@@ -160,7 +163,7 @@ fn run_import(config: PathBuf, db: Option<String>, input: String, replace: bool)
         match std::fs::read_to_string(&input) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("Error reading input: {}", e);
+                eprintln!("Error reading input: {e}");
                 return 1;
             }
         }
@@ -173,20 +176,20 @@ fn run_import(config: PathBuf, db: Option<String>, input: String, replace: bool)
             for table in ALL_TABLES {
                 if let Some(count) = result.counts.get(*table) {
                     let skip = result.skipped.get(*table).unwrap_or(&0);
-                    let mut msg = format!("  {}: {} imported", table, count);
+                    let mut msg = format!("  {table}: {count} imported");
                     if *skip > 0 {
-                        msg.push_str(&format!(", {} skipped", skip));
+                        msg.push_str(&format!(", {skip} skipped"));
                     }
-                    eprintln!("{}", msg);
+                    eprintln!("{msg}");
                 }
             }
             for w in &result.warnings {
-                eprintln!("  WARNING: {}", w);
+                eprintln!("  WARNING: {w}");
             }
             0
         }
         Err(e) => {
-            eprintln!("Error importing: {}", e);
+            eprintln!("Error importing: {e}");
             1
         }
     }

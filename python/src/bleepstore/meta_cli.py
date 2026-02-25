@@ -38,51 +38,73 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # Export subcommand
     export_parser = subparsers.add_parser("export", help="Export metadata to JSON")
     export_parser.add_argument(
-        "--config", type=Path, default=Path("bleepstore.yaml"),
+        "--config",
+        type=Path,
+        default=Path("bleepstore.yaml"),
         help="Config file path (default: bleepstore.yaml)",
     )
     export_parser.add_argument(
-        "--db", type=str, default=None,
+        "--db",
+        type=str,
+        default=None,
         help="SQLite database path (overrides config)",
     )
     export_parser.add_argument(
-        "--format", choices=["json"], default="json",
+        "--format",
+        choices=["json"],
+        default="json",
         help="Output format (default: json)",
     )
     export_parser.add_argument(
-        "--output", type=str, default="-",
+        "--output",
+        type=str,
+        default="-",
         help="Output file path (default: stdout)",
     )
     export_parser.add_argument(
-        "--tables", type=str, default=None,
+        "--tables",
+        type=str,
+        default=None,
         help=f"Comma-separated table names (default: all). Valid: {','.join(ALL_TABLES)}",
     )
     export_parser.add_argument(
-        "--include-credentials", action="store_true", default=False,
+        "--include-credentials",
+        action="store_true",
+        default=False,
         help="Include real secret keys (default: redacted)",
     )
 
     # Import subcommand
     import_parser = subparsers.add_parser("import", help="Import metadata from JSON")
     import_parser.add_argument(
-        "--config", type=Path, default=Path("bleepstore.yaml"),
+        "--config",
+        type=Path,
+        default=Path("bleepstore.yaml"),
         help="Config file path (default: bleepstore.yaml)",
     )
     import_parser.add_argument(
-        "--db", type=str, default=None,
+        "--db",
+        type=str,
+        default=None,
         help="SQLite database path (overrides config)",
     )
     import_parser.add_argument(
-        "--input", type=str, default="-",
+        "--input",
+        type=str,
+        default="-",
         help="Input file path (default: stdin)",
     )
     import_group = import_parser.add_mutually_exclusive_group()
     import_group.add_argument(
-        "--merge", action="store_true", default=True,
+        "--merge",
+        action="store_true",
+        default=True,
         help="INSERT OR IGNORE (default)",
     )
     import_group.add_argument(
-        "--replace", action="store_true", default=False,
+        "--replace",
+        action="store_true",
+        default=False,
         help="DELETE existing rows first, then INSERT",
     )
 

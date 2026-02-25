@@ -2,16 +2,13 @@
 
 import json
 import sqlite3
-import tempfile
 from pathlib import Path
 
 import pytest
 
 from bleepstore.serialization import (
-    ALL_TABLES,
     ExportOptions,
     ImportOptions,
-    ImportResult,
     export_metadata,
     import_metadata,
 )
@@ -102,34 +99,75 @@ def _create_test_db(db_path: str, seed: bool = True) -> None:
     if seed:
         conn.execute(
             "INSERT INTO buckets VALUES (?, ?, ?, ?, ?, ?)",
-            ("test-bucket", "us-east-1", "bleepstore", "bleepstore",
-             '{"owner":{"id":"bleepstore"},"grants":[]}', "2026-02-25T12:00:00.000Z"),
+            (
+                "test-bucket",
+                "us-east-1",
+                "bleepstore",
+                "bleepstore",
+                '{"owner":{"id":"bleepstore"},"grants":[]}',
+                "2026-02-25T12:00:00.000Z",
+            ),
         )
         conn.execute(
             "INSERT INTO objects VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("test-bucket", "photos/cat.jpg", 142857,
-             '"d41d8cd98f00b204e9800998ecf8427e"', "image/jpeg",
-             None, None, None, None, None, "STANDARD",
-             '{}', '{"x-amz-meta-author":"John"}',
-             "2026-02-25T14:30:45.000Z", 0),
+            (
+                "test-bucket",
+                "photos/cat.jpg",
+                142857,
+                '"d41d8cd98f00b204e9800998ecf8427e"',
+                "image/jpeg",
+                None,
+                None,
+                None,
+                None,
+                None,
+                "STANDARD",
+                "{}",
+                '{"x-amz-meta-author":"John"}',
+                "2026-02-25T14:30:45.000Z",
+                0,
+            ),
         )
         conn.execute(
             "INSERT INTO multipart_uploads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("upload-abc123", "test-bucket", "large-file.bin",
-             "application/octet-stream", None, None, None, None, None,
-             "STANDARD", '{}', '{}', "bleepstore", "bleepstore",
-             "2026-02-25T13:00:00.000Z"),
+            (
+                "upload-abc123",
+                "test-bucket",
+                "large-file.bin",
+                "application/octet-stream",
+                None,
+                None,
+                None,
+                None,
+                None,
+                "STANDARD",
+                "{}",
+                "{}",
+                "bleepstore",
+                "bleepstore",
+                "2026-02-25T13:00:00.000Z",
+            ),
         )
         conn.execute(
             "INSERT INTO multipart_parts VALUES (?, ?, ?, ?, ?)",
-            ("upload-abc123", 1, 5242880,
-             '"098f6bcd4621d373cade4e832627b4f6"',
-             "2026-02-25T13:05:00.000Z"),
+            (
+                "upload-abc123",
+                1,
+                5242880,
+                '"098f6bcd4621d373cade4e832627b4f6"',
+                "2026-02-25T13:05:00.000Z",
+            ),
         )
         conn.execute(
             "INSERT INTO credentials VALUES (?, ?, ?, ?, ?, ?)",
-            ("bleepstore", "bleepstore-secret", "bleepstore", "bleepstore", 1,
-             "2026-02-25T12:00:00.000Z"),
+            (
+                "bleepstore",
+                "bleepstore-secret",
+                "bleepstore",
+                "bleepstore",
+                1,
+                "2026-02-25T12:00:00.000Z",
+            ),
         )
     conn.commit()
     conn.close()

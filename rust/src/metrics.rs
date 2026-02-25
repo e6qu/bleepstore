@@ -166,78 +166,74 @@ fn map_s3_operation(method: &str, path: &str, query: Option<&str>) -> Option<Str
             "GET" => Some("ListBuckets".to_string()),
             _ => None,
         },
-        "/{bucket}" => {
-            match method {
-                "GET" => {
-                    if qs.contains("location") {
-                        Some("GetBucketLocation".to_string())
-                    } else if qs.contains("acl") {
-                        Some("GetBucketAcl".to_string())
-                    } else if qs.contains("uploads") {
-                        Some("ListMultipartUploads".to_string())
-                    } else {
-                        Some("ListObjects".to_string())
-                    }
+        "/{bucket}" => match method {
+            "GET" => {
+                if qs.contains("location") {
+                    Some("GetBucketLocation".to_string())
+                } else if qs.contains("acl") {
+                    Some("GetBucketAcl".to_string())
+                } else if qs.contains("uploads") {
+                    Some("ListMultipartUploads".to_string())
+                } else {
+                    Some("ListObjects".to_string())
                 }
-                "PUT" => {
-                    if qs.contains("acl") {
-                        Some("PutBucketAcl".to_string())
-                    } else {
-                        Some("CreateBucket".to_string())
-                    }
-                }
-                "DELETE" => Some("DeleteBucket".to_string()),
-                "HEAD" => Some("HeadBucket".to_string()),
-                "POST" => {
-                    if qs.contains("delete") {
-                        Some("DeleteObjects".to_string())
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
             }
-        }
-        "/{bucket}/{key}" => {
-            match method {
-                "GET" => {
-                    if qs.contains("acl") {
-                        Some("GetObjectAcl".to_string())
-                    } else if qs.contains("uploadId") {
-                        Some("ListParts".to_string())
-                    } else {
-                        Some("GetObject".to_string())
-                    }
+            "PUT" => {
+                if qs.contains("acl") {
+                    Some("PutBucketAcl".to_string())
+                } else {
+                    Some("CreateBucket".to_string())
                 }
-                "PUT" => {
-                    if qs.contains("acl") {
-                        Some("PutObjectAcl".to_string())
-                    } else if qs.contains("partNumber") {
-                        Some("UploadPart".to_string())
-                    } else {
-                        Some("PutObject".to_string())
-                    }
-                }
-                "DELETE" => {
-                    if qs.contains("uploadId") {
-                        Some("AbortMultipartUpload".to_string())
-                    } else {
-                        Some("DeleteObject".to_string())
-                    }
-                }
-                "HEAD" => Some("HeadObject".to_string()),
-                "POST" => {
-                    if qs.contains("uploads") {
-                        Some("CreateMultipartUpload".to_string())
-                    } else if qs.contains("uploadId") {
-                        Some("CompleteMultipartUpload".to_string())
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
             }
-        }
+            "DELETE" => Some("DeleteBucket".to_string()),
+            "HEAD" => Some("HeadBucket".to_string()),
+            "POST" => {
+                if qs.contains("delete") {
+                    Some("DeleteObjects".to_string())
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        },
+        "/{bucket}/{key}" => match method {
+            "GET" => {
+                if qs.contains("acl") {
+                    Some("GetObjectAcl".to_string())
+                } else if qs.contains("uploadId") {
+                    Some("ListParts".to_string())
+                } else {
+                    Some("GetObject".to_string())
+                }
+            }
+            "PUT" => {
+                if qs.contains("acl") {
+                    Some("PutObjectAcl".to_string())
+                } else if qs.contains("partNumber") {
+                    Some("UploadPart".to_string())
+                } else {
+                    Some("PutObject".to_string())
+                }
+            }
+            "DELETE" => {
+                if qs.contains("uploadId") {
+                    Some("AbortMultipartUpload".to_string())
+                } else {
+                    Some("DeleteObject".to_string())
+                }
+            }
+            "HEAD" => Some("HeadObject".to_string()),
+            "POST" => {
+                if qs.contains("uploads") {
+                    Some("CreateMultipartUpload".to_string())
+                } else if qs.contains("uploadId") {
+                    Some("CompleteMultipartUpload".to_string())
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        },
         _ => None,
     }
 }
