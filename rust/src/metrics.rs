@@ -6,7 +6,7 @@
 
 use axum::http::{Request, StatusCode};
 use axum::response::{IntoResponse, Response};
-use metrics::{counter, describe_counter, describe_gauge, describe_histogram, histogram};
+use metrics::{counter, describe_counter, describe_gauge, describe_histogram, gauge, histogram};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -79,9 +79,11 @@ pub fn describe_metrics() {
     describe_histogram!(HTTP_REQUEST_SIZE_BYTES, "HTTP request body size in bytes");
     describe_histogram!(HTTP_RESPONSE_SIZE_BYTES, "HTTP response body size in bytes");
 
-    // Initialize S3OperationsTotal so it appears in /metrics output
-    // even before any S3 operations have been performed.
+    // Seed all metrics so they appear in /metrics output immediately,
+    // even before any requests have been processed.
     counter!(S3_OPERATIONS_TOTAL, "operation" => "ListBuckets", "status" => "success").increment(0);
+    gauge!(OBJECTS_TOTAL).set(0.0);
+    gauge!(BUCKETS_TOTAL).set(0.0);
 }
 
 // -- Metrics middleware -------------------------------------------------------
