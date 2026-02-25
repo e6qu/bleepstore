@@ -197,8 +197,8 @@ impl StorageBackend for SqliteBackend {
                 let conn = conn
                     .lock()
                     .map_err(|e| anyhow::anyhow!("Mutex poisoned: {e}"))?;
-                let mut stmt =
-                    conn.prepare("SELECT 1 FROM object_data WHERE bucket = ?1 AND key = ?2 LIMIT 1")?;
+                let mut stmt = conn
+                    .prepare("SELECT 1 FROM object_data WHERE bucket = ?1 AND key = ?2 LIMIT 1")?;
                 let found = stmt.exists(params![bucket, key])?;
                 Ok::<bool, anyhow::Error>(found)
             })
