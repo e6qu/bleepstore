@@ -317,6 +317,23 @@ func (b *LocalBackend) DeleteParts(ctx context.Context, bucket, key, uploadID st
 	return nil
 }
 
+// DeleteUploadParts removes the parts directory for a specific multipart upload.
+// This is used during startup reaping of expired uploads to clean up orphaned
+// part files on disk.
+func (b *LocalBackend) DeleteUploadParts(uploadID string) error {
+	partDir := filepath.Join(b.RootDir, ".multipart", uploadID)
+	err := os.RemoveAll(partDir)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("removing part directory %q: %w", partDir, err)
+	}
+
+	// Best-effort cleanup: remove .multipart dir if empty.
+	multipartDir := filepath.Join(b.RootDir, ".multipart")
+	os.Remove(multipartDir) // Fails silently if not empty.
+
+	return nil
+}
+
 // CreateBucket creates a directory for the bucket under the root directory.
 func (b *LocalBackend) CreateBucket(ctx context.Context, bucket string) error {
 	bucketDir := filepath.Join(b.RootDir, bucket)
@@ -353,6 +370,12 @@ func (b *LocalBackend) ObjectExists(ctx context.Context, bucket, key string) (bo
 		return false, nil
 	}
 	return false, fmt.Errorf("checking object existence %q/%q: %w", bucket, key, err)
+}
+
+// HealthCheck verifies that the local storage root directory is accessible.
+func (b *LocalBackend) HealthCheck(ctx context.Context) error {
+	_, err := os.Stat(b.RootDir)
+	return err
 }
 
 // cleanEmptyParents removes empty directories starting from dir up to (but not

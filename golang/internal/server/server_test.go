@@ -5,13 +5,25 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/bleepstore/bleepstore/internal/config"
+	"github.com/bleepstore/bleepstore/internal/metadata"
+	"github.com/bleepstore/bleepstore/internal/metrics"
+	"github.com/bleepstore/bleepstore/internal/storage"
 )
 
+func init() {
+	// Register metrics once for the entire test binary so that tests
+	// checking /metrics output see the expected collectors.
+	metrics.Register()
+}
+
 // newTestServer creates a Server for testing with default config.
+// Observability is enabled by default.
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	cfg := &config.Config{
@@ -24,8 +36,64 @@ func newTestServer(t *testing.T) *Server {
 			AccessKey: "bleepstore",
 			SecretKey: "bleepstore-secret",
 		},
+		Observability: config.ObservabilityConfig{
+			Metrics:     true,
+			HealthCheck: true,
+		},
 	}
 	srv, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
+	return srv
+}
+
+// newTestServerWithConfig creates a Server for testing with a custom config.
+func newTestServerWithConfig(t *testing.T, cfg *config.Config) *Server {
+	t.Helper()
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
+	return srv
+}
+
+// newTestServerWithBackends creates a Server with real metadata and storage backends.
+func newTestServerWithBackends(t *testing.T) *Server {
+	t.Helper()
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "metadata.db")
+	storageDir := filepath.Join(tmpDir, "objects")
+	os.MkdirAll(storageDir, 0o755)
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Host:   "0.0.0.0",
+			Port:   9011,
+			Region: "us-east-1",
+		},
+		Auth: config.AuthConfig{
+			AccessKey: "bleepstore",
+			SecretKey: "bleepstore-secret",
+		},
+		Observability: config.ObservabilityConfig{
+			Metrics:     true,
+			HealthCheck: true,
+		},
+	}
+
+	metaStore, err := metadata.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("creating metadata store: %v", err)
+	}
+	t.Cleanup(func() { metaStore.Close() })
+
+	storageBackend, err := storage.NewLocalBackend(storageDir)
+	if err != nil {
+		t.Fatalf("creating storage backend: %v", err)
+	}
+
+	srv, err := New(cfg, metaStore, WithStorageBackend(storageBackend))
 	if err != nil {
 		t.Fatalf("New() failed: %v", err)
 	}
@@ -38,7 +106,10 @@ func testRequest(t *testing.T, srv *Server, method, path string) *httptest.Respo
 	t.Helper()
 	req := httptest.NewRequest(method, path, nil)
 	rec := httptest.NewRecorder()
-	handler := metricsMiddleware(commonHeaders(srv.router))
+	var handler http.Handler = commonHeaders(srv.router)
+	if srv.cfg.Observability.Metrics {
+		handler = metricsMiddleware(handler)
+	}
 	handler.ServeHTTP(rec, req)
 	return rec
 }
@@ -56,12 +127,51 @@ func TestHealthEndpoint(t *testing.T) {
 		t.Errorf("GET /health Content-Type = %q, want application/json", ct)
 	}
 
-	var body map[string]string
+	var body map[string]interface{}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("GET /health body unmarshal error: %v", err)
 	}
 	if body["status"] != "ok" {
 		t.Errorf("GET /health status = %q, want %q", body["status"], "ok")
+	}
+}
+
+func TestHealthEndpointWithBackends(t *testing.T) {
+	srv := newTestServerWithBackends(t)
+	rec := testRequest(t, srv, "GET", "/health")
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("GET /health status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("GET /health body unmarshal error: %v", err)
+	}
+	if body["status"] != "ok" {
+		t.Errorf("GET /health status = %q, want %q", body["status"], "ok")
+	}
+
+	// With health_check enabled and backends, should have checks.
+	checks, ok := body["checks"].(map[string]interface{})
+	if !ok {
+		t.Fatal("GET /health response missing 'checks' field")
+	}
+
+	metaCheck, ok := checks["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatal("GET /health missing 'metadata' check")
+	}
+	if metaCheck["status"] != "ok" {
+		t.Errorf("metadata check status = %q, want %q", metaCheck["status"], "ok")
+	}
+
+	storageCheck, ok := checks["storage"].(map[string]interface{})
+	if !ok {
+		t.Fatal("GET /health missing 'storage' check")
+	}
+	if storageCheck["status"] != "ok" {
+		t.Errorf("storage check status = %q, want %q", storageCheck["status"], "ok")
 	}
 }
 
@@ -110,30 +220,19 @@ func TestDocsEndpoint(t *testing.T) {
 func TestOpenAPIEndpoint(t *testing.T) {
 	srv := newTestServer(t)
 
-	// Huma serves OpenAPI spec. Try /openapi.json first, fall back to /openapi.
-	paths := []string{"/openapi.json", "/openapi"}
-	var rec *httptest.ResponseRecorder
-	var foundPath string
+	rec := testRequest(t, srv, "GET", "/openapi.json")
 
-	for _, p := range paths {
-		rec = testRequest(t, srv, "GET", p)
-		if rec.Code == http.StatusOK {
-			foundPath = p
-			break
-		}
-	}
-
-	if foundPath == "" {
-		t.Fatalf("Neither /openapi.json nor /openapi returned 200 OK")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /openapi.json status = %d, want %d", rec.Code, http.StatusOK)
 	}
 
 	var body map[string]interface{}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("GET %s body is not valid JSON: %v", foundPath, err)
+		t.Fatalf("GET /openapi.json body is not valid JSON: %v", err)
 	}
 
 	if _, ok := body["openapi"]; !ok {
-		t.Errorf("GET %s response does not contain 'openapi' key", foundPath)
+		t.Errorf("GET /openapi.json response does not contain 'openapi' key")
 	}
 }
 
@@ -172,6 +271,111 @@ func TestMetricsEndpoint(t *testing.T) {
 	}
 	if !strings.Contains(body, "bleepstore_bytes_sent_total") {
 		t.Error("GET /metrics does not contain bleepstore_bytes_sent_total")
+	}
+}
+
+func TestMetricsDisabled(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Host:   "0.0.0.0",
+			Port:   9011,
+			Region: "us-east-1",
+		},
+		Auth: config.AuthConfig{
+			AccessKey: "bleepstore",
+			SecretKey: "bleepstore-secret",
+		},
+		Observability: config.ObservabilityConfig{
+			Metrics:     false,
+			HealthCheck: true,
+		},
+	}
+	srv := newTestServerWithConfig(t, cfg)
+	rec := testRequest(t, srv, "GET", "/metrics")
+
+	// When metrics disabled, /metrics route is not registered.
+	// The catch-all S3 dispatch will handle it (returning 500 since no metadata store).
+	if rec.Code == http.StatusOK {
+		t.Errorf("GET /metrics with metrics disabled should not return 200, got %d", rec.Code)
+	}
+}
+
+func TestHealthzEndpoint(t *testing.T) {
+	srv := newTestServer(t)
+	rec := testRequest(t, srv, "GET", "/healthz")
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("GET /healthz status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	// Body should be empty.
+	body := rec.Body.String()
+	if body != "" {
+		t.Errorf("GET /healthz body = %q, want empty", body)
+	}
+}
+
+func TestReadyzEndpoint(t *testing.T) {
+	srv := newTestServerWithBackends(t)
+	rec := testRequest(t, srv, "GET", "/readyz")
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("GET /readyz status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	// Body should be empty.
+	body := rec.Body.String()
+	if body != "" {
+		t.Errorf("GET /readyz body = %q, want empty", body)
+	}
+}
+
+func TestHealthCheckDisabled(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Host:   "0.0.0.0",
+			Port:   9011,
+			Region: "us-east-1",
+		},
+		Auth: config.AuthConfig{
+			AccessKey: "bleepstore",
+			SecretKey: "bleepstore-secret",
+		},
+		Observability: config.ObservabilityConfig{
+			Metrics:     true,
+			HealthCheck: false,
+		},
+	}
+	srv := newTestServerWithConfig(t, cfg)
+
+	// /healthz should not be registered when health_check is disabled.
+	rec := testRequest(t, srv, "GET", "/healthz")
+	if rec.Code == http.StatusOK {
+		t.Errorf("GET /healthz with health_check disabled should not return 200, got %d", rec.Code)
+	}
+
+	// /readyz should not be registered when health_check is disabled.
+	rec = testRequest(t, srv, "GET", "/readyz")
+	if rec.Code == http.StatusOK {
+		t.Errorf("GET /readyz with health_check disabled should not return 200, got %d", rec.Code)
+	}
+
+	// /health should still work but return static response without checks.
+	rec = testRequest(t, srv, "GET", "/health")
+	if rec.Code != http.StatusOK {
+		t.Errorf("GET /health status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("GET /health body unmarshal error: %v", err)
+	}
+	if body["status"] != "ok" {
+		t.Errorf("GET /health status = %q, want %q", body["status"], "ok")
+	}
+	// Should NOT have checks field when health_check is disabled.
+	if _, ok := body["checks"]; ok {
+		t.Errorf("GET /health with health_check disabled should not contain 'checks' field")
 	}
 }
 

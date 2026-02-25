@@ -54,6 +54,11 @@ pub const LoggingConfig = struct {
     format: []const u8 = "text",
 };
 
+pub const ObservabilityConfig = struct {
+    metrics: bool = true,
+    health_check: bool = true,
+};
+
 pub const ClusterConfig = struct {
     enabled: bool = false,
     node_id: []const u8 = "",
@@ -71,6 +76,7 @@ pub const Config = struct {
     storage: StorageConfig = .{},
     cluster: ClusterConfig = .{},
     logging: LoggingConfig = .{},
+    observability: ObservabilityConfig = .{},
 
     /// Backing buffer for string values loaded from file.
     /// When non-null, string fields in sub-configs point into this buffer.
@@ -257,6 +263,12 @@ fn applyConfigValue(cfg: *Config, key: []const u8, value: []const u8) void {
         cfg.logging.level = value;
     } else if (std.mem.eql(u8, key, "logging.format")) {
         cfg.logging.format = value;
+    }
+    // Observability settings
+    else if (std.mem.eql(u8, key, "observability.metrics")) {
+        cfg.observability.metrics = std.mem.eql(u8, value, "true");
+    } else if (std.mem.eql(u8, key, "observability.health_check")) {
+        cfg.observability.health_check = std.mem.eql(u8, value, "true");
     }
 }
 

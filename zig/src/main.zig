@@ -241,9 +241,17 @@ pub fn main() !void {
     // Set global max object size for handler access.
     server_mod.global_max_object_size = cfg.server.max_object_size;
 
-    // Step 2: Initialize metrics (record start time)
-    metrics_mod.initMetrics();
-    std.log.info("metrics initialized", .{});
+    // Set observability flags from config.
+    server_mod.global_metrics_enabled = cfg.observability.metrics;
+    server_mod.global_health_check_enabled = cfg.observability.health_check;
+
+    // Step 2: Initialize metrics (record start time) — only when metrics enabled.
+    if (cfg.observability.metrics) {
+        metrics_mod.initMetrics();
+        std.log.info("metrics initialized", .{});
+    } else {
+        std.log.info("metrics disabled by config", .{});
+    }
 
     // Step 3: Initialize SQLite metadata store
     // Crash-only: SQLite WAL mode auto-recovers from crashes.
@@ -385,13 +393,22 @@ pub fn main() !void {
     defer auth_cache.deinit();
     server_mod.global_auth_cache = &auth_cache;
 
-    // Step 7: Update metrics gauges from metadata store
-    if (metadata_store.metadataStore().countBuckets()) |count| {
-        metrics_mod.setBucketsTotal(count);
-    } else |_| {}
-    if (metadata_store.metadataStore().countObjects()) |count| {
-        metrics_mod.setObjectsTotal(count);
-    } else |_| {}
+    // Step 7: Reap expired multipart uploads (crash-only startup recovery).
+    // TTL = 604800 seconds (7 days).
+    const reaped = metadata_store.reapExpiredUploads(604800) catch 0;
+    if (reaped > 0) {
+        std.log.info("reaped {d} expired multipart uploads", .{reaped});
+    }
+
+    // Step 8: Update metrics gauges from metadata store (only when metrics enabled)
+    if (cfg.observability.metrics) {
+        if (metadata_store.metadataStore().countBuckets()) |count| {
+            metrics_mod.setBucketsTotal(count);
+        } else |_| {}
+        if (metadata_store.metadataStore().countObjects()) |count| {
+            metrics_mod.setObjectsTotal(count);
+        } else |_| {}
+    }
 
     // Install signal handlers (SIGTERM/SIGINT -> stop accepting, exit)
     installSignalHandlers();

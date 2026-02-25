@@ -131,6 +131,9 @@ type ListPartsResult struct {
 type MetadataStore interface {
 	io.Closer
 
+	// Ping checks connectivity to the metadata store.
+	Ping(ctx context.Context) error
+
 	// Bucket operations
 
 	// CreateBucket creates a new bucket record.

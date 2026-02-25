@@ -2,6 +2,9 @@
 package handlers
 
 import (
+	"bytes"
+	"crypto/md5"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -80,6 +83,46 @@ func (h *ObjectHandler) PutObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check If-None-Match: * header (create-only / no-overwrite semantics).
+	ifNoneMatch := r.Header.Get("If-None-Match")
+	if ifNoneMatch == "*" {
+		exists, existErr := h.meta.ObjectExists(ctx, bucketName, key)
+		if existErr != nil {
+			slog.Error("PutObject ObjectExists error", "error", existErr)
+			xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
+			return
+		}
+		if exists {
+			xmlutil.WriteErrorResponse(w, r, s3err.ErrPreconditionFailed)
+			return
+		}
+	}
+
+	// Validate Content-MD5 if present.
+	contentMD5 := r.Header.Get("Content-MD5")
+	var bodyReader io.Reader = r.Body
+	if contentMD5 != "" {
+		expected, decodeErr := base64.StdEncoding.DecodeString(contentMD5)
+		if decodeErr != nil || len(expected) != 16 {
+			xmlutil.WriteErrorResponse(w, r, s3err.ErrInvalidDigest)
+			return
+		}
+		// Read the entire body to compute MD5.
+		bodyBytes, readErr := io.ReadAll(r.Body)
+		if readErr != nil {
+			slog.Error("PutObject body read error", "error", readErr)
+			xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
+			return
+		}
+		actual := md5.Sum(bodyBytes)
+		if !bytes.Equal(actual[:], expected) {
+			xmlutil.WriteErrorResponse(w, r, s3err.ErrBadDigest)
+			return
+		}
+		// Replace body with buffered reader for downstream consumption.
+		bodyReader = bytes.NewReader(bodyBytes)
+	}
+
 	// Extract content type, defaulting to application/octet-stream.
 	contentType := r.Header.Get("Content-Type")
 	if contentType == "" {
@@ -98,16 +141,30 @@ func (h *ObjectHandler) PutObject(w http.ResponseWriter, r *http.Request) {
 
 	// Extract optional canned ACL.
 	cannedACL := r.Header.Get("x-amz-acl")
+
+	// Validate mutually exclusive ACL modes.
+	if cannedACL != "" && hasGrantHeaders(r.Header) {
+		xmlutil.WriteErrorResponse(w, r, &s3err.S3Error{
+			Code:       "InvalidArgument",
+			Message:    "Specifying both x-amz-acl and x-amz-grant headers is not allowed",
+			HTTPStatus: 400,
+		})
+		return
+	}
+
 	var aclJSON json.RawMessage
 	if cannedACL != "" {
 		acp := parseCannedACL(cannedACL, h.ownerID, h.ownerDisplay)
+		aclJSON = aclToJSON(acp)
+	} else if hasGrantHeaders(r.Header) {
+		acp := parseGrantHeaders(r.Header, h.ownerID, h.ownerDisplay)
 		aclJSON = aclToJSON(acp)
 	} else {
 		aclJSON = defaultPrivateACL(h.ownerID, h.ownerDisplay)
 	}
 
 	// Write object data to storage backend (atomic: temp-fsync-rename).
-	bytesWritten, etag, err := h.store.PutObject(ctx, bucketName, key, r.Body, r.ContentLength)
+	bytesWritten, etag, err := h.store.PutObject(ctx, bucketName, key, bodyReader, r.ContentLength)
 	if err != nil {
 		slog.Error("PutObject storage error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
@@ -371,8 +428,31 @@ func (h *ObjectHandler) DeleteObjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Read the body for Content-MD5 validation and XML parsing.
+	bodyBytes, readErr := io.ReadAll(r.Body)
+	if readErr != nil {
+		slog.Error("DeleteObjects body read error", "error", readErr)
+		xmlutil.WriteErrorResponse(w, r, s3err.ErrInternalError)
+		return
+	}
+
+	// Validate Content-MD5 if present.
+	contentMD5 := r.Header.Get("Content-MD5")
+	if contentMD5 != "" {
+		expected, decodeErr := base64.StdEncoding.DecodeString(contentMD5)
+		if decodeErr != nil || len(expected) != 16 {
+			xmlutil.WriteErrorResponse(w, r, s3err.ErrInvalidDigest)
+			return
+		}
+		actual := md5.Sum(bodyBytes)
+		if !bytes.Equal(actual[:], expected) {
+			xmlutil.WriteErrorResponse(w, r, s3err.ErrBadDigest)
+			return
+		}
+	}
+
 	// Parse the Delete XML request body.
-	deleteReq, err := parseDeleteRequest(r.Body)
+	deleteReq, err := parseDeleteRequest(bytes.NewReader(bodyBytes))
 	if err != nil {
 		slog.Error("DeleteObjects XML parse error", "error", err)
 		xmlutil.WriteErrorResponse(w, r, s3err.ErrMalformedXML)
@@ -846,16 +926,30 @@ func (h *ObjectHandler) PutObjectAcl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate mutually exclusive ACL modes: canned ACL and grant headers
+	// cannot be specified together.
+	cannedACL := r.Header.Get("x-amz-acl")
+	if cannedACL != "" && hasGrantHeaders(r.Header) {
+		xmlutil.WriteErrorResponse(w, r, &s3err.S3Error{
+			Code:       "InvalidArgument",
+			Message:    "Specifying both x-amz-acl and x-amz-grant headers is not allowed",
+			HTTPStatus: 400,
+		})
+		return
+	}
+
 	var acp *xmlutil.AccessControlPolicy
 
 	// Three mutually exclusive modes:
 	// 1. Canned ACL via x-amz-acl header
-	// 2. Explicit grants via x-amz-grant-* headers (not yet implemented)
+	// 2. Explicit grants via x-amz-grant-* headers
 	// 3. XML body
-	cannedACL := r.Header.Get("x-amz-acl")
 	if cannedACL != "" {
 		// Mode 1: Canned ACL.
 		acp = parseCannedACL(cannedACL, h.ownerID, h.ownerDisplay)
+	} else if hasGrantHeaders(r.Header) {
+		// Mode 2: Explicit grants via x-amz-grant-* headers.
+		acp = parseGrantHeaders(r.Header, h.ownerID, h.ownerDisplay)
 	} else if r.ContentLength > 0 {
 		// Mode 3: XML body.
 		body, readErr := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MB max
@@ -869,7 +963,7 @@ func (h *ObjectHandler) PutObjectAcl(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		// No canned ACL and no body: default to private.
+		// No canned ACL, no grant headers, and no body: default to private.
 		acp = parseCannedACL("private", h.ownerID, h.ownerDisplay)
 	}
 

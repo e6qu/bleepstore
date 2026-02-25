@@ -13,6 +13,8 @@
 #   ./run_benchmarks.sh boto          # Run boto3 benchmarks (latency + throughput + multipart)
 #   ./run_benchmarks.sh locust        # Run Locust load test (headless, 30s, 20 users)
 #   ./run_benchmarks.sh k6            # Run k6 load test (requires k6 installed separately)
+#   ./run_benchmarks.sh stress        # Run stress test scenarios (connection storms, large objects, etc.)
+#   ./run_benchmarks.sh scaling       # Run concurrency scaling benchmarks (throughput curve)
 #   ./run_benchmarks.sh all           # Run boto3 + locust
 #
 set -euo pipefail
@@ -76,6 +78,16 @@ case "$TOOL" in
             --env "SECRET_KEY=${BLEEPSTORE_SECRET_KEY:-bleepstore-secret}" \
             k6-s3.js "$@"
         ;;
+    stress)
+        echo ""
+        echo "--- Stress Test Scenarios ---"
+        python bench_stress.py --endpoint "$ENDPOINT" "$@"
+        ;;
+    scaling)
+        echo ""
+        echo "--- Concurrency Scaling Benchmarks ---"
+        python bench_scaling.py --endpoint "$ENDPOINT" "$@"
+        ;;
     all)
         "$0" boto "$@"
         echo ""
@@ -83,7 +95,7 @@ case "$TOOL" in
         ;;
     *)
         echo "Unknown tool: $TOOL"
-        echo "Usage: $0 {boto|locust|k6|all} [args...]"
+        echo "Usage: $0 {boto|locust|k6|stress|scaling|all} [args...]"
         exit 1
         ;;
 esac

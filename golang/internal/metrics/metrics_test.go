@@ -10,11 +10,13 @@ func TestNormalizePath(t *testing.T) {
 		want string
 	}{
 		{"/health", "/health"},
+		{"/healthz", "/healthz"},
+		{"/readyz", "/readyz"},
 		{"/docs", "/docs"},
 		{"/docs/", "/docs"},
 		{"/docs/something", "/docs"},
 		{"/metrics", "/metrics"},
-		{"/openapi.json", "/openapi"},
+		{"/openapi.json", "/openapi.json"},
 		{"/", "/"},
 		{"", "/"},
 		{"/my-bucket", "/{bucket}"},
@@ -36,10 +38,10 @@ func TestNormalizePath(t *testing.T) {
 }
 
 func TestMetricsRegistered(t *testing.T) {
-	// Verify that calling Inc/Set on metrics does not panic.
-	// The init() function registers all metrics, so if registration
-	// failed, we would have already panicked.
+	// Register metrics explicitly (replaces former init() auto-registration).
+	Register()
 
+	// Verify that calling Inc/Set on metrics does not panic.
 	HTTPRequestsTotal.WithLabelValues("GET", "/health", "200").Inc()
 	HTTPRequestDuration.WithLabelValues("GET", "/health").Observe(0.001)
 	HTTPRequestSize.WithLabelValues("PUT", "/{bucket}/{key}").Observe(1024)

@@ -34,6 +34,18 @@ pub const BYTES_RECEIVED_TOTAL: &str = "bleepstore_bytes_received_total";
 /// Total bytes sent in response bodies (counter).
 pub const BYTES_SENT_TOTAL: &str = "bleepstore_bytes_sent_total";
 
+/// HTTP request body size in bytes (histogram). Labels: method, path.
+pub const HTTP_REQUEST_SIZE_BYTES: &str = "bleepstore_http_request_size_bytes";
+
+/// HTTP response body size in bytes (histogram). Labels: method, path.
+pub const HTTP_RESPONSE_SIZE_BYTES: &str = "bleepstore_http_response_size_bytes";
+
+/// Histogram bucket boundaries for body size metrics (bytes).
+pub const SIZE_HISTOGRAM_BUCKETS: [f64; 10] = [
+    256.0, 1024.0, 4096.0, 16384.0, 65536.0, 262144.0, 1048576.0, 4194304.0, 16777216.0,
+    67108864.0,
+];
+
 // -- Global recorder installation ---------------------------------------------
 
 /// Singleton handle to the Prometheus recorder.
@@ -65,6 +77,14 @@ pub fn describe_metrics() {
         "Total bytes received (request bodies)"
     );
     describe_counter!(BYTES_SENT_TOTAL, "Total bytes sent (response bodies)");
+    describe_histogram!(
+        HTTP_REQUEST_SIZE_BYTES,
+        "HTTP request body size in bytes"
+    );
+    describe_histogram!(
+        HTTP_RESPONSE_SIZE_BYTES,
+        "HTTP response body size in bytes"
+    );
 }
 
 // -- Metrics middleware -------------------------------------------------------
@@ -85,13 +105,33 @@ pub async fn metrics_middleware(
         return next.run(req).await;
     }
 
+    // Capture request body size by consuming and reconstructing the body.
+    let (parts, body) = req.into_parts();
+    let body_bytes = axum::body::to_bytes(body, usize::MAX)
+        .await
+        .unwrap_or_default();
+    let req_size = body_bytes.len() as f64;
+    let req = Request::from_parts(parts, axum::body::Body::from(body_bytes));
+
     let start = Instant::now();
     let response = next.run(req).await;
     let duration = start.elapsed().as_secs_f64();
     let status = response.status().as_u16().to_string();
 
+    // Capture response body size by consuming and reconstructing the response.
+    let (resp_parts, resp_body) = response.into_parts();
+    let resp_bytes = axum::body::to_bytes(resp_body, usize::MAX)
+        .await
+        .unwrap_or_default();
+    let resp_size = resp_bytes.len() as f64;
+    let response = Response::from_parts(resp_parts, axum::body::Body::from(resp_bytes));
+
     counter!(HTTP_REQUESTS_TOTAL, "method" => method.clone(), "path" => path.clone(), "status" => status).increment(1);
-    histogram!(HTTP_REQUEST_DURATION_SECONDS, "method" => method, "path" => path).record(duration);
+    histogram!(HTTP_REQUEST_DURATION_SECONDS, "method" => method.clone(), "path" => path.clone()).record(duration);
+    histogram!(HTTP_REQUEST_SIZE_BYTES, "method" => method.clone(), "path" => path.clone()).record(req_size);
+    histogram!(HTTP_RESPONSE_SIZE_BYTES, "method" => method.clone(), "path" => path.clone()).record(resp_size);
+    counter!(BYTES_RECEIVED_TOTAL).increment(req_size as u64);
+    counter!(BYTES_SENT_TOTAL).increment(resp_size as u64);
 
     response
 }
@@ -111,7 +151,9 @@ pub async fn metrics_middleware(
 /// - `/` -> `/`
 fn normalize_path(path: &str) -> String {
     match path {
-        "/" | "/health" | "/docs" | "/openapi.json" | "/metrics" => path.to_string(),
+        "/" | "/health" | "/healthz" | "/readyz" | "/docs" | "/openapi.json" | "/metrics" => {
+            path.to_string()
+        }
         _ => {
             // Strip leading slash then count segments.
             let trimmed = path.trim_start_matches('/');
@@ -180,5 +222,48 @@ mod tests {
             normalize_path("/my-bucket/path/to/object.txt"),
             "/{bucket}/{key}"
         );
+    }
+
+    #[test]
+    fn test_normalize_path_healthz() {
+        assert_eq!(normalize_path("/healthz"), "/healthz");
+    }
+
+    #[test]
+    fn test_normalize_path_readyz() {
+        assert_eq!(normalize_path("/readyz"), "/readyz");
+    }
+
+    #[test]
+    fn test_metric_constants_exist() {
+        assert_eq!(HTTP_REQUESTS_TOTAL, "bleepstore_http_requests_total");
+        assert_eq!(
+            HTTP_REQUEST_DURATION_SECONDS,
+            "bleepstore_http_request_duration_seconds"
+        );
+        assert_eq!(S3_OPERATIONS_TOTAL, "bleepstore_s3_operations_total");
+        assert_eq!(OBJECTS_TOTAL, "bleepstore_objects_total");
+        assert_eq!(BUCKETS_TOTAL, "bleepstore_buckets_total");
+        assert_eq!(BYTES_RECEIVED_TOTAL, "bleepstore_bytes_received_total");
+        assert_eq!(BYTES_SENT_TOTAL, "bleepstore_bytes_sent_total");
+        assert_eq!(
+            HTTP_REQUEST_SIZE_BYTES,
+            "bleepstore_http_request_size_bytes"
+        );
+        assert_eq!(
+            HTTP_RESPONSE_SIZE_BYTES,
+            "bleepstore_http_response_size_bytes"
+        );
+    }
+
+    #[test]
+    fn test_size_histogram_buckets() {
+        assert_eq!(SIZE_HISTOGRAM_BUCKETS.len(), 10);
+        assert_eq!(SIZE_HISTOGRAM_BUCKETS[0], 256.0);
+        assert_eq!(SIZE_HISTOGRAM_BUCKETS[9], 67108864.0);
+        // Verify buckets are in ascending order.
+        for i in 1..SIZE_HISTOGRAM_BUCKETS.len() {
+            assert!(SIZE_HISTOGRAM_BUCKETS[i] > SIZE_HISTOGRAM_BUCKETS[i - 1]);
+        }
     }
 }

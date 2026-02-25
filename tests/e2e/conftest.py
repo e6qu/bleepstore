@@ -26,6 +26,7 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "acl_ops: ACL operations")
     config.addinivalue_line("markers", "error_handling: Error response handling")
     config.addinivalue_line("markers", "auth: Authentication tests")
+    config.addinivalue_line("markers", "observability: Observability endpoint tests")
 
 ENDPOINT = os.environ.get("BLEEPSTORE_ENDPOINT", "http://localhost:9000")
 ACCESS_KEY = os.environ.get("BLEEPSTORE_ACCESS_KEY", "bleepstore")

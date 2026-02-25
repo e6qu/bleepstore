@@ -469,6 +469,12 @@ func (b *GCPGatewayBackend) ObjectExists(ctx context.Context, bucket, key string
 	return true, nil
 }
 
+// HealthCheck verifies that the upstream GCS bucket is accessible.
+func (b *GCPGatewayBackend) HealthCheck(ctx context.Context) error {
+	_, err := b.client.ListObjects(ctx, b.Bucket, "\x00nonexistent\x00")
+	return err
+}
+
 // isGCSNotFound checks if a GCS error is a 404/not-found error.
 func isGCSNotFound(err error) bool {
 	if errors.Is(err, gcs.ErrObjectNotExist) {

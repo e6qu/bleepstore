@@ -19,6 +19,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import boto3
 from botocore.config import Config
 
+from output_utils import add_json_args, build_benchmark_result, write_json_output
+
 ENDPOINT = os.environ.get("BLEEPSTORE_ENDPOINT", "http://localhost:9000")
 ACCESS_KEY = os.environ.get("BLEEPSTORE_ACCESS_KEY", "bleepstore")
 SECRET_KEY = os.environ.get("BLEEPSTORE_SECRET_KEY", "bleepstore-secret")
@@ -162,6 +164,7 @@ def main():
         default=["put", "get"],
         choices=["put", "get", "delete"],
     )
+    add_json_args(parser)
     args = parser.parse_args()
 
     global ENDPOINT
@@ -175,6 +178,7 @@ def main():
     print(f"{'OP':<8} {'SIZE':<8} {'OPS/s':<10} {'MB/s':<10} {'p50ms':<10} {'p95ms':<10} {'p99ms':<10}")
     print("-" * 66)
 
+    all_results = []
     for op in args.operations:
         for size_name in args.sizes:
             size_bytes = OBJECT_SIZES[size_name]
@@ -186,6 +190,26 @@ def main():
                 f"{result['ops_per_sec']:<10} {result['throughput_mbps']:<10} "
                 f"{result['p50_ms']:<10} {result['p95_ms']:<10} {result['p99_ms']:<10}"
             )
+            all_results.append({
+                "name": f"{result['operation']} {result['size']}",
+                "iterations": result["iterations"],
+                "concurrency": result["concurrency"],
+                "ops_per_sec": result["ops_per_sec"],
+                "throughput_mbps": result["throughput_mbps"],
+                "p50_ms": result["p50_ms"],
+                "p95_ms": result["p95_ms"],
+                "p99_ms": result["p99_ms"],
+                "total_time_s": result["total_time_s"],
+            })
+
+    # JSON output
+    json_result = build_benchmark_result(
+        endpoint=ENDPOINT,
+        benchmark="throughput",
+        results=all_results,
+        implementation=args.implementation,
+    )
+    write_json_output(args, json_result)
 
 
 if __name__ == "__main__":

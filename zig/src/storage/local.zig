@@ -412,6 +412,23 @@ pub const LocalBackend = struct {
         std.fs.cwd().deleteDir(bucket_dir) catch {};
     }
 
+    fn healthCheck(ctx: *anyopaque) anyerror!void {
+        const self = getSelf(ctx);
+        // Verify the root directory is accessible.
+        std.fs.cwd().access(self.root_path, .{}) catch {
+            return error.StorageUnavailable;
+        };
+    }
+
+    /// Delete the parts directory for a specific upload.
+    /// Used during expired multipart upload reaping on startup.
+    pub fn deleteUploadParts(self: *Self, bucket: []const u8, upload_id: []const u8) !void {
+        _ = bucket;
+        const part_dir = try std.fs.path.join(self.allocator, &.{ self.root_path, ".multipart", upload_id });
+        defer self.allocator.free(part_dir);
+        std.fs.cwd().deleteTree(part_dir) catch {};
+    }
+
     // --- vtable + interface ---
 
     const vtable = StorageBackend.VTable{
@@ -425,6 +442,7 @@ pub const LocalBackend = struct {
         .deleteParts = deleteParts,
         .createBucket = createBucket,
         .deleteBucket = deleteBucket,
+        .healthCheck = healthCheck,
     };
 
     /// Obtain a StorageBackend interface backed by this local implementation.
@@ -696,4 +714,34 @@ test "LocalBackend: putPart overwrites existing part" {
 
     // Clean up.
     try sb.deleteParts("overwrite-bucket", "upload-xyz");
+}
+
+test "LocalBackend: healthCheck succeeds for valid directory" {
+    const allocator = std.testing.allocator;
+
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    const tmp_path = try tmp_dir.dir.realpathAlloc(allocator, ".");
+    defer allocator.free(tmp_path);
+
+    var lb = try LocalBackend.init(allocator, tmp_path);
+    defer lb.deinit();
+    const sb = lb.storageBackend();
+
+    // healthCheck should succeed since the directory exists.
+    try sb.healthCheck();
+}
+
+test "LocalBackend: healthCheck fails for nonexistent directory" {
+    const allocator = std.testing.allocator;
+
+    var lb = LocalBackend{
+        .allocator = allocator,
+        .root_path = "/nonexistent/bleepstore/test/path",
+    };
+    const sb = lb.storageBackend();
+
+    // healthCheck should fail since the directory does not exist.
+    try std.testing.expectError(error.StorageUnavailable, sb.healthCheck());
 }

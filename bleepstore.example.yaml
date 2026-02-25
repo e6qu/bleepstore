@@ -44,6 +44,10 @@ storage:
   #   prefix: "bleepstore/"
   #   # Uses DefaultAzureCredential chain
 
+# observability:
+#   metrics: true        # Prometheus /metrics endpoint
+#   health_check: true   # /healthz and /readyz endpoints
+
 # Cluster configuration (only used when metadata.engine = "raft")
 # cluster:
 #   node_id: "node-1"

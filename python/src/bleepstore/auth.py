@@ -288,6 +288,9 @@ class SigV4Authenticator:
                 f"X-Amz-Expires must be between 1 and {MAX_PRESIGNED_EXPIRES} seconds."
             )
 
+        # Clock skew check (fail fast before signature computation)
+        self._check_clock_skew(amz_date)
+
         # Check expiration
         try:
             request_time = datetime.strptime(amz_date, "%Y%m%dT%H%M%SZ").replace(

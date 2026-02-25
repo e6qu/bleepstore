@@ -16,6 +16,8 @@ import uuid
 import boto3
 from botocore.config import Config
 
+from output_utils import add_json_args, build_benchmark_result, write_json_output
+
 ENDPOINT = os.environ.get("BLEEPSTORE_ENDPOINT", "http://localhost:9000")
 ACCESS_KEY = os.environ.get("BLEEPSTORE_ACCESS_KEY", "bleepstore")
 SECRET_KEY = os.environ.get("BLEEPSTORE_SECRET_KEY", "bleepstore-secret")
@@ -68,6 +70,7 @@ def main():
     parser = argparse.ArgumentParser(description="BleepStore Latency Benchmark")
     parser.add_argument("--endpoint", default=ENDPOINT)
     parser.add_argument("--iterations", type=int, default=100)
+    add_json_args(parser)
     args = parser.parse_args()
 
     global ENDPOINT
@@ -151,6 +154,15 @@ def main():
                 f"{r['name']:<16} {r['min_ms']:<10} {r['p50_ms']:<10} "
                 f"{r['p95_ms']:<10} {r['p99_ms']:<10} {r['max_ms']:<10} {r['mean_ms']:<10}"
             )
+
+        # JSON output
+        json_result = build_benchmark_result(
+            endpoint=ENDPOINT,
+            benchmark="latency",
+            results=results,
+            implementation=args.implementation,
+        )
+        write_json_output(args, json_result)
 
     finally:
         # Cleanup

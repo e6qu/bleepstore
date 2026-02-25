@@ -11,12 +11,21 @@ import (
 
 // Config is the top-level configuration for BleepStore.
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	Auth     AuthConfig     `yaml:"auth"`
-	Metadata MetadataConfig `yaml:"metadata"`
-	Storage  StorageConfig  `yaml:"storage"`
-	Cluster  ClusterConfig  `yaml:"cluster"`
-	Logging  LoggingConfig  `yaml:"logging"`
+	Server        ServerConfig        `yaml:"server"`
+	Auth          AuthConfig          `yaml:"auth"`
+	Metadata      MetadataConfig      `yaml:"metadata"`
+	Storage       StorageConfig       `yaml:"storage"`
+	Cluster       ClusterConfig       `yaml:"cluster"`
+	Logging       LoggingConfig       `yaml:"logging"`
+	Observability ObservabilityConfig `yaml:"observability"`
+}
+
+// ObservabilityConfig holds settings for metrics and health check endpoints.
+type ObservabilityConfig struct {
+	// Metrics enables the /metrics Prometheus endpoint.
+	Metrics bool `yaml:"metrics"`
+	// HealthCheck enables the /healthz and /readyz liveness/readiness probes.
+	HealthCheck bool `yaml:"health_check"`
 }
 
 // LoggingConfig holds structured logging settings.
@@ -165,6 +174,10 @@ func defaultConfig() *Config {
 			Local: LocalConfig{
 				RootDir: "./data/objects",
 			},
+		},
+		Observability: ObservabilityConfig{
+			Metrics:     true,
+			HealthCheck: true,
 		},
 	}
 }

@@ -9,12 +9,15 @@ Usage:
 
 import argparse
 import os
+import statistics
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import boto3
 from botocore.config import Config
+
+from output_utils import add_json_args, build_benchmark_result, write_json_output
 
 ENDPOINT = os.environ.get("BLEEPSTORE_ENDPOINT", "http://localhost:9000")
 ACCESS_KEY = os.environ.get("BLEEPSTORE_ACCESS_KEY", "bleepstore")
@@ -58,6 +61,7 @@ def main():
     parser.add_argument("--part-size-mb", type=int, default=10, help="Part size in MB")
     parser.add_argument("--concurrency", type=int, default=4, help="Concurrent part uploads")
     parser.add_argument("--iterations", type=int, default=3, help="Number of uploads")
+    add_json_args(parser)
     args = parser.parse_args()
 
     global ENDPOINT
@@ -86,6 +90,7 @@ def main():
     last_part_data = os.urandom(last_part_size) if last_part_size != part_bytes else part_data
 
     upload_times = []
+    iteration_results = []
 
     try:
         for iteration in range(args.iterations):
@@ -141,6 +146,13 @@ def main():
                     f"complete={complete_ms:.0f}ms"
                 )
 
+                iteration_results.append({
+                    "total_ms": round(total_ms, 2),
+                    "throughput_mbps": round(throughput_mbps, 1),
+                    "avg_part_ms": round(avg_part_ms, 2),
+                    "complete_ms": round(complete_ms, 2),
+                })
+
             except Exception:
                 client.abort_multipart_upload(
                     Bucket=bucket, Key=key, UploadId=upload_id
@@ -152,6 +164,29 @@ def main():
         avg_total = sum(upload_times) / len(upload_times)
         avg_throughput = (total_bytes / (avg_total / 1000)) / (1024 * 1024)
         print(f"Average: {avg_total:.0f}ms ({avg_throughput:.1f} MB/s)")
+
+        # JSON output
+        json_results = [{
+            "name": f"Multipart {args.size_mb}MB ({args.part_size_mb}MB parts)",
+            "iterations": args.iterations,
+            "concurrency": args.concurrency,
+            "num_parts": num_parts,
+            "size_mb": args.size_mb,
+            "part_size_mb": args.part_size_mb,
+            "mean_ms": round(avg_total, 2),
+            "min_ms": round(min(upload_times), 2),
+            "max_ms": round(max(upload_times), 2),
+            "p50_ms": round(statistics.median(upload_times), 2),
+            "throughput_mbps": round(avg_throughput, 1),
+            "per_iteration": iteration_results,
+        }]
+        json_result = build_benchmark_result(
+            endpoint=ENDPOINT,
+            benchmark="multipart",
+            results=json_results,
+            implementation=args.implementation,
+        )
+        write_json_output(args, json_result)
 
     finally:
         # Cleanup

@@ -1010,3 +1010,45 @@ class SQLiteMetadataStore:
         ) as cursor:
             row = await cursor.fetchone()
             return row[0] if row else 0
+
+    async def reap_expired_uploads(self, ttl_seconds: int = 604800) -> list[dict]:
+        """Delete expired multipart uploads and their parts from metadata.
+
+        Finds uploads older than ``ttl_seconds`` (default 7 days), deletes
+        their part records and upload records, and returns details of the
+        reaped uploads so callers can clean up storage.
+
+        Args:
+            ttl_seconds: Maximum age of uploads in seconds before reaping.
+
+        Returns:
+            A list of dicts with ``upload_id``, ``bucket``, and ``key`` for
+            each reaped upload.
+        """
+        assert self._db is not None
+
+        # Query expired uploads using SQLite datetime arithmetic
+        async with self._db.execute(
+            "SELECT upload_id, bucket, key FROM multipart_uploads "
+            "WHERE initiated_at < datetime('now', ? || ' seconds')",
+            (str(-ttl_seconds),),
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        reaped = [dict(r) for r in rows]
+
+        if not reaped:
+            return []
+
+        # Delete parts and uploads for each expired upload
+        for upload in reaped:
+            upload_id = upload["upload_id"]
+            await self._db.execute(
+                "DELETE FROM multipart_parts WHERE upload_id = ?", (upload_id,)
+            )
+            await self._db.execute(
+                "DELETE FROM multipart_uploads WHERE upload_id = ?", (upload_id,)
+            )
+
+        await self._db.commit()
+        return reaped

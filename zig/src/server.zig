@@ -45,6 +45,18 @@ pub var global_auth_cache: ?*auth_mod.AuthCache = null;
 /// Global max object size (5 GiB default, configurable via server.max_object_size).
 pub var global_max_object_size: u64 = 5368709120;
 
+/// Global observability flags (set from config in main.zig).
+pub var global_metrics_enabled: bool = true;
+pub var global_health_check_enabled: bool = true;
+
+/// Canonical OpenAPI spec embedded from schemas/s3-api.openapi.json (via symlink).
+const canonical_spec = @embedFile("s3-api.openapi.json");
+
+/// Patched OpenAPI spec with servers array replaced at startup.
+/// Points to a buffer allocated during Server.init() that lives for the
+/// process lifetime (never freed -- crash-only design).
+pub var global_openapi_json: []const u8 = canonical_spec;
+
 pub const ServerState = struct {
     allocator: std.mem.Allocator,
     config: config_mod.Config,
@@ -62,6 +74,8 @@ pub const ServerState = struct {
 pub const routes: []const tk.Route = &.{
     // Infrastructure endpoints
     .get("/health", handleHealth),
+    .get("/healthz", handleHealthz),
+    .get("/readyz", handleReadyz),
     .get("/metrics", handleMetrics),
     .get("/docs", handleSwaggerUi),
     .get("/openapi.json", handleOpenApiJson),
@@ -79,14 +93,123 @@ pub const routes: []const tk.Route = &.{
 // ---------------------------------------------------------------------------
 
 fn handleHealth(res: *tk.Response) void {
-    res.status = 200;
+    if (global_metrics_enabled) metrics_mod.incrementHttpRequests();
+
+    const start_us = getTimestampUs();
+
     res.content_type = .JSON;
     const request_id = generateRequestId();
     setCommonHeaders(res, &request_id);
-    res.body = "{\"status\":\"ok\"}";
+
+    if (!global_health_check_enabled) {
+        // Disabled: return static response, no deep checks.
+        res.status = 200;
+        res.body = "{\"status\":\"ok\"}";
+        observeHandlerMetrics(start_us, 0, @as(usize, "{\"status\":\"ok\"}".len));
+        return;
+    }
+
+    // Deep health check: probe metadata and storage.
+    var all_ok = true;
+
+    // Metadata check
+    var meta_status: []const u8 = "ok";
+    const meta_start = getTimestampUs();
+    if (global_metadata_store) |ms| {
+        _ = ms.countBuckets() catch {
+            meta_status = "error";
+            all_ok = false;
+        };
+    }
+    const meta_latency_ms = (getTimestampUs() - meta_start) / 1000;
+
+    // Storage check
+    var storage_status: []const u8 = "ok";
+    const storage_start = getTimestampUs();
+    if (global_storage_backend) |sb| {
+        sb.healthCheck() catch {
+            storage_status = "error";
+            all_ok = false;
+        };
+    }
+    const storage_latency_ms = (getTimestampUs() - storage_start) / 1000;
+
+    const overall_status: []const u8 = if (all_ok) "ok" else "degraded";
+    res.status = if (all_ok) 200 else 503;
+
+    const body = std.fmt.allocPrint(res.arena,
+        "{{\"status\":\"{s}\",\"checks\":{{\"metadata\":{{\"status\":\"{s}\",\"latency_ms\":{d}}},\"storage\":{{\"status\":\"{s}\",\"latency_ms\":{d}}}}}}}", .{
+        overall_status,
+        meta_status,
+        meta_latency_ms,
+        storage_status,
+        storage_latency_ms,
+    }) catch "{\"status\":\"ok\"}";
+    res.body = body;
+
+    observeHandlerMetrics(start_us, 0, body.len);
+}
+
+fn handleHealthz(res: *tk.Response) void {
+    if (global_metrics_enabled) metrics_mod.incrementHttpRequests();
+    const start_us = getTimestampUs();
+
+    if (!global_health_check_enabled) {
+        res.status = 404;
+        res.body = "";
+        observeHandlerMetrics(start_us, 0, 0);
+        return;
+    }
+
+    res.status = 200;
+    res.body = "";
+    observeHandlerMetrics(start_us, 0, 0);
+}
+
+fn handleReadyz(res: *tk.Response) void {
+    if (global_metrics_enabled) metrics_mod.incrementHttpRequests();
+    const start_us = getTimestampUs();
+
+    if (!global_health_check_enabled) {
+        res.status = 404;
+        res.body = "";
+        observeHandlerMetrics(start_us, 0, 0);
+        return;
+    }
+
+    // Probe metadata store.
+    if (global_metadata_store) |ms| {
+        _ = ms.countBuckets() catch {
+            res.status = 503;
+            res.body = "";
+            observeHandlerMetrics(start_us, 0, 0);
+            return;
+        };
+    }
+
+    // Probe storage backend.
+    if (global_storage_backend) |sb| {
+        sb.healthCheck() catch {
+            res.status = 503;
+            res.body = "";
+            observeHandlerMetrics(start_us, 0, 0);
+            return;
+        };
+    }
+
+    res.status = 200;
+    res.body = "";
+    observeHandlerMetrics(start_us, 0, 0);
 }
 
 fn handleMetrics(res: *tk.Response) void {
+    // The metrics endpoint itself is NOT counted in HTTP metrics (per spec).
+    if (!global_metrics_enabled) {
+        res.status = 404;
+        res.body = "";
+        return;
+    }
+
     res.status = 200;
     res.header("Content-Type", "text/plain; version=0.0.4");
     const body = metrics_mod.renderMetrics(res.arena) catch {
@@ -98,15 +221,38 @@ fn handleMetrics(res: *tk.Response) void {
 }
 
 fn handleSwaggerUi(res: *tk.Response) void {
+    if (global_metrics_enabled) metrics_mod.incrementHttpRequests();
+    const start_us = getTimestampUs();
     res.status = 200;
     res.content_type = .HTML;
     res.body = swagger_ui_html;
+    observeHandlerMetrics(start_us, 0, swagger_ui_html.len);
 }
 
 fn handleOpenApiJson(res: *tk.Response) void {
+    if (global_metrics_enabled) metrics_mod.incrementHttpRequests();
+    const start_us = getTimestampUs();
     res.status = 200;
     res.content_type = .JSON;
-    res.body = openapi_json;
+    res.body = global_openapi_json;
+    observeHandlerMetrics(start_us, 0, global_openapi_json.len);
+}
+
+/// Get current timestamp in microseconds for duration measurement.
+fn getTimestampUs() u64 {
+    const nanos = std.time.nanoTimestamp();
+    const safe_nanos: u64 = @intCast(if (nanos < 0) 0 else nanos);
+    return safe_nanos / 1000;
+}
+
+/// Observe duration and size metrics for a handler. No-op when metrics are disabled.
+fn observeHandlerMetrics(start_us: u64, request_size: usize, response_size: usize) void {
+    if (!global_metrics_enabled) return;
+    const end_us = getTimestampUs();
+    const elapsed = if (end_us >= start_us) end_us - start_us else 0;
+    metrics_mod.observeDuration(elapsed);
+    metrics_mod.observeRequestSize(@intCast(request_size));
+    metrics_mod.observeResponseSize(@intCast(response_size));
 }
 
 // ---------------------------------------------------------------------------
@@ -166,8 +312,11 @@ fn handleS3CatchAll(ctx: *tk.Context) anyerror!void {
         req.unread_body = 0;
     }
 
+    // Start timing for metrics.
+    const s3_start_us = getTimestampUs();
+
     // Increment HTTP request counter for S3 routes.
-    metrics_mod.incrementHttpRequests();
+    if (global_metrics_enabled) metrics_mod.incrementHttpRequests();
 
     // Per-request arena allocator (httpz provides res.arena).
     const req_alloc = res.arena;
@@ -247,6 +396,13 @@ fn handleS3CatchAll(ctx: *tk.Context) anyerror!void {
         std.log.err("request error: {} for {s}", .{ err, req.url.raw });
         sendS3Error(res, req_alloc, .InternalError, req.url.raw, &request_id) catch {};
     };
+
+    // Observe S3 request metrics: duration and sizes.
+    if (global_metrics_enabled) {
+        const req_body_len: usize = if (req.body()) |b| b.len else 0;
+        const res_body_len: usize = res.body.len;
+        observeHandlerMetrics(s3_start_us, req_body_len, res_body_len);
+    }
 }
 
 /// Authenticate the incoming request using AWS SigV4 (header or presigned URL).
@@ -598,6 +754,11 @@ pub const Server = struct {
         global_auth_enabled = cfg.auth.enabled;
         global_allocator = allocator;
 
+        // Patch the canonical OpenAPI spec's "servers" array to point at this
+        // instance's actual host:port.  We do simple string surgery: find the
+        // byte range of the "servers":[...] value and splice in our replacement.
+        patchOpenApiServers(allocator, cfg.server.port);
+
         return .{
             .allocator = allocator,
             .state = ServerState{
@@ -676,6 +837,29 @@ pub fn sendS3Error(
     res.body = body;
 }
 
+/// Send an S3 error response with a custom message (overriding the default).
+pub fn sendS3ErrorWithMessage(
+    res: *tk.Response,
+    alloc: std.mem.Allocator,
+    s3error: s3err.S3Error,
+    custom_message: []const u8,
+    resource: []const u8,
+    request_id: *const [16]u8,
+) !void {
+    const body = try xml.renderError(
+        alloc,
+        s3error.code(),
+        custom_message,
+        resource,
+        request_id,
+    );
+
+    setCommonHeaders(res, request_id);
+    res.status = @intCast(@intFromEnum(s3error.httpStatus()));
+    res.content_type = .XML;
+    res.body = body;
+}
+
 /// Send a response with common S3 headers.
 /// content_type must be a string literal or arena-allocated (httpz stores slices).
 pub fn sendResponse(
@@ -699,6 +883,14 @@ pub fn setCommonHeaders(res: *tk.Response, request_id: *const [16]u8) void {
     // Copy request ID into the arena so the slice survives.
     const rid = std.fmt.allocPrint(res.arena, "{s}", .{@as([]const u8, request_id)}) catch "0000000000000000";
     res.header("x-amz-request-id", rid);
+
+    // Generate x-amz-id-2: Base64-encoded 24 random bytes (32 base64 chars).
+    var id2_raw: [24]u8 = undefined;
+    std.crypto.random.bytes(&id2_raw);
+    var id2_b64: [std.base64.standard.Encoder.calcSize(24)]u8 = undefined;
+    const id2_encoded = std.base64.standard.Encoder.encode(&id2_b64, &id2_raw);
+    const id2_str = std.fmt.allocPrint(res.arena, "{s}", .{id2_encoded}) catch "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    res.header("x-amz-id-2", id2_str);
 
     // Format date into an arena-allocated buffer.
     var date_buf: [29]u8 = undefined;
@@ -862,64 +1054,102 @@ const swagger_ui_html =
     \\</html>
 ;
 
-/// Minimal OpenAPI 3.0 JSON specification for current BleepStore routes.
-/// This is a hand-built spec reflecting Stage 1b (health + 501 stubs + observability).
-const openapi_json =
-    \\{
-    \\  "openapi": "3.0.0",
-    \\  "info": {
-    \\    "title": "BleepStore S3-Compatible API",
-    \\    "version": "0.1.0",
-    \\    "description": "S3-compatible object store (Zig implementation). All S3 operations currently return 501 NotImplemented."
-    \\  },
-    \\  "servers": [
-    \\    { "url": "http://localhost:9013", "description": "Local development" }
-    \\  ],
-    \\  "paths": {
-    \\    "/health": {
-    \\      "get": {
-    \\        "summary": "Health check",
-    \\        "operationId": "HealthCheck",
-    \\        "responses": { "200": { "description": "Server is healthy", "content": { "application/json": { "schema": { "type": "object", "properties": { "status": { "type": "string" } } } } } } }
-    \\      }
-    \\    },
-    \\    "/metrics": {
-    \\      "get": {
-    \\        "summary": "Prometheus metrics",
-    \\        "operationId": "GetMetrics",
-    \\        "responses": { "200": { "description": "Metrics in Prometheus exposition format", "content": { "text/plain": {} } } }
-    \\      }
-    \\    },
-    \\    "/docs": {
-    \\      "get": {
-    \\        "summary": "Swagger UI",
-    \\        "operationId": "SwaggerUI",
-    \\        "responses": { "200": { "description": "Interactive API documentation", "content": { "text/html": {} } } }
-    \\      }
-    \\    },
-    \\    "/": {
-    \\      "get": {
-    \\        "summary": "List all buckets",
-    \\        "operationId": "ListBuckets",
-    \\        "tags": ["Bucket"],
-    \\        "responses": { "200": { "description": "Bucket list" }, "501": { "description": "Not implemented" } }
-    \\      }
-    \\    },
-    \\    "/{Bucket}": {
-    \\      "put": { "summary": "Create bucket", "operationId": "CreateBucket", "tags": ["Bucket"], "responses": { "200": { "description": "Bucket created" }, "501": { "description": "Not implemented" } } },
-    \\      "delete": { "summary": "Delete bucket", "operationId": "DeleteBucket", "tags": ["Bucket"], "responses": { "204": { "description": "Bucket deleted" }, "501": { "description": "Not implemented" } } },
-    \\      "head": { "summary": "Head bucket", "operationId": "HeadBucket", "tags": ["Bucket"], "responses": { "200": { "description": "Bucket exists" }, "501": { "description": "Not implemented" } } },
-    \\      "get": { "summary": "List objects or get bucket location/ACL", "operationId": "GetBucket", "tags": ["Bucket", "Object"], "responses": { "200": { "description": "Object list" }, "501": { "description": "Not implemented" } } }
-    \\    },
-    \\    "/{Bucket}/{Key}": {
-    \\      "put": { "summary": "Put object", "operationId": "PutObject", "tags": ["Object"], "responses": { "200": { "description": "Object stored" }, "501": { "description": "Not implemented" } } },
-    \\      "get": { "summary": "Get object", "operationId": "GetObject", "tags": ["Object"], "responses": { "200": { "description": "Object data" }, "501": { "description": "Not implemented" } } },
-    \\      "delete": { "summary": "Delete object", "operationId": "DeleteObject", "tags": ["Object"], "responses": { "204": { "description": "Object deleted" }, "501": { "description": "Not implemented" } } },
-    \\      "head": { "summary": "Head object", "operationId": "HeadObject", "tags": ["Object"], "responses": { "200": { "description": "Object metadata" }, "501": { "description": "Not implemented" } } }
-    \\    }
-    \\  }
-    \\}
-;
+/// Patch the embedded canonical OpenAPI spec's "servers" array to reflect
+/// this instance's actual port.  Uses simple string surgery on the JSON text:
+/// find the `"servers": [...]` byte range and splice in a replacement array
+/// pointing at `http://localhost:{port}`.
+///
+/// The patched buffer is allocated with `allocator` and stored in the global
+/// `global_openapi_json`.  It is never freed (crash-only design).
+fn patchOpenApiServers(allocator: std.mem.Allocator, port: u16) void {
+    // Locate the "servers" key in the canonical JSON.
+    const servers_key = "\"servers\":";
+    const servers_key_spaced = "\"servers\": ";
+    const spec = canonical_spec;
+
+    // Find the start of the "servers" key (try both with and without space).
+    const key_pos = std.mem.indexOf(u8, spec, servers_key_spaced) orelse
+        std.mem.indexOf(u8, spec, servers_key) orelse {
+        // If not found, serve the canonical spec unpatched.
+        std.log.warn("OpenAPI spec: could not find \"servers\" key, serving unpatched", .{});
+        return;
+    };
+
+    // Find the opening '[' after the key.
+    const after_key = if (std.mem.indexOf(u8, spec, servers_key_spaced) != null)
+        key_pos + servers_key_spaced.len
+    else
+        key_pos + servers_key.len;
+
+    // Skip whitespace to find '['.
+    var bracket_start = after_key;
+    while (bracket_start < spec.len and (spec[bracket_start] == ' ' or spec[bracket_start] == '\n' or spec[bracket_start] == '\r' or spec[bracket_start] == '\t')) {
+        bracket_start += 1;
+    }
+    if (bracket_start >= spec.len or spec[bracket_start] != '[') {
+        std.log.warn("OpenAPI spec: expected '[' after \"servers\" key, serving unpatched", .{});
+        return;
+    }
+
+    // Find the matching ']' (simple bracket counting -- no nested arrays expected).
+    var depth: usize = 0;
+    var bracket_end: usize = bracket_start;
+    var in_string = false;
+    var escaped = false;
+    while (bracket_end < spec.len) {
+        const ch = spec[bracket_end];
+        if (escaped) {
+            escaped = false;
+        } else if (ch == '\\' and in_string) {
+            escaped = true;
+        } else if (ch == '"') {
+            in_string = !in_string;
+        } else if (!in_string) {
+            if (ch == '[') depth += 1;
+            if (ch == ']') {
+                depth -= 1;
+                if (depth == 0) {
+                    bracket_end += 1; // include the ']'
+                    break;
+                }
+            }
+        }
+        bracket_end += 1;
+    }
+
+    // Build the replacement servers array.
+    var port_buf: [5]u8 = undefined;
+    const port_str = std.fmt.bufPrint(&port_buf, "{d}", .{port}) catch "9013";
+    const replacement_prefix = "[{\"url\":\"http://localhost:";
+    const replacement_suffix = "\",\"description\":\"BleepStore Zig\"}]";
+
+    const prefix = spec[0..key_pos];
+    // Re-emit the key exactly as found.
+    const key_text = spec[key_pos..after_key];
+    const suffix = spec[bracket_end..];
+
+    const total_len = prefix.len + key_text.len + replacement_prefix.len + port_str.len + replacement_suffix.len + suffix.len;
+    const buf = allocator.alloc(u8, total_len) catch {
+        std.log.warn("OpenAPI spec: allocation failed, serving unpatched", .{});
+        return;
+    };
+
+    var offset: usize = 0;
+    @memcpy(buf[offset .. offset + prefix.len], prefix);
+    offset += prefix.len;
+    @memcpy(buf[offset .. offset + key_text.len], key_text);
+    offset += key_text.len;
+    @memcpy(buf[offset .. offset + replacement_prefix.len], replacement_prefix);
+    offset += replacement_prefix.len;
+    @memcpy(buf[offset .. offset + port_str.len], port_str);
+    offset += port_str.len;
+    @memcpy(buf[offset .. offset + replacement_suffix.len], replacement_suffix);
+    offset += replacement_suffix.len;
+    @memcpy(buf[offset .. offset + suffix.len], suffix);
+
+    global_openapi_json = buf;
+    std.log.info("OpenAPI spec patched: serving canonical spec on port {d} ({d} bytes)", .{ port, total_len });
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -959,4 +1189,65 @@ test "formatRfc1123Date returns 29 chars" {
     try std.testing.expectEqual(@as(usize, 29), date.len);
     // Should end with "GMT"
     try std.testing.expectEqualStrings("GMT", date[26..29]);
+}
+
+test "openapi spec matches canonical" {
+    const embedded = @embedFile("s3-api.openapi.json");
+    // The embedded file IS the canonical spec (via symlink), so parsing should succeed.
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, embedded, .{});
+    defer parsed.deinit();
+
+    // Verify it's valid JSON with expected top-level keys.
+    const root = parsed.value.object;
+    try std.testing.expect(root.contains("openapi"));
+    try std.testing.expect(root.contains("info"));
+    try std.testing.expect(root.contains("paths"));
+    try std.testing.expect(root.contains("components"));
+    try std.testing.expect(root.contains("security"));
+    try std.testing.expect(root.contains("tags"));
+
+    // Verify the openapi version.
+    const version = root.get("openapi").?.string;
+    try std.testing.expectEqualStrings("3.1.0", version);
+
+    // Verify title.
+    const info = root.get("info").?.object;
+    const title = info.get("title").?.string;
+    try std.testing.expectEqualStrings("BleepStore S3-Compatible API", title);
+}
+
+test "patchOpenApiServers produces valid JSON with correct port" {
+    // Use the testing allocator so leaks are detected.
+    const allocator = std.testing.allocator;
+
+    // Save and restore the global to avoid polluting other tests.
+    const saved = global_openapi_json;
+    defer global_openapi_json = saved;
+
+    // Patch to port 9999.
+    patchOpenApiServers(allocator, 9999);
+
+    // The patched spec should be valid JSON.
+    const parsed = try std.json.parseFromSlice(std.json.Value, allocator, global_openapi_json, .{});
+    defer parsed.deinit();
+
+    // Verify servers array was patched.
+    const root = parsed.value.object;
+    const servers = root.get("servers").?.array;
+    try std.testing.expectEqual(@as(usize, 1), servers.items.len);
+
+    const server_obj = servers.items[0].object;
+    const url = server_obj.get("url").?.string;
+    try std.testing.expectEqualStrings("http://localhost:9999", url);
+
+    const desc = server_obj.get("description").?.string;
+    try std.testing.expectEqualStrings("BleepStore Zig", desc);
+
+    // The rest of the spec should still be intact.
+    try std.testing.expect(root.contains("paths"));
+    try std.testing.expect(root.contains("openapi"));
+
+    // Free the patched buffer (testing allocator requires it).
+    allocator.free(global_openapi_json);
+    global_openapi_json = saved;
 }
