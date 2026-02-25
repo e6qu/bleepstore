@@ -120,10 +120,7 @@ impl GcpGatewayBackend {
         // If an explicit credentials file is provided, set the env var so that
         // Application Default Credentials (ADC) picks it up when resolving tokens.
         if let Some(ref creds_path) = credentials_file {
-            info!(
-                "Setting GOOGLE_APPLICATION_CREDENTIALS={}",
-                creds_path
-            );
+            info!("Setting GOOGLE_APPLICATION_CREDENTIALS={}", creds_path);
             std::env::set_var("GOOGLE_APPLICATION_CREDENTIALS", creds_path);
         }
 

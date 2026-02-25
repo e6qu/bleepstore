@@ -151,7 +151,9 @@ def _parse_storage(data: dict[str, Any] | None) -> dict[str, Any]:
         result["memory_max_size_bytes"] = memory_section.get("max_size_bytes", 0)
         result["memory_persistence"] = memory_section.get("persistence", "none")
         result["memory_snapshot_path"] = memory_section.get("snapshot_path", "./data/memory.snap")
-        result["memory_snapshot_interval_seconds"] = memory_section.get("snapshot_interval_seconds", 300)
+        result["memory_snapshot_interval_seconds"] = memory_section.get(
+            "snapshot_interval_seconds", 300
+        )
 
     aws_section = data.get("aws")
     if isinstance(aws_section, dict):

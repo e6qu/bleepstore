@@ -460,9 +460,7 @@ class MemoryStorageBackend:
         for pn in part_numbers:
             part_key = (upload_id, pn)
             if part_key not in self._parts:
-                raise FileNotFoundError(
-                    f"Part not found: upload_id={upload_id}, part_number={pn}"
-                )
+                raise FileNotFoundError(f"Part not found: upload_id={upload_id}, part_number={pn}")
             part_data, _ = self._parts[part_key]
             assembled_chunks.append(part_data)
             md5.update(part_data)
@@ -492,9 +490,7 @@ class MemoryStorageBackend:
             key: The object key.
             upload_id: The multipart upload identifier.
         """
-        keys_to_delete = [
-            (uid, pn) for (uid, pn) in self._parts if uid == upload_id
-        ]
+        keys_to_delete = [(uid, pn) for (uid, pn) in self._parts if uid == upload_id]
         for part_key in keys_to_delete:
             self._remove_part(part_key[0], part_key[1])
 
@@ -507,9 +503,7 @@ class MemoryStorageBackend:
         Args:
             upload_id: The multipart upload identifier.
         """
-        keys_to_delete = [
-            (uid, pn) for (uid, pn) in self._parts if uid == upload_id
-        ]
+        keys_to_delete = [(uid, pn) for (uid, pn) in self._parts if uid == upload_id]
         for part_key in keys_to_delete:
             self._remove_part(part_key[0], part_key[1])
 

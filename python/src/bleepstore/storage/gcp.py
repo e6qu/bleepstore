@@ -67,6 +67,7 @@ class GCPGatewayBackend:
         """
         if self.credentials_file:
             from gcloud.aio.auth import Token
+
             token = Token(service_file=self.credentials_file)
             self._client = Storage(token=token)
         else:

@@ -57,7 +57,9 @@ impl AwsGatewayBackend {
         // If explicit credentials are provided, inject them as static credentials.
         if let (Some(ref ak), Some(ref sk)) = (&access_key_id, &secret_access_key) {
             let creds = aws_sdk_s3::config::Credentials::new(
-                ak, sk, None, // session_token
+                ak,
+                sk,
+                None, // session_token
                 None, // expiry
                 "bleepstore-config",
             );

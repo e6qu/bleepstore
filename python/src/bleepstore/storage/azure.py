@@ -82,11 +82,13 @@ class AzureGatewayBackend:
         """
         if self.connection_string:
             from azure.storage.blob.aio import BlobServiceClient
+
             service_client = BlobServiceClient.from_connection_string(self.connection_string)
             self._container_client = service_client.get_container_client(self.container_name)
         else:
             if self.use_managed_identity:
                 from azure.identity.aio import ManagedIdentityCredential
+
                 self._credential = ManagedIdentityCredential()
             else:
                 self._credential = DefaultAzureCredential()

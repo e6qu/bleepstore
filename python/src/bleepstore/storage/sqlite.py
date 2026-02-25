@@ -321,9 +321,7 @@ class SQLiteStorageBackend:
                 row = await cursor.fetchone()
 
             if row is None:
-                raise FileNotFoundError(
-                    f"Part not found: upload_id={upload_id}, part_number={pn}"
-                )
+                raise FileNotFoundError(f"Part not found: upload_id={upload_id}, part_number={pn}")
             assembled_chunks.append(row[0])
 
         data = b"".join(assembled_chunks)

@@ -69,12 +69,12 @@ type SQLiteConfig struct {
 // StorageConfig holds object storage backend settings.
 type StorageConfig struct {
 	// Backend is the storage backend type (e.g., "local", "memory", "sqlite", "aws", "gcp", "azure").
-	Backend string        `yaml:"backend"`
-	Local   LocalConfig   `yaml:"local"`
-	Memory  MemoryConfig  `yaml:"memory"`
-	AWS     AWSConfig     `yaml:"aws"`
-	GCP     GCPConfig     `yaml:"gcp"`
-	Azure   AzureConfig   `yaml:"azure"`
+	Backend string       `yaml:"backend"`
+	Local   LocalConfig  `yaml:"local"`
+	Memory  MemoryConfig `yaml:"memory"`
+	AWS     AWSConfig    `yaml:"aws"`
+	GCP     GCPConfig    `yaml:"gcp"`
+	Azure   AzureConfig  `yaml:"azure"`
 }
 
 // MemoryConfig holds in-memory storage backend settings.

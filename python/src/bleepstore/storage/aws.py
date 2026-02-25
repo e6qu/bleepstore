@@ -77,6 +77,7 @@ class AWSGatewayBackend:
             client_kwargs["endpoint_url"] = self.endpoint_url
         if self.use_path_style:
             from botocore.config import Config as BotoConfig
+
             client_kwargs["config"] = BotoConfig(s3={"addressing_style": "path"})
 
         # Use explicit credentials if provided, otherwise fall back to chain

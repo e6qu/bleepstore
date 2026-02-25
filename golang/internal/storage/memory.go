@@ -34,10 +34,10 @@ type memPart struct {
 // It optionally supports snapshot persistence to a SQLite file so that data
 // survives restarts.
 type MemoryBackend struct {
-	mu          sync.RWMutex
-	objects     map[string]memObject // key: "bucket/key"
-	parts       map[string]memPart   // key: "uploadID/partNumber"
-	currentSize int64
+	mu           sync.RWMutex
+	objects      map[string]memObject // key: "bucket/key"
+	parts        map[string]memPart   // key: "uploadID/partNumber"
+	currentSize  int64
 	maxSizeBytes int64
 
 	persistence             string

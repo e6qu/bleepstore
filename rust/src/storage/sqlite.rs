@@ -121,10 +121,11 @@ impl StorageBackend for SqliteBackend {
         let conn = Arc::clone(&self.conn);
         Box::pin(async move {
             let result = tokio::task::spawn_blocking(move || {
-                let conn = conn.lock().map_err(|e| anyhow::anyhow!("Mutex poisoned: {e}"))?;
-                let mut stmt = conn.prepare(
-                    "SELECT data, etag FROM object_data WHERE storage_key = ?1",
-                )?;
+                let conn = conn
+                    .lock()
+                    .map_err(|e| anyhow::anyhow!("Mutex poisoned: {e}"))?;
+                let mut stmt =
+                    conn.prepare("SELECT data, etag FROM object_data WHERE storage_key = ?1")?;
                 let row = stmt.query_row(params![storage_key], |row| {
                     let data: Vec<u8> = row.get(0)?;
                     let _etag: String = row.get(1)?;
@@ -132,9 +133,9 @@ impl StorageBackend for SqliteBackend {
                 });
                 match row {
                     Ok(data) => Ok(data),
-                    Err(rusqlite::Error::QueryReturnedNoRows) => {
-                        Err(anyhow::anyhow!("Object not found at storage key: {storage_key}"))
-                    }
+                    Err(rusqlite::Error::QueryReturnedNoRows) => Err(anyhow::anyhow!(
+                        "Object not found at storage key: {storage_key}"
+                    )),
                     Err(e) => Err(anyhow::anyhow!(e)),
                 }
             })
@@ -154,7 +155,9 @@ impl StorageBackend for SqliteBackend {
         let conn = Arc::clone(&self.conn);
         Box::pin(async move {
             tokio::task::spawn_blocking(move || {
-                let conn = conn.lock().map_err(|e| anyhow::anyhow!("Mutex poisoned: {e}"))?;
+                let conn = conn
+                    .lock()
+                    .map_err(|e| anyhow::anyhow!("Mutex poisoned: {e}"))?;
                 conn.execute(
                     "DELETE FROM object_data WHERE storage_key = ?1",
                     params![storage_key],
@@ -174,10 +177,11 @@ impl StorageBackend for SqliteBackend {
         let conn = Arc::clone(&self.conn);
         Box::pin(async move {
             let exists = tokio::task::spawn_blocking(move || {
-                let conn = conn.lock().map_err(|e| anyhow::anyhow!("Mutex poisoned: {e}"))?;
-                let mut stmt = conn.prepare(
-                    "SELECT 1 FROM object_data WHERE storage_key = ?1 LIMIT 1",
-                )?;
+                let conn = conn
+                    .lock()
+                    .map_err(|e| anyhow::anyhow!("Mutex poisoned: {e}"))?;
+                let mut stmt =
+                    conn.prepare("SELECT 1 FROM object_data WHERE storage_key = ?1 LIMIT 1")?;
                 let found = stmt.exists(params![storage_key])?;
                 Ok::<bool, anyhow::Error>(found)
             })
@@ -245,7 +249,9 @@ impl StorageBackend for SqliteBackend {
             let data_vec: Vec<u8> = data.to_vec();
             let etag_clone = etag.clone();
             tokio::task::spawn_blocking(move || {
-                let conn = conn.lock().map_err(|e| anyhow::anyhow!("Mutex poisoned: {e}"))?;
+                let conn = conn
+                    .lock()
+                    .map_err(|e| anyhow::anyhow!("Mutex poisoned: {e}"))?;
                 conn.execute(
                     "INSERT OR REPLACE INTO part_data (part_key, data, etag) VALUES (?1, ?2, ?3)",
                     params![part_key, data_vec, etag_clone],
@@ -334,7 +340,9 @@ impl StorageBackend for SqliteBackend {
         let conn = Arc::clone(&self.conn);
         Box::pin(async move {
             tokio::task::spawn_blocking(move || {
-                let conn = conn.lock().map_err(|e| anyhow::anyhow!("Mutex poisoned: {e}"))?;
+                let conn = conn
+                    .lock()
+                    .map_err(|e| anyhow::anyhow!("Mutex poisoned: {e}"))?;
                 let pattern = format!("{upload_id}/%");
                 conn.execute(
                     "DELETE FROM part_data WHERE part_key LIKE ?1",

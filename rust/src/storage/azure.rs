@@ -119,9 +119,9 @@ impl AzureGatewayBackend {
     fn resolve_auth_from_connection_string(conn_str: &str) -> anyhow::Result<AzureAuth> {
         for part in conn_str.split(';') {
             if let Some(key_val) = part.strip_prefix("AccountKey=") {
-                let key_bytes = BASE64_STANDARD.decode(key_val).map_err(|e| {
-                    anyhow::anyhow!("Invalid AccountKey in connection string: {e}")
-                })?;
+                let key_bytes = BASE64_STANDARD
+                    .decode(key_val)
+                    .map_err(|e| anyhow::anyhow!("Invalid AccountKey in connection string: {e}"))?;
                 return Ok(AzureAuth::SharedKey { key_bytes });
             }
         }

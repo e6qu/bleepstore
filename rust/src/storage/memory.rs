@@ -226,8 +226,11 @@ impl MemoryBackend {
     /// safe to call from both sync and async contexts.
     fn read_snapshot_into_maps(
         snapshot_path: &str,
-    ) -> anyhow::Result<(HashMap<String, (Bytes, String)>, HashMap<String, (Bytes, String)>, u64)>
-    {
+    ) -> anyhow::Result<(
+        HashMap<String, (Bytes, String)>,
+        HashMap<String, (Bytes, String)>,
+        u64,
+    )> {
         let conn = Connection::open(snapshot_path)?;
         let mut objects_map: HashMap<String, (Bytes, String)> = HashMap::new();
         let mut parts_map: HashMap<String, (Bytes, String)> = HashMap::new();
@@ -235,8 +238,7 @@ impl MemoryBackend {
 
         // Load objects.
         {
-            let mut stmt =
-                conn.prepare("SELECT storage_key, data, etag FROM object_snapshots")?;
+            let mut stmt = conn.prepare("SELECT storage_key, data, etag FROM object_snapshots")?;
             let rows = stmt.query_map([], |row| {
                 let key: String = row.get(0)?;
                 let data: Vec<u8> = row.get(1)?;
@@ -252,8 +254,7 @@ impl MemoryBackend {
 
         // Load parts.
         {
-            let mut stmt =
-                conn.prepare("SELECT part_key, data, etag FROM part_snapshots")?;
+            let mut stmt = conn.prepare("SELECT part_key, data, etag FROM part_snapshots")?;
             let rows = stmt.query_map([], |row| {
                 let key: String = row.get(0)?;
                 let data: Vec<u8> = row.get(1)?;
@@ -284,8 +285,7 @@ impl MemoryBackend {
 
         // Read snapshot in a blocking task to avoid blocking the runtime.
         let (objects_map, parts_map, total_size) =
-            tokio::task::spawn_blocking(move || Self::read_snapshot_into_maps(&path))
-                .await??;
+            tokio::task::spawn_blocking(move || Self::read_snapshot_into_maps(&path)).await??;
 
         let mut objects = self.objects.write().await;
         let mut parts = self.parts.write().await;
@@ -310,8 +310,7 @@ impl MemoryBackend {
         let interval_secs = self.snapshot_interval_seconds;
 
         tokio::spawn(async move {
-            let mut interval =
-                tokio::time::interval(std::time::Duration::from_secs(interval_secs));
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
             // The first tick completes immediately; skip it.
             interval.tick().await;
 
@@ -437,9 +436,7 @@ impl StorageBackend for MemoryBackend {
                 match objects.get(&src_storage_key) {
                     Some((data, etag)) => (data.clone(), etag.clone()),
                     None => {
-                        anyhow::bail!(
-                            "Source object not found at storage key: {src_storage_key}"
-                        );
+                        anyhow::bail!("Source object not found at storage key: {src_storage_key}");
                     }
                 }
             };
@@ -523,9 +520,9 @@ impl StorageBackend for MemoryBackend {
                 let parts_map = self.parts.read().await;
                 for (part_number, _etag) in &parts {
                     let part_key = format!("{upload_id}/{part_number}");
-                    let (part_data, _part_etag) = parts_map.get(&part_key).ok_or_else(|| {
-                        anyhow::anyhow!("Part not found: {part_key}")
-                    })?;
+                    let (part_data, _part_etag) = parts_map
+                        .get(&part_key)
+                        .ok_or_else(|| anyhow::anyhow!("Part not found: {part_key}"))?;
 
                     // Compute MD5 of this part for composite ETag.
                     let mut part_hasher = Md5::new();
@@ -543,16 +540,13 @@ impl StorageBackend for MemoryBackend {
             let mut composite_hasher = Md5::new();
             composite_hasher.update(&combined_md5_bytes);
             let composite_md5 = composite_hasher.finalize();
-            let composite_etag =
-                format!("\"{}-{}\"", hex::encode(composite_md5), parts.len());
+            let composite_etag = format!("\"{}-{}\"", hex::encode(composite_md5), parts.len());
 
             // Store the assembled object (accounting for size).
             let new_len = assembled.len() as u64;
             let old_len = {
                 let objects = self.objects.read().await;
-                objects
-                    .get(&final_storage_key)
-                    .map(|(d, _)| d.len() as u64)
+                objects.get(&final_storage_key).map(|(d, _)| d.len() as u64)
             };
             let delta = new_len as i64 - old_len.unwrap_or(0) as i64;
             if delta > 0 {
@@ -561,10 +555,7 @@ impl StorageBackend for MemoryBackend {
 
             {
                 let mut objects = self.objects.write().await;
-                objects.insert(
-                    final_storage_key,
-                    (assembled, composite_etag.clone()),
-                );
+                objects.insert(final_storage_key, (assembled, composite_etag.clone()));
             }
 
             self.adjust_size(delta).await;
@@ -1101,10 +1092,7 @@ mod tests {
 
         // With max_size_bytes = 0, we can store as much as we want.
         let big_data = Bytes::from(vec![0u8; 1_000_000]);
-        backend
-            .put("test-bucket/big.bin", big_data)
-            .await
-            .unwrap();
+        backend.put("test-bucket/big.bin", big_data).await.unwrap();
     }
 
     // -- Snapshot tests -------------------------------------------------------
@@ -1117,8 +1105,7 @@ mod tests {
 
         // Create backend, store some data, snapshot.
         {
-            let backend =
-                MemoryBackend::new(0, "snapshot", snap_str, 0).unwrap();
+            let backend = MemoryBackend::new(0, "snapshot", snap_str, 0).unwrap();
             backend
                 .put("bucket/key1.txt", Bytes::from("data one"))
                 .await
@@ -1136,8 +1123,7 @@ mod tests {
 
         // Create new backend from the snapshot.
         {
-            let backend =
-                MemoryBackend::new(0, "snapshot", snap_str, 0).unwrap();
+            let backend = MemoryBackend::new(0, "snapshot", snap_str, 0).unwrap();
 
             let obj1 = backend.get("bucket/key1.txt").await.unwrap();
             assert_eq!(obj1.data, Bytes::from("data one"));
@@ -1158,8 +1144,7 @@ mod tests {
         let snap_path = dir.path().join("close-snapshot.db");
         let snap_str = snap_path.to_str().unwrap();
 
-        let backend =
-            MemoryBackend::new(0, "snapshot", snap_str, 0).unwrap();
+        let backend = MemoryBackend::new(0, "snapshot", snap_str, 0).unwrap();
         backend
             .put("bucket/key.txt", Bytes::from("close data"))
             .await
@@ -1171,8 +1156,7 @@ mod tests {
         assert!(snap_path.exists());
 
         // Verify the snapshot contains the data.
-        let backend2 =
-            MemoryBackend::new(0, "snapshot", snap_str, 0).unwrap();
+        let backend2 = MemoryBackend::new(0, "snapshot", snap_str, 0).unwrap();
         let obj = backend2.get("bucket/key.txt").await.unwrap();
         assert_eq!(obj.data, Bytes::from("close data"));
     }
