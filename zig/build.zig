@@ -49,6 +49,45 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
 
+    // --- bleepstore-meta tool ---
+    const meta_exe = b.addExecutable(.{
+        .name = "bleepstore-meta",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/meta_main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+
+    meta_exe.linkSystemLibrary("sqlite3");
+    b.installArtifact(meta_exe);
+
+    const run_meta = b.addRunArtifact(meta_exe);
+    run_meta.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        run_meta.addArgs(args);
+    }
+
+    const run_meta_step = b.step("run-meta", "Run the bleepstore-meta tool");
+    run_meta_step.dependOn(&run_meta.step);
+
+    // --- bleepstore-meta tests ---
+    const meta_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/serialization.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+
+    meta_tests.linkSystemLibrary("sqlite3");
+
+    const run_meta_tests = b.addRunArtifact(meta_tests);
+    const meta_test_step = b.step("test-meta", "Run serialization tests");
+    meta_test_step.dependOn(&run_meta_tests.step);
+
     // --- E2E Integration Tests ---
     // Builds and runs a standalone HTTP client that exercises the S3 API
     // against a running server on port 9013. Start the server first!

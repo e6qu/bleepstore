@@ -24,10 +24,15 @@
 - **Production config**: `--shutdown-timeout` (default 30s), `--max-object-size` (default 5 GiB)
 - **Max object size enforcement** in PutObject and UploadPart handlers
 
+## Cross-Language Storage Identity (2026-02-25)
+- SQLite storage schema normalized from single TEXT PK to composite PKs: `(bucket, key)` for object_data, `(upload_id, part_number)` for part_data
+- Memory snapshot schema normalized to composite PKs to match
+- All unit tests pass (266), E2E tests pass (86/86)
+
 ## Storage Backends
 - **Local filesystem** (default) -- stores objects on disk, used for E2E testing
 - **Memory** -- in-memory HashMap-based storage with tokio::sync::RwLock, optional `max_size_bytes` limit, snapshot persistence
-- **SQLite** -- object BLOBs stored in the same SQLite database as metadata (`object_data`, `part_data` tables)
+- **SQLite** -- object BLOBs stored in the same SQLite database as metadata (`object_data`, `part_data` tables, composite PKs)
 - **AWS S3 gateway** -- proxies to upstream AWS S3 bucket via `aws-sdk-s3`
   - Enhanced config: `endpoint_url`, `use_path_style`, `access_key_id`, `secret_access_key`
 - **GCP Cloud Storage gateway** -- proxies to upstream GCS bucket via `reqwest` + GCS JSON API

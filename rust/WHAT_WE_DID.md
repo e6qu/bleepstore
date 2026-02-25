@@ -1,5 +1,17 @@
 # BleepStore Rust — What We Did
 
+## Cross-Language Storage Identity Normalization (2026-02-25)
+
+Normalized SQLite storage and memory snapshot schemas from single TEXT PKs to composite PKs matching Python/Go/Zig.
+
+### Changes:
+- **storage/sqlite.rs**: Changed `object_data` from `storage_key TEXT PRIMARY KEY` to `PRIMARY KEY (bucket, key)`. Changed `part_data` from `part_key TEXT PRIMARY KEY` to `PRIMARY KEY (upload_id, part_number)`. Updated all queries (put, get, delete, exists, copy_object, put_part, assemble_parts, delete_parts). Added `split_storage_key()` helper.
+- **storage/memory.rs**: Changed snapshot tables (`object_snapshots`, `part_snapshots`) to composite PKs. Updated `snapshot()` to split keys into columns. Updated `read_snapshot_into_maps()` to reconstruct keys from columns. Added `split_snapshot_key()` and `split_part_key()` helpers.
+
+### Verification:
+- All unit tests pass (266)
+- All E2E tests pass (86/86)
+
 ## Session 18 — 2026-02-25
 
 ### Pluggable Storage Backends (memory, sqlite, cloud enhancements)

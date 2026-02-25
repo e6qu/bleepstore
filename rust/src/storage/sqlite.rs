@@ -43,21 +43,25 @@ impl SqliteBackend {
              PRAGMA synchronous=NORMAL;",
         )?;
 
-        // Object data table.
+        // Object data table — composite PK for cross-language identity.
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS object_data (\
-                 storage_key TEXT PRIMARY KEY,\
-                 data        BLOB NOT NULL,\
-                 etag        TEXT NOT NULL\
+                 bucket TEXT NOT NULL,\
+                 key    TEXT NOT NULL,\
+                 data   BLOB NOT NULL,\
+                 etag   TEXT NOT NULL,\
+                 PRIMARY KEY (bucket, key)\
              );",
         )?;
 
-        // Part data table.
+        // Part data table — composite PK for cross-language identity.
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS part_data (\
-                 part_key TEXT PRIMARY KEY,\
-                 data     BLOB NOT NULL,\
-                 etag     TEXT NOT NULL\
+                 upload_id   TEXT NOT NULL,\
+                 part_number INTEGER NOT NULL,\
+                 data        BLOB NOT NULL,\
+                 etag        TEXT NOT NULL,\
+                 PRIMARY KEY (upload_id, part_number)\
              );",
         )?;
 
@@ -85,6 +89,19 @@ impl SqliteBackend {
     }
 }
 
+/// Split a `"bucket/key"` storage key into `(bucket, key)`.
+///
+/// The bucket is everything before the first `/`; the key is the rest.
+fn split_storage_key(storage_key: &str) -> (String, String) {
+    match storage_key.find('/') {
+        Some(pos) => (
+            storage_key[..pos].to_string(),
+            storage_key[pos + 1..].to_string(),
+        ),
+        None => (storage_key.to_string(), String::new()),
+    }
+}
+
 // ── StorageBackend implementation ──────────────────────────────────────
 
 impl StorageBackend for SqliteBackend {
@@ -93,7 +110,8 @@ impl StorageBackend for SqliteBackend {
         storage_key: &str,
         data: Bytes,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + Send + '_>> {
-        let storage_key = storage_key.to_string();
+        // Split "bucket/key" into separate columns.
+        let (bucket, key) = split_storage_key(storage_key);
         let data = data.clone();
         let conn = Arc::clone(&self.conn);
         Box::pin(async move {
@@ -103,8 +121,8 @@ impl StorageBackend for SqliteBackend {
             tokio::task::spawn_blocking(move || {
                 let conn = conn.lock().map_err(|e| anyhow::anyhow!("Mutex poisoned: {e}"))?;
                 conn.execute(
-                    "INSERT OR REPLACE INTO object_data (storage_key, data, etag) VALUES (?1, ?2, ?3)",
-                    params![storage_key, data_vec, etag_clone],
+                    "INSERT OR REPLACE INTO object_data (bucket, key, data, etag) VALUES (?1, ?2, ?3, ?4)",
+                    params![bucket, key, data_vec, etag_clone],
                 )?;
                 Ok::<(), anyhow::Error>(())
             })
@@ -117,7 +135,7 @@ impl StorageBackend for SqliteBackend {
         &self,
         storage_key: &str,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<StoredObject>> + Send + '_>> {
-        let storage_key = storage_key.to_string();
+        let (bucket, key) = split_storage_key(storage_key);
         let conn = Arc::clone(&self.conn);
         Box::pin(async move {
             let result = tokio::task::spawn_blocking(move || {
@@ -125,16 +143,15 @@ impl StorageBackend for SqliteBackend {
                     .lock()
                     .map_err(|e| anyhow::anyhow!("Mutex poisoned: {e}"))?;
                 let mut stmt =
-                    conn.prepare("SELECT data, etag FROM object_data WHERE storage_key = ?1")?;
-                let row = stmt.query_row(params![storage_key], |row| {
+                    conn.prepare("SELECT data FROM object_data WHERE bucket = ?1 AND key = ?2")?;
+                let row = stmt.query_row(params![bucket, key], |row| {
                     let data: Vec<u8> = row.get(0)?;
-                    let _etag: String = row.get(1)?;
                     Ok(data)
                 });
                 match row {
                     Ok(data) => Ok(data),
                     Err(rusqlite::Error::QueryReturnedNoRows) => Err(anyhow::anyhow!(
-                        "Object not found at storage key: {storage_key}"
+                        "Object not found at storage key: {bucket}/{key}"
                     )),
                     Err(e) => Err(anyhow::anyhow!(e)),
                 }
@@ -151,7 +168,7 @@ impl StorageBackend for SqliteBackend {
         &self,
         storage_key: &str,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + '_>> {
-        let storage_key = storage_key.to_string();
+        let (bucket, key) = split_storage_key(storage_key);
         let conn = Arc::clone(&self.conn);
         Box::pin(async move {
             tokio::task::spawn_blocking(move || {
@@ -159,8 +176,8 @@ impl StorageBackend for SqliteBackend {
                     .lock()
                     .map_err(|e| anyhow::anyhow!("Mutex poisoned: {e}"))?;
                 conn.execute(
-                    "DELETE FROM object_data WHERE storage_key = ?1",
-                    params![storage_key],
+                    "DELETE FROM object_data WHERE bucket = ?1 AND key = ?2",
+                    params![bucket, key],
                 )?;
                 Ok::<(), anyhow::Error>(())
             })
@@ -173,16 +190,16 @@ impl StorageBackend for SqliteBackend {
         &self,
         storage_key: &str,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send + '_>> {
-        let storage_key = storage_key.to_string();
+        let (bucket, key) = split_storage_key(storage_key);
         let conn = Arc::clone(&self.conn);
         Box::pin(async move {
             let exists = tokio::task::spawn_blocking(move || {
                 let conn = conn
                     .lock()
                     .map_err(|e| anyhow::anyhow!("Mutex poisoned: {e}"))?;
-                let mut stmt =
-                    conn.prepare("SELECT 1 FROM object_data WHERE storage_key = ?1 LIMIT 1")?;
-                let found = stmt.exists(params![storage_key])?;
+                let mut stmt = conn
+                    .prepare("SELECT 1 FROM object_data WHERE bucket = ?1 AND key = ?2 LIMIT 1")?;
+                let found = stmt.exists(params![bucket, key])?;
                 Ok::<bool, anyhow::Error>(found)
             })
             .await??;
@@ -197,8 +214,10 @@ impl StorageBackend for SqliteBackend {
         dst_bucket: &str,
         dst_key: &str,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + Send + '_>> {
-        let src_storage_key = format!("{bucket}/{src_key}");
-        let dst_storage_key = format!("{dst_bucket}/{dst_key}");
+        let src_bucket = bucket.to_string();
+        let src_key = src_key.to_string();
+        let dst_bucket = dst_bucket.to_string();
+        let dst_key = dst_key.to_string();
         let conn = Arc::clone(&self.conn);
         Box::pin(async move {
             let etag = tokio::task::spawn_blocking(move || {
@@ -206,25 +225,25 @@ impl StorageBackend for SqliteBackend {
 
                 // Read source object.
                 let mut stmt = conn.prepare(
-                    "SELECT data, etag FROM object_data WHERE storage_key = ?1",
+                    "SELECT data, etag FROM object_data WHERE bucket = ?1 AND key = ?2",
                 )?;
                 let (data, etag): (Vec<u8>, String) = stmt
-                    .query_row(params![src_storage_key], |row| {
+                    .query_row(params![src_bucket, src_key], |row| {
                         let data: Vec<u8> = row.get(0)?;
                         let etag: String = row.get(1)?;
                         Ok((data, etag))
                     })
                     .map_err(|e| match e {
                         rusqlite::Error::QueryReturnedNoRows => {
-                            anyhow::anyhow!("Source object not found at storage key: {src_storage_key}")
+                            anyhow::anyhow!("Source object not found: {src_bucket}/{src_key}")
                         }
                         other => anyhow::anyhow!(other),
                     })?;
 
                 // Insert destination object.
                 conn.execute(
-                    "INSERT OR REPLACE INTO object_data (storage_key, data, etag) VALUES (?1, ?2, ?3)",
-                    params![dst_storage_key, data, etag],
+                    "INSERT OR REPLACE INTO object_data (bucket, key, data, etag) VALUES (?1, ?2, ?3, ?4)",
+                    params![dst_bucket, dst_key, data, etag],
                 )?;
 
                 Ok::<String, anyhow::Error>(etag)
@@ -241,7 +260,7 @@ impl StorageBackend for SqliteBackend {
         part_number: u32,
         data: Bytes,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + Send + '_>> {
-        let part_key = format!("{upload_id}/{part_number}");
+        let upload_id = upload_id.to_string();
         let data = data.clone();
         let conn = Arc::clone(&self.conn);
         Box::pin(async move {
@@ -253,8 +272,8 @@ impl StorageBackend for SqliteBackend {
                     .lock()
                     .map_err(|e| anyhow::anyhow!("Mutex poisoned: {e}"))?;
                 conn.execute(
-                    "INSERT OR REPLACE INTO part_data (part_key, data, etag) VALUES (?1, ?2, ?3)",
-                    params![part_key, data_vec, etag_clone],
+                    "INSERT OR REPLACE INTO part_data (upload_id, part_number, data, etag) VALUES (?1, ?2, ?3, ?4)",
+                    params![upload_id, part_number, data_vec, etag_clone],
                 )?;
                 Ok::<(), anyhow::Error>(())
             })
@@ -279,25 +298,22 @@ impl StorageBackend for SqliteBackend {
             let result = tokio::task::spawn_blocking(move || {
                 let conn = conn.lock().map_err(|e| anyhow::anyhow!("Mutex poisoned: {e}"))?;
 
-                let final_storage_key = format!("{bucket}/{key}");
-
                 let mut combined_data: Vec<u8> = Vec::new();
                 let mut combined_md5_bytes: Vec<u8> = Vec::new();
 
                 let mut stmt = conn.prepare(
-                    "SELECT data FROM part_data WHERE part_key = ?1",
+                    "SELECT data FROM part_data WHERE upload_id = ?1 AND part_number = ?2",
                 )?;
 
                 for (part_number, _etag) in &parts {
-                    let part_key = format!("{upload_id}/{part_number}");
                     let part_data: Vec<u8> = stmt
-                        .query_row(params![part_key], |row| {
+                        .query_row(params![upload_id, part_number], |row| {
                             let data: Vec<u8> = row.get(0)?;
                             Ok(data)
                         })
                         .map_err(|e| match e {
                             rusqlite::Error::QueryReturnedNoRows => {
-                                anyhow::anyhow!("Part not found: {part_key}")
+                                anyhow::anyhow!("Part not found: {upload_id}/{part_number}")
                             }
                             other => anyhow::anyhow!(other),
                         })?;
@@ -320,8 +336,8 @@ impl StorageBackend for SqliteBackend {
 
                 // Store the assembled object.
                 conn.execute(
-                    "INSERT OR REPLACE INTO object_data (storage_key, data, etag) VALUES (?1, ?2, ?3)",
-                    params![final_storage_key, combined_data, composite_etag],
+                    "INSERT OR REPLACE INTO object_data (bucket, key, data, etag) VALUES (?1, ?2, ?3, ?4)",
+                    params![bucket, key, combined_data, composite_etag],
                 )?;
 
                 Ok::<String, anyhow::Error>(composite_etag)
@@ -343,10 +359,9 @@ impl StorageBackend for SqliteBackend {
                 let conn = conn
                     .lock()
                     .map_err(|e| anyhow::anyhow!("Mutex poisoned: {e}"))?;
-                let pattern = format!("{upload_id}/%");
                 conn.execute(
-                    "DELETE FROM part_data WHERE part_key LIKE ?1",
-                    params![pattern],
+                    "DELETE FROM part_data WHERE upload_id = ?1",
+                    params![upload_id],
                 )?;
                 Ok::<(), anyhow::Error>(())
             })

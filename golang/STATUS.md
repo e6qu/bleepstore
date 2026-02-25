@@ -48,6 +48,10 @@ All E2E tests pass (the former `test_missing_content_length` failure has been re
 - **GCP Cloud Storage Gateway Backend** -- proxies to upstream GCS
 - **Azure Blob Storage Gateway Backend** -- proxies to upstream Azure container
 
+## Cross-Language Storage Identity (2026-02-25)
+- Part file naming normalized from zero-padded `%05d` to plain `%d` (matches Python/Rust/Zig)
+- All unit tests pass (274), E2E tests pass (86/86)
+
 ## Storage Backends
 
 - **Local filesystem** (default) -- objects stored in `data/` directory

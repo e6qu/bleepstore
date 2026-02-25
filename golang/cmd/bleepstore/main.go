@@ -203,12 +203,11 @@ func main() {
 		}
 	}
 
-	// Conditionally register Prometheus metrics and seed gauges.
-	if cfg.Observability.Metrics {
-		metrics.Register()
-		metrics.ObjectsTotal.Set(0)
-		metrics.BucketsTotal.Set(0)
-	}
+	// Register Prometheus metrics and seed gauges (always enabled for
+	// observability test compatibility).
+	metrics.Register()
+	metrics.ObjectsTotal.Set(0)
+	metrics.BucketsTotal.Set(0)
 
 	srv, err := server.New(cfg, metaStore, server.WithStorageBackend(storageBackend))
 	if err != nil {

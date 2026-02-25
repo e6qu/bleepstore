@@ -13,6 +13,7 @@ pub mod errors;
 pub mod handlers;
 pub mod metadata;
 pub mod metrics;
+pub mod serialization;
 pub mod server;
 pub mod storage;
 pub mod xml;

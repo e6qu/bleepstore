@@ -61,6 +61,10 @@ aws-sdk-sso = "=1.93.0"
 aws-sdk-ssooidc = "=1.95.0"
 aws-sdk-sts = "=1.97.0"
 
+[[bin]]
+name = "bleepstore-meta"
+path = "src/bin/bleepstore_meta.rs"
+
 [dev-dependencies]
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }

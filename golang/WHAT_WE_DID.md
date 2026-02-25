@@ -1,5 +1,17 @@
 # BleepStore Go -- What We Did
 
+## Cross-Language Storage Identity Normalization (2026-02-25)
+
+Normalized part file naming from zero-padded `%05d` to plain `%d` to match Python/Rust/Zig convention.
+
+### Changes:
+- **internal/storage/local.go**: Changed `fmt.Sprintf("%05d", partNumber)` to `fmt.Sprintf("%d", partNumber)` in PutPart and AssembleParts
+- **internal/storage/memory.go**: Changed `partKey()` from `%05d` to `%d` format
+
+### Verification:
+- All unit tests pass (274)
+- All E2E tests pass (86/86)
+
 ## Session 19 -- 2026-02-25
 
 ### Pluggable Storage Backends (memory, sqlite, cloud enhancements)

@@ -39,4 +39,11 @@ echo "BleepStore E2E Tests"
 echo "  Endpoint:   $ENDPOINT"
 echo "  Virtualenv: $VENV_DIR"
 echo "=============================================="
-python -m pytest e2e/ -v --tb=short "$@"
+# Exclude cross-impl tests in single-server mode (they require 2+ servers)
+CROSS_IMPL="${BLEEPSTORE_CROSS_IMPL:-}"
+IGNORE_CROSS=""
+if [ -z "$CROSS_IMPL" ]; then
+    IGNORE_CROSS="--ignore=e2e/test_cross_impl.py"
+fi
+
+python -m pytest e2e/ -v --tb=short $IGNORE_CROSS "$@"

@@ -43,6 +43,7 @@ dev = [
 
 [project.scripts]
 bleepstore = "bleepstore.cli:main"
+bleepstore-meta = "bleepstore.meta_cli:entry_point"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/bleepstore"]
