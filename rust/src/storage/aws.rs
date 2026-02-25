@@ -43,6 +43,9 @@ impl AwsGatewayBackend {
         region: String,
         prefix: String,
         endpoint_url: Option<String>,
+        use_path_style: bool,
+        access_key_id: Option<String>,
+        secret_access_key: Option<String>,
     ) -> anyhow::Result<Self> {
         let mut config_loader = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .region(aws_config::Region::new(region));
@@ -51,10 +54,20 @@ impl AwsGatewayBackend {
             config_loader = config_loader.endpoint_url(endpoint);
         }
 
+        // If explicit credentials are provided, inject them as static credentials.
+        if let (Some(ref ak), Some(ref sk)) = (&access_key_id, &secret_access_key) {
+            let creds = aws_sdk_s3::config::Credentials::new(
+                ak, sk, None, // session_token
+                None, // expiry
+                "bleepstore-config",
+            );
+            config_loader = config_loader.credentials_provider(creds);
+        }
+
         let sdk_config = config_loader.load().await;
 
         let s3_config_builder =
-            aws_sdk_s3::config::Builder::from(&sdk_config).force_path_style(true);
+            aws_sdk_s3::config::Builder::from(&sdk_config).force_path_style(use_path_style);
 
         let client = Client::from_conf(s3_config_builder.build());
 

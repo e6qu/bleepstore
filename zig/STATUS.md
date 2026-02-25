@@ -230,6 +230,14 @@ Unit tests now pass at 134/134. Python E2E tests need to be re-run to verify fix
   - parseAclGrants: JSON-to-struct ACL grant parsing via std.json
 - **Global config values** for handler access: region, access_key, auth_enabled
 
+## Storage Backends
+- **Local filesystem** (`src/storage/local.zig`): Default backend. Atomic temp-fsync-rename writes, MD5 ETags.
+- **Memory** (`src/storage/memory.zig`): In-memory StringHashMap-based storage with std.Thread.Mutex. Supports `max_size_bytes` limit, MD5 ETag computation. 16 unit tests.
+- **SQLite** (`src/storage/sqlite_backend.zig`): Object BLOBs stored in the same SQLite database as metadata. Tables: `object_data`, `part_data`. Uses @cImport SQLite C API with vtable pattern. 14 unit tests.
+- **AWS S3 gateway** (`src/storage/aws.zig`): Proxies to upstream S3 bucket. Enhanced config: `endpoint_url`, `use_path_style`.
+- **GCP Cloud Storage gateway** (`src/storage/gcp.zig`): Proxies to upstream GCS bucket. Enhanced config: `credentials_file`.
+- **Azure Blob gateway** (`src/storage/azure.zig`): Proxies to upstream Azure container. Enhanced config: `connection_string`, `use_managed_identity`.
+
 ## What Doesn't Work Yet
 - PutBucketAcl with XML body not fully parsed (canned ACL via header works)
 - PutObjectAcl with XML body not fully parsed (canned ACL via header works)

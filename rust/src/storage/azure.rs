@@ -71,7 +71,13 @@ impl AzureGatewayBackend {
     ///   - `AZURE_STORAGE_KEY` (Shared Key auth, preferred)
     ///   - `AZURE_STORAGE_SAS_TOKEN` (SAS token auth, fallback)
     ///   - `AZURE_STORAGE_CONNECTION_STRING` (parsed for account key)
-    pub async fn new(container: String, account: String, prefix: String) -> anyhow::Result<Self> {
+    pub async fn new(
+        container: String,
+        account: String,
+        prefix: String,
+        connection_string: Option<String>,
+        use_managed_identity: bool,
+    ) -> anyhow::Result<Self> {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(300))
             .build()
@@ -79,8 +85,20 @@ impl AzureGatewayBackend {
 
         let base_url = format!("https://{account}.blob.core.windows.net");
 
-        // Resolve credentials from environment.
-        let auth = Self::resolve_auth()?;
+        // Resolve credentials: explicit connection_string takes priority,
+        // then fall back to environment variables.
+        let auth = if let Some(ref conn_str) = connection_string {
+            Self::resolve_auth_from_connection_string(conn_str)?
+        } else if use_managed_identity {
+            // Managed identity: no static credentials needed. Requests will use
+            // the Azure Instance Metadata Service (IMDS) to obtain tokens at
+            // request time. For now, we require env-var-based auth as a fallback
+            // since we don't yet implement IMDS token acquisition.
+            info!("Azure managed identity requested; falling back to env-based auth");
+            Self::resolve_auth()?
+        } else {
+            Self::resolve_auth()?
+        };
 
         info!(
             "Azure gateway backend initialized: container={} account={} prefix='{}'",
@@ -95,6 +113,21 @@ impl AzureGatewayBackend {
             base_url,
             auth,
         })
+    }
+
+    /// Resolve Azure authentication from an explicit connection string.
+    fn resolve_auth_from_connection_string(conn_str: &str) -> anyhow::Result<AzureAuth> {
+        for part in conn_str.split(';') {
+            if let Some(key_val) = part.strip_prefix("AccountKey=") {
+                let key_bytes = BASE64_STANDARD.decode(key_val).map_err(|e| {
+                    anyhow::anyhow!("Invalid AccountKey in connection string: {e}")
+                })?;
+                return Ok(AzureAuth::SharedKey { key_bytes });
+            }
+        }
+        Err(anyhow::anyhow!(
+            "Connection string provided but does not contain AccountKey"
+        ))
     }
 
     /// Resolve Azure authentication from environment variables.

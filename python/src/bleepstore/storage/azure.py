@@ -49,10 +49,14 @@ class AzureGatewayBackend:
         container_name: str,
         account_url: str = "",
         prefix: str = "",
+        connection_string: str = "",
+        use_managed_identity: bool = False,
     ) -> None:
         self.container_name = container_name
         self.account_url = account_url
         self.prefix = prefix
+        self.connection_string = connection_string
+        self.use_managed_identity = use_managed_identity
         self._container_client: ContainerClient | None = None
         self._credential: DefaultAzureCredential | None = None
 
@@ -76,12 +80,21 @@ class AzureGatewayBackend:
         Raises:
             ValueError: If the upstream container does not exist or is inaccessible.
         """
-        self._credential = DefaultAzureCredential()
-        self._container_client = ContainerClient(
-            self.account_url,
-            self.container_name,
-            credential=self._credential,
-        )
+        if self.connection_string:
+            from azure.storage.blob.aio import BlobServiceClient
+            service_client = BlobServiceClient.from_connection_string(self.connection_string)
+            self._container_client = service_client.get_container_client(self.container_name)
+        else:
+            if self.use_managed_identity:
+                from azure.identity.aio import ManagedIdentityCredential
+                self._credential = ManagedIdentityCredential()
+            else:
+                self._credential = DefaultAzureCredential()
+            self._container_client = ContainerClient(
+                self.account_url,
+                self.container_name,
+                credential=self._credential,
+            )
 
         # Verify container exists
         try:

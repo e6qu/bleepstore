@@ -34,6 +34,9 @@ pub const AzureGatewayBackend = struct {
     host: []const u8,
     http_client: std.http.Client,
 
+    /// Stored connection string for potential use in auth resolution.
+    connection_string: []const u8,
+
     /// True if access_token was allocated by us (from env var) and must be freed.
     token_owned: bool,
     /// True if host was allocated by us and must be freed.
@@ -46,6 +49,7 @@ pub const AzureGatewayBackend = struct {
         container: []const u8,
         account_name: []const u8,
         prefix: []const u8,
+        connection_string: []const u8,
     ) !Self {
         // Resolve access token from environment.
         const token_result = std.process.getEnvVarOwned(allocator, "AZURE_ACCESS_TOKEN") catch |err| {
@@ -101,6 +105,7 @@ pub const AzureGatewayBackend = struct {
             .access_token = token_result,
             .host = host,
             .http_client = client,
+            .connection_string = connection_string,
             .token_owned = true,
             .host_owned = true,
         };

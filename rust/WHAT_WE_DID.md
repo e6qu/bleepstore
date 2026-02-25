@@ -1,5 +1,27 @@
 # BleepStore Rust — What We Did
 
+## Session 18 — 2026-02-25
+
+### Pluggable Storage Backends (memory, sqlite, cloud enhancements)
+
+**New storage backends:**
+- **Memory backend** (`src/storage/memory.rs`): In-memory HashMap-based storage with tokio::sync::RwLock. Supports `max_size_bytes` limit, rusqlite snapshot persistence, Arc<AtomicBool> shutdown signal. 28 unit tests.
+- **SQLite backend** (`src/storage/sqlite.rs`): Object BLOBs stored in the same SQLite database as metadata. Tables: `object_data`, `part_data`. Uses Arc<Mutex<Connection>> with spawn_blocking pattern. 21 unit tests.
+
+**Cloud config enhancements:**
+- AWS: `use_path_style`, `access_key_id`, `secret_access_key` (endpoint_url already existed)
+- GCP: `credentials_file`
+- Azure: `connection_string`, `use_managed_identity`
+
+**Config + factory:**
+- Added `MemoryStorageConfig` struct to `config.rs`
+- Extended AWS/GCP/Azure config structs with new fields
+- Updated `main.rs` match with "memory" and "sqlite" arms
+- Updated `src/storage/mod.rs` with `pub mod memory;` and `pub mod sqlite;`
+
+**E2E:**
+- Updated `run_e2e.sh` with `--backend` flag (e.g., `./run_e2e.sh --backend memory`)
+
 ## Session 17 -- Stage 15: Performance Optimization & Production Readiness (2026-02-24)
 
 ### Phase 1: SigV4 Signing Key & Credential Cache

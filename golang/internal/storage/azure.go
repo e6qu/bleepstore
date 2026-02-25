@@ -69,9 +69,10 @@ type AzureGatewayBackend struct {
 
 // NewAzureGatewayBackend creates a new AzureGatewayBackend configured to proxy
 // to the specified Azure Blob container. It initializes the Azure SDK client
-// using DefaultAzureCredential.
-func NewAzureGatewayBackend(ctx context.Context, container, accountURL, prefix string) (*AzureGatewayBackend, error) {
-	client, err := newRealAzureClient(accountURL)
+// using DefaultAzureCredential, or a connection string if provided.
+// If useManagedIdentity is true, it explicitly uses managed identity credentials.
+func NewAzureGatewayBackend(ctx context.Context, container, accountURL, prefix, connectionString string, useManagedIdentity bool) (*AzureGatewayBackend, error) {
+	client, err := newRealAzureClient(accountURL, connectionString, useManagedIdentity)
 	if err != nil {
 		return nil, fmt.Errorf("creating Azure client: %w", err)
 	}

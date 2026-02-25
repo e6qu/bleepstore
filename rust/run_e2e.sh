@@ -7,7 +7,8 @@
 #
 # Usage:
 #   ./run_e2e.sh [pytest-args...]
-#   ./run_e2e.sh -m bucket_ops
+#   ./run_e2e.sh --backend memory
+#   ./run_e2e.sh --backend sqlite -m bucket_ops
 #   ./run_e2e.sh -k test_put
 #
 set -euo pipefail
@@ -17,6 +18,23 @@ PORT=9012
 LOG_DIR="$SCRIPT_DIR/logs"
 SERVER_LOG="$LOG_DIR/server.log"
 E2E_LOG="$LOG_DIR/e2e.log"
+
+# Parse --backend flag (defaults to "local")
+BACKEND="local"
+REMAINING_ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --backend)
+            BACKEND="$2"
+            shift 2
+            ;;
+        *)
+            REMAINING_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+set -- "${REMAINING_ARGS[@]+"${REMAINING_ARGS[@]}"}"
 
 mkdir -p "$LOG_DIR"
 
@@ -41,9 +59,18 @@ sleep 0.5
 # Ensure data directories exist (config uses ./data/metadata.db and ./data/objects)
 mkdir -p "$SCRIPT_DIR/data/objects"
 
+# Generate config with selected backend
+CONFIG_FILE="$PROJECT_ROOT/bleepstore.example.yaml"
+if [ "$BACKEND" != "local" ]; then
+    CONFIG_FILE="$LOG_DIR/bleepstore-${BACKEND}.yaml"
+    sed "s/backend: \"local\"/backend: \"${BACKEND}\"/" \
+        "$PROJECT_ROOT/bleepstore.example.yaml" > "$CONFIG_FILE"
+    echo "Using storage backend: $BACKEND"
+fi
+
 # Start the server in background
 echo "Starting BleepStore Rust on port $PORT..."
-$BINARY --config "$PROJECT_ROOT/bleepstore.example.yaml" --bind "0.0.0.0:$PORT" \
+$BINARY --config "$CONFIG_FILE" --bind "0.0.0.0:$PORT" \
     > "$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 

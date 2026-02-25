@@ -1,5 +1,28 @@
 # BleepStore Go -- What We Did
 
+## Session 19 -- 2026-02-25
+
+### Pluggable Storage Backends (memory, sqlite, cloud enhancements)
+
+**New storage backends:**
+- **Memory backend** (`internal/storage/memory.go`): In-memory map-based storage with sync.RWMutex. Supports `max_size_bytes` limit, SQLite snapshot persistence, Close() for graceful shutdown.
+- **SQLite backend** (`internal/storage/sqlite.go`): Object BLOBs stored in the same SQLite database as metadata. Tables: `object_data`, `part_data`. Uses modernc.org/sqlite with WAL mode.
+
+**Cloud config enhancements:**
+- AWS: `endpoint_url`, `use_path_style`, `access_key_id`, `secret_access_key`
+- GCP: `credentials_file`
+- Azure: `connection_string`, `use_managed_identity`
+
+**Config + factory:**
+- Restructured `config.go` to use nested structs (MemoryConfig, AWSConfig, GCPConfig, AzureConfig)
+- Updated `main.go` switch with "memory" and "sqlite" cases
+- Updated cloud backend constructors with new parameters
+
+**E2E:**
+- Updated `run_e2e.sh` with `--backend` flag (e.g., `./run_e2e.sh --backend memory`)
+
+---
+
 ## Session 18 -- Stage 15: Performance Optimization & Production Readiness (2026-02-24)
 
 ### What was implemented:

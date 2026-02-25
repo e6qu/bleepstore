@@ -41,10 +41,18 @@ class AWSGatewayBackend:
         bucket_name: str,
         region: str = "us-east-1",
         prefix: str = "",
+        endpoint_url: str = "",
+        use_path_style: bool = False,
+        access_key_id: str = "",
+        secret_access_key: str = "",
     ) -> None:
         self.bucket_name = bucket_name
         self.region = region
         self.prefix = prefix
+        self.endpoint_url = endpoint_url
+        self.use_path_style = use_path_style
+        self.access_key_id = access_key_id
+        self.secret_access_key = secret_access_key
         self._session = AioSession()
         self._client = None
         self._client_ctx = None
@@ -63,7 +71,20 @@ class AWSGatewayBackend:
         Raises:
             ValueError: If the upstream bucket does not exist or is inaccessible.
         """
-        self._client_ctx = self._session.create_client("s3", region_name=self.region)
+        # Build client kwargs from config
+        client_kwargs: dict = {"region_name": self.region}
+        if self.endpoint_url:
+            client_kwargs["endpoint_url"] = self.endpoint_url
+        if self.use_path_style:
+            from botocore.config import Config as BotoConfig
+            client_kwargs["config"] = BotoConfig(s3={"addressing_style": "path"})
+
+        # Use explicit credentials if provided, otherwise fall back to chain
+        if self.access_key_id and self.secret_access_key:
+            session = AioSession()
+            session.set_credentials(self.access_key_id, self.secret_access_key)
+            self._session = session
+        self._client_ctx = self._session.create_client("s3", **client_kwargs)
         self._client = await self._client_ctx.__aenter__()
 
         # Verify bucket exists

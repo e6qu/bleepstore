@@ -26,9 +26,14 @@
 
 ## Storage Backends
 - **Local filesystem** (default) -- stores objects on disk, used for E2E testing
+- **Memory** -- in-memory HashMap-based storage with tokio::sync::RwLock, optional `max_size_bytes` limit, snapshot persistence
+- **SQLite** -- object BLOBs stored in the same SQLite database as metadata (`object_data`, `part_data` tables)
 - **AWS S3 gateway** -- proxies to upstream AWS S3 bucket via `aws-sdk-s3`
+  - Enhanced config: `endpoint_url`, `use_path_style`, `access_key_id`, `secret_access_key`
 - **GCP Cloud Storage gateway** -- proxies to upstream GCS bucket via `reqwest` + GCS JSON API
+  - Enhanced config: `credentials_file`
 - **Azure Blob Storage gateway** -- proxies to upstream Azure container via `reqwest` + Azure Blob REST API
+  - Enhanced config: `connection_string`, `use_managed_identity`
 
 ## E2E Test Results (2026-02-24)
 - **86 passed, 0 failed** out of 86 total (with local backend)

@@ -29,20 +29,35 @@ pub const MetadataConfig = struct {
 pub const StorageConfig = struct {
     backend: StorageBackendType = .local,
     local_root: []const u8 = "./data/objects",
+    // Memory backend
+    memory_max_size_bytes: u64 = 0,
+    memory_persistence: []const u8 = "none",
+    memory_snapshot_path: []const u8 = "./data/memory.snap",
+    memory_snapshot_interval_seconds: u64 = 300,
+    // AWS S3
     aws_bucket: []const u8 = "",
     aws_region: []const u8 = "us-east-1",
     aws_prefix: []const u8 = "",
+    aws_endpoint_url: []const u8 = "",
+    aws_use_path_style: bool = false,
     aws_access_key_id: []const u8 = "",
     aws_secret_access_key: []const u8 = "",
+    // GCP Cloud Storage
     gcp_bucket: []const u8 = "",
     gcp_project: []const u8 = "",
     gcp_prefix: []const u8 = "",
+    gcp_credentials_file: []const u8 = "",
+    // Azure Blob
     azure_container: []const u8 = "",
     azure_account: []const u8 = "",
     azure_prefix: []const u8 = "",
+    azure_connection_string: []const u8 = "",
+    azure_use_managed_identity: bool = false,
 
     pub const StorageBackendType = enum {
         local,
+        memory,
+        sqlite,
         aws,
         gcp,
         azure,
@@ -212,6 +227,10 @@ fn applyConfigValue(cfg: *Config, key: []const u8, value: []const u8) void {
     else if (std.mem.eql(u8, key, "storage.backend")) {
         if (std.mem.eql(u8, value, "local")) {
             cfg.storage.backend = .local;
+        } else if (std.mem.eql(u8, value, "memory")) {
+            cfg.storage.backend = .memory;
+        } else if (std.mem.eql(u8, value, "sqlite")) {
+            cfg.storage.backend = .sqlite;
         } else if (std.mem.eql(u8, value, "aws")) {
             cfg.storage.backend = .aws;
         } else if (std.mem.eql(u8, value, "gcp")) {
@@ -221,6 +240,14 @@ fn applyConfigValue(cfg: *Config, key: []const u8, value: []const u8) void {
         }
     } else if (std.mem.eql(u8, key, "storage.local_root") or std.mem.eql(u8, key, "storage.local.root_dir") or std.mem.eql(u8, key, "local.root_dir")) {
         cfg.storage.local_root = value;
+    } else if (std.mem.eql(u8, key, "storage.memory.max_size_bytes") or std.mem.eql(u8, key, "memory.max_size_bytes")) {
+        cfg.storage.memory_max_size_bytes = std.fmt.parseInt(u64, value, 10) catch return;
+    } else if (std.mem.eql(u8, key, "storage.memory.persistence") or std.mem.eql(u8, key, "memory.persistence")) {
+        cfg.storage.memory_persistence = value;
+    } else if (std.mem.eql(u8, key, "storage.memory.snapshot_path") or std.mem.eql(u8, key, "memory.snapshot_path")) {
+        cfg.storage.memory_snapshot_path = value;
+    } else if (std.mem.eql(u8, key, "storage.memory.snapshot_interval_seconds") or std.mem.eql(u8, key, "memory.snapshot_interval_seconds")) {
+        cfg.storage.memory_snapshot_interval_seconds = std.fmt.parseInt(u64, value, 10) catch return;
     } else if (std.mem.eql(u8, key, "storage.aws.bucket") or std.mem.eql(u8, key, "aws.bucket")) {
         cfg.storage.aws_bucket = value;
     } else if (std.mem.eql(u8, key, "storage.aws.region") or std.mem.eql(u8, key, "aws.region")) {
@@ -231,18 +258,28 @@ fn applyConfigValue(cfg: *Config, key: []const u8, value: []const u8) void {
         cfg.storage.aws_access_key_id = value;
     } else if (std.mem.eql(u8, key, "storage.aws.secret_access_key") or std.mem.eql(u8, key, "aws.secret_access_key")) {
         cfg.storage.aws_secret_access_key = value;
+    } else if (std.mem.eql(u8, key, "storage.aws.endpoint_url") or std.mem.eql(u8, key, "aws.endpoint_url")) {
+        cfg.storage.aws_endpoint_url = value;
+    } else if (std.mem.eql(u8, key, "storage.aws.use_path_style") or std.mem.eql(u8, key, "aws.use_path_style")) {
+        cfg.storage.aws_use_path_style = std.mem.eql(u8, value, "true");
     } else if (std.mem.eql(u8, key, "storage.gcp.bucket") or std.mem.eql(u8, key, "gcp.bucket")) {
         cfg.storage.gcp_bucket = value;
     } else if (std.mem.eql(u8, key, "storage.gcp.project") or std.mem.eql(u8, key, "gcp.project")) {
         cfg.storage.gcp_project = value;
     } else if (std.mem.eql(u8, key, "storage.gcp.prefix") or std.mem.eql(u8, key, "gcp.prefix")) {
         cfg.storage.gcp_prefix = value;
+    } else if (std.mem.eql(u8, key, "storage.gcp.credentials_file") or std.mem.eql(u8, key, "gcp.credentials_file")) {
+        cfg.storage.gcp_credentials_file = value;
     } else if (std.mem.eql(u8, key, "storage.azure.container") or std.mem.eql(u8, key, "azure.container")) {
         cfg.storage.azure_container = value;
     } else if (std.mem.eql(u8, key, "storage.azure.account") or std.mem.eql(u8, key, "azure.account")) {
         cfg.storage.azure_account = value;
     } else if (std.mem.eql(u8, key, "storage.azure.prefix") or std.mem.eql(u8, key, "azure.prefix")) {
         cfg.storage.azure_prefix = value;
+    } else if (std.mem.eql(u8, key, "storage.azure.connection_string") or std.mem.eql(u8, key, "azure.connection_string")) {
+        cfg.storage.azure_connection_string = value;
+    } else if (std.mem.eql(u8, key, "storage.azure.use_managed_identity") or std.mem.eql(u8, key, "azure.use_managed_identity")) {
+        cfg.storage.azure_use_managed_identity = std.mem.eql(u8, value, "true");
     }
     // Cluster settings
     else if (std.mem.eql(u8, key, "cluster.enabled")) {

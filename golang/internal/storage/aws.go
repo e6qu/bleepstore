@@ -25,6 +25,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
@@ -67,14 +68,38 @@ type AWSGatewayBackend struct {
 
 // NewAWSGatewayBackend creates a new AWSGatewayBackend configured to proxy
 // to the specified S3 bucket in the given region. It initializes the AWS SDK
-// client using the default credential chain.
-func NewAWSGatewayBackend(ctx context.Context, bucket, region, prefix string) (*AWSGatewayBackend, error) {
-	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
+// client using the default credential chain, with optional overrides for
+// custom endpoint, path-style addressing, and static credentials.
+func NewAWSGatewayBackend(ctx context.Context, bucket, region, prefix, endpointURL string, usePathStyle bool, accessKeyID, secretAccessKey string) (*AWSGatewayBackend, error) {
+	var loadOpts []func(*awsconfig.LoadOptions) error
+	loadOpts = append(loadOpts, awsconfig.WithRegion(region))
+
+	// Use static credentials if provided, otherwise fall back to default chain.
+	if accessKeyID != "" && secretAccessKey != "" {
+		loadOpts = append(loadOpts, awsconfig.WithCredentialsProvider(
+			credentials.NewStaticCredentialsProvider(accessKeyID, secretAccessKey, ""),
+		))
+	}
+
+	cfg, err := awsconfig.LoadDefaultConfig(ctx, loadOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("loading AWS config: %w", err)
 	}
 
-	client := s3.NewFromConfig(cfg)
+	// Build S3 client options for custom endpoint and path-style.
+	var s3Opts []func(*s3.Options)
+	if endpointURL != "" {
+		s3Opts = append(s3Opts, func(o *s3.Options) {
+			o.BaseEndpoint = aws.String(endpointURL)
+		})
+	}
+	if usePathStyle {
+		s3Opts = append(s3Opts, func(o *s3.Options) {
+			o.UsePathStyle = true
+		})
+	}
+
+	client := s3.NewFromConfig(cfg, s3Opts...)
 
 	b := &AWSGatewayBackend{
 		Bucket: bucket,

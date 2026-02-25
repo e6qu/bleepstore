@@ -48,6 +48,15 @@ All E2E tests pass (the former `test_missing_content_length` failure has been re
 - **GCP Cloud Storage Gateway Backend** -- proxies to upstream GCS
 - **Azure Blob Storage Gateway Backend** -- proxies to upstream Azure container
 
+## Storage Backends
+
+- **Local filesystem** (default) -- objects stored in `data/` directory
+- **Memory backend** -- in-memory map-based storage with `sync.RWMutex`, configurable `max_size_bytes` limit, SQLite snapshot persistence, graceful `Close()`
+- **SQLite backend** -- object BLOBs stored in the same SQLite database as metadata (`object_data`, `part_data` tables), uses `modernc.org/sqlite` with WAL mode
+- **AWS S3 Gateway** -- proxies to upstream AWS S3. Enhanced config: `endpoint_url`, `use_path_style`, `access_key_id`, `secret_access_key`
+- **GCP Cloud Storage Gateway** -- proxies to upstream GCS. Enhanced config: `credentials_file`
+- **Azure Blob Storage Gateway** -- proxies to upstream Azure container. Enhanced config: `connection_string`, `use_managed_identity`
+
 ## Known Issues
 - None -- all 86 E2E tests pass
 

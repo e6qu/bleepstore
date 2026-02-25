@@ -43,10 +43,12 @@ class GCPGatewayBackend:
         bucket_name: str,
         project: str = "",
         prefix: str = "",
+        credentials_file: str = "",
     ) -> None:
         self.bucket_name = bucket_name
         self.project = project
         self.prefix = prefix
+        self.credentials_file = credentials_file
         self._client: Storage | None = None
 
     def _gcs_name(self, bucket: str, key: str) -> str:
@@ -63,7 +65,12 @@ class GCPGatewayBackend:
         Raises:
             ValueError: If the upstream bucket does not exist or is inaccessible.
         """
-        self._client = Storage()
+        if self.credentials_file:
+            from gcloud.aio.auth import Token
+            token = Token(service_file=self.credentials_file)
+            self._client = Storage(token=token)
+        else:
+            self._client = Storage()
 
         # Verify bucket exists by attempting to list with maxResults=1
         try:

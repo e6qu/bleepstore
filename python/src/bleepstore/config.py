@@ -39,15 +39,30 @@ class StorageConfig(BaseModel):
 
     backend: str = "local"
     local_root: str = "./data/objects"
+    # Memory backend
+    memory_max_size_bytes: int = 0
+    memory_persistence: str = "none"
+    memory_snapshot_path: str = "./data/memory.snap"
+    memory_snapshot_interval_seconds: int = 300
+    # AWS S3
     aws_bucket: str = ""
     aws_region: str = "us-east-1"
     aws_prefix: str = ""
+    aws_endpoint_url: str = ""
+    aws_use_path_style: bool = False
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
+    # GCP Cloud Storage
     gcp_bucket: str = ""
     gcp_project: str = ""
     gcp_prefix: str = ""
+    gcp_credentials_file: str = ""
+    # Azure Blob
     azure_container: str = ""
     azure_account: str = ""
     azure_prefix: str = ""
+    azure_connection_string: str = ""
+    azure_use_managed_identity: bool = False
 
 
 class ClusterConfig(BaseModel):
@@ -131,23 +146,37 @@ def _parse_storage(data: dict[str, Any] | None) -> dict[str, Any]:
     if isinstance(local_section, dict):
         result["local_root"] = local_section.get("root_dir", "./data/objects")
 
+    memory_section = data.get("memory")
+    if isinstance(memory_section, dict):
+        result["memory_max_size_bytes"] = memory_section.get("max_size_bytes", 0)
+        result["memory_persistence"] = memory_section.get("persistence", "none")
+        result["memory_snapshot_path"] = memory_section.get("snapshot_path", "./data/memory.snap")
+        result["memory_snapshot_interval_seconds"] = memory_section.get("snapshot_interval_seconds", 300)
+
     aws_section = data.get("aws")
     if isinstance(aws_section, dict):
         result["aws_bucket"] = aws_section.get("bucket", "")
         result["aws_region"] = aws_section.get("region", "us-east-1")
         result["aws_prefix"] = aws_section.get("prefix", "")
+        result["aws_endpoint_url"] = aws_section.get("endpoint_url", "")
+        result["aws_use_path_style"] = aws_section.get("use_path_style", False)
+        result["aws_access_key_id"] = aws_section.get("access_key_id", "")
+        result["aws_secret_access_key"] = aws_section.get("secret_access_key", "")
 
     gcp_section = data.get("gcp")
     if isinstance(gcp_section, dict):
         result["gcp_bucket"] = gcp_section.get("bucket", "")
         result["gcp_project"] = gcp_section.get("project", "")
         result["gcp_prefix"] = gcp_section.get("prefix", "")
+        result["gcp_credentials_file"] = gcp_section.get("credentials_file", "")
 
     azure_section = data.get("azure")
     if isinstance(azure_section, dict):
         result["azure_container"] = azure_section.get("container", "")
         result["azure_account"] = azure_section.get("account", "")
         result["azure_prefix"] = azure_section.get("prefix", "")
+        result["azure_connection_string"] = azure_section.get("connection_string", "")
+        result["azure_use_managed_identity"] = azure_section.get("use_managed_identity", False)
 
     return result
 

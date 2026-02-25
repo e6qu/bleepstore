@@ -573,3 +573,24 @@ Skipped Stages 12–14 (Raft clustering) — Stage 15 is independent of clusteri
 - **tests/test_server.py**: Rewrote all tests from aiohttp test client to httpx AsyncClient. Changed `resp.status` to `resp.status_code`, `await resp.text()` to `resp.text`, `await resp.json()` to `resp.json()`, `resp.content_type` to `resp.headers["content-type"]`. Header names are lowercase in httpx (e.g., `"server"` not `"Server"`).
 - **tests/test_xml_utils.py**: No changes needed -- tests only use `render_error()` which is framework-agnostic.
 - **tests/test_config.py**: No changes needed -- Pydantic BaseModel is API-compatible with dataclass usage in tests.
+
+## Session 20 — 2026-02-25
+
+### Pluggable Storage Backends (memory, sqlite, cloud enhancements)
+
+**New storage backends:**
+- **Memory backend** (`storage/memory.py`): In-memory dict-based storage with optional SQLite snapshot persistence. Supports `max_size_bytes` limit, `persistence: "none"|"snapshot"`, background snapshot task via asyncio.
+- **SQLite backend** (`storage/sqlite.py`): Object BLOBs stored in the same SQLite database as metadata. Tables: `object_data`, `part_data`. Uses aiosqlite with WAL mode.
+
+**Cloud config enhancements:**
+- AWS: `endpoint_url`, `use_path_style`, `access_key_id`, `secret_access_key`
+- GCP: `credentials_file`
+- Azure: `connection_string`, `use_managed_identity`
+
+**Config + factory:**
+- Updated `config.py` with memory_* fields and cloud enhancement fields
+- Updated `server.py` `_create_storage_backend()` with "memory" and "sqlite" cases
+- Updated `bleepstore.example.yaml` with new config sections
+
+**E2E:**
+- Updated `run_e2e.sh` with `--backend` flag (e.g., `./run_e2e.sh --backend memory`)
