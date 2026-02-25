@@ -158,6 +158,11 @@ func (s *SQLiteStore) initDB() error {
 	return nil
 }
 
+// Ping checks connectivity to the SQLite database.
+func (s *SQLiteStore) Ping(ctx context.Context) error {
+	return s.db.PingContext(ctx)
+}
+
 // Close closes the underlying SQLite database connection.
 func (s *SQLiteStore) Close() error {
 	if s.db != nil {
@@ -1095,6 +1100,67 @@ func (s *SQLiteStore) ListMultipartUploads(ctx context.Context, bucket string, o
 		result.NextUploadIDMarker = last.UploadID
 	}
 	return result, nil
+}
+
+// ---- Reaping operations ----
+
+// ExpiredUpload holds the identifying fields of an expired multipart upload,
+// returned by ReapExpiredUploads so the caller can clean up storage files.
+type ExpiredUpload struct {
+	UploadID   string
+	BucketName string
+	ObjectKey  string
+}
+
+// ReapExpiredUploads deletes multipart uploads older than ttlSeconds and their
+// associated parts. All deletes run inside a single transaction for atomicity.
+// Returns the list of reaped uploads (for storage cleanup) and any error.
+func (s *SQLiteStore) ReapExpiredUploads(ttlSeconds int) ([]ExpiredUpload, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("beginning reap transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Find expired uploads.
+	rows, err := tx.Query(
+		`SELECT upload_id, bucket, key FROM multipart_uploads
+		 WHERE initiated_at < datetime('now', '-' || ? || ' seconds')`,
+		ttlSeconds,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("querying expired uploads: %w", err)
+	}
+
+	var expired []ExpiredUpload
+	for rows.Next() {
+		var u ExpiredUpload
+		if err := rows.Scan(&u.UploadID, &u.BucketName, &u.ObjectKey); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scanning expired upload: %w", err)
+		}
+		expired = append(expired, u)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating expired uploads: %w", err)
+	}
+
+	// Delete parts and upload records for each expired upload.
+	for _, u := range expired {
+		if _, err := tx.Exec(`DELETE FROM multipart_parts WHERE upload_id = ?`, u.UploadID); err != nil {
+			return nil, fmt.Errorf("deleting parts for upload %q: %w", u.UploadID, err)
+		}
+		if _, err := tx.Exec(`DELETE FROM multipart_uploads WHERE upload_id = ?`, u.UploadID); err != nil {
+			return nil, fmt.Errorf("deleting upload %q: %w", u.UploadID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("committing reap transaction: %w", err)
+	}
+
+	return expired, nil
 }
 
 // ---- Credential operations ----

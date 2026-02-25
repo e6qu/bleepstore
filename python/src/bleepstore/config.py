@@ -59,6 +59,13 @@ class ClusterConfig(BaseModel):
     raft_port: int = 8334
 
 
+class ObservabilityConfig(BaseModel):
+    """Observability feature toggles."""
+
+    metrics: bool = True
+    health_check: bool = True
+
+
 class BleepStoreConfig(BaseModel):
     """Top-level BleepStore configuration."""
 
@@ -67,6 +74,7 @@ class BleepStoreConfig(BaseModel):
     metadata: MetadataConfig = Field(default_factory=MetadataConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     cluster: ClusterConfig = Field(default_factory=ClusterConfig)
+    observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
 
 
 def _parse_server(data: dict[str, Any] | None) -> dict[str, Any]:
@@ -156,6 +164,16 @@ def _parse_cluster(data: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _parse_observability(data: dict[str, Any] | None) -> dict[str, Any]:
+    """Parse the observability section from YAML data."""
+    if data is None:
+        return {}
+    return {
+        "metrics": data.get("metrics", True),
+        "health_check": data.get("health_check", True),
+    }
+
+
 def load_config(path: Path) -> BleepStoreConfig:
     """Load a BleepStoreConfig from a YAML file.
 
@@ -178,4 +196,5 @@ def load_config(path: Path) -> BleepStoreConfig:
         metadata=MetadataConfig(**_parse_metadata(raw.get("metadata"))),
         storage=StorageConfig(**_parse_storage(raw.get("storage"))),
         cluster=ClusterConfig(**_parse_cluster(raw.get("cluster"))),
+        observability=ObservabilityConfig(**_parse_observability(raw.get("observability"))),
     )

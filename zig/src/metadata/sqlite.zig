@@ -1016,6 +1016,53 @@ pub const SqliteMetadataStore = struct {
     }
 
     // =========================================================================
+    // Expired multipart upload reaping (crash-only startup)
+    // =========================================================================
+
+    /// Reap multipart uploads older than `ttl_seconds`.
+    /// Deletes associated parts and upload records.
+    /// Returns the count of reaped uploads.
+    pub fn reapExpiredUploads(self: *Self, ttl_seconds: i64) !usize {
+        // Query expired uploads.
+        const select_sql =
+            \\SELECT upload_id, bucket, key FROM multipart_uploads
+            \\WHERE initiated_at < datetime('now', '-' || ?1 || ' seconds');
+        ;
+        const select_stmt = try self.prepareStmt(select_sql);
+        defer self.finalizeStmt(select_stmt);
+        self.bindInt64(select_stmt, 1, ttl_seconds);
+
+        // Collect expired upload IDs (we need to iterate fully before modifying).
+        var expired_ids: std.ArrayList([]const u8) = .empty;
+        defer {
+            for (expired_ids.items) |id| self.allocator.free(id);
+            expired_ids.deinit(self.allocator);
+        }
+
+        while (c.sqlite3_step(select_stmt) == c.SQLITE_ROW) {
+            const upload_id = try self.columnTextDup(select_stmt, 0);
+            try expired_ids.append(self.allocator, upload_id);
+        }
+
+        // Delete parts and uploads for each expired upload.
+        for (expired_ids.items) |upload_id| {
+            const parts_sql = "DELETE FROM multipart_parts WHERE upload_id = ?1;";
+            const parts_stmt = try self.prepareStmt(parts_sql);
+            defer self.finalizeStmt(parts_stmt);
+            self.bindText(parts_stmt, 1, upload_id);
+            _ = c.sqlite3_step(parts_stmt);
+
+            const upload_sql = "DELETE FROM multipart_uploads WHERE upload_id = ?1;";
+            const upload_stmt = try self.prepareStmt(upload_sql);
+            defer self.finalizeStmt(upload_stmt);
+            self.bindText(upload_stmt, 1, upload_id);
+            _ = c.sqlite3_step(upload_stmt);
+        }
+
+        return expired_ids.items.len;
+    }
+
+    // =========================================================================
     // vtable + interface
     // =========================================================================
 
@@ -1641,4 +1688,73 @@ test "SqliteMetadataStore: object upsert replaces existing" {
     try std.testing.expectEqual(@as(u64, 20), o.size);
     try std.testing.expectEqualStrings("\"new\"", o.etag);
     try std.testing.expectEqualStrings("text/html", o.content_type);
+}
+
+test "SqliteMetadataStore: reapExpiredUploads with no expired uploads" {
+    var ms = try SqliteMetadataStore.init(std.testing.allocator, ":memory:");
+    defer ms.deinit();
+    const iface = ms.metadataStore();
+
+    try iface.createBucket(.{ .name = "reap-bucket", .creation_date = "2026-01-01T00:00:00.000Z", .region = "us-east-1", .owner_id = "owner" });
+
+    // Create a recent upload (initiated "now" via SQLite's datetime).
+    try iface.createMultipartUpload(.{
+        .upload_id = "recent-upload",
+        .bucket = "reap-bucket",
+        .key = "recent.bin",
+        .initiated = "2099-01-01T00:00:00.000Z",
+        .owner_id = "owner",
+    });
+
+    // Reap with 7-day TTL -- nothing should be reaped.
+    const reaped = try ms.reapExpiredUploads(604800);
+    try std.testing.expectEqual(@as(usize, 0), reaped);
+
+    // Upload should still exist.
+    const upload = try iface.getMultipartUpload("recent-upload");
+    try std.testing.expect(upload != null);
+    const u = upload.?;
+    std.testing.allocator.free(u.upload_id);
+    std.testing.allocator.free(u.bucket);
+    std.testing.allocator.free(u.key);
+    std.testing.allocator.free(u.content_type);
+    std.testing.allocator.free(u.storage_class);
+    std.testing.allocator.free(u.acl);
+    std.testing.allocator.free(u.user_metadata);
+    std.testing.allocator.free(u.owner_id);
+    std.testing.allocator.free(u.owner_display);
+    std.testing.allocator.free(u.initiated);
+}
+
+test "SqliteMetadataStore: reapExpiredUploads removes old uploads" {
+    var ms = try SqliteMetadataStore.init(std.testing.allocator, ":memory:");
+    defer ms.deinit();
+    const iface = ms.metadataStore();
+
+    try iface.createBucket(.{ .name = "reap-bucket2", .creation_date = "2026-01-01T00:00:00.000Z", .region = "us-east-1", .owner_id = "owner" });
+
+    // Create an old upload (well in the past).
+    try iface.createMultipartUpload(.{
+        .upload_id = "old-upload",
+        .bucket = "reap-bucket2",
+        .key = "old.bin",
+        .initiated = "2020-01-01T00:00:00.000Z",
+        .owner_id = "owner",
+    });
+
+    // Add a part to the old upload.
+    try iface.putPartMeta("old-upload", .{ .part_number = 1, .size = 1024, .etag = "\"part-etag\"", .last_modified = "2020-01-01T00:01:00.000Z" });
+
+    // Reap with 1-second TTL -- the old upload should be reaped.
+    const reaped = try ms.reapExpiredUploads(1);
+    try std.testing.expectEqual(@as(usize, 1), reaped);
+
+    // Upload should be gone.
+    const upload = try iface.getMultipartUpload("old-upload");
+    try std.testing.expect(upload == null);
+
+    // Parts should also be gone.
+    const parts_result = try iface.listPartsMeta("old-upload", 1000, 0);
+    defer std.testing.allocator.free(parts_result.parts);
+    try std.testing.expectEqual(@as(usize, 0), parts_result.parts.len);
 }

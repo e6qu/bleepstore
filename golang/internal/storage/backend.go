@@ -49,4 +49,7 @@ type StorageBackend interface {
 	// ObjectExists checks whether an object exists in the storage backend
 	// at the specified bucket and key. Returns true if the object exists.
 	ObjectExists(ctx context.Context, bucket, key string) (bool, error)
+
+	// HealthCheck verifies that the storage backend is operational.
+	HealthCheck(ctx context.Context) error
 }

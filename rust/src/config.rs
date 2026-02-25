@@ -34,6 +34,10 @@ pub struct Config {
     /// Logging settings.
     #[serde(default)]
     pub logging: LoggingConfig,
+
+    /// Observability settings (metrics + health probes).
+    #[serde(default)]
+    pub observability: ObservabilityConfig,
 }
 
 /// HTTP listener configuration.
@@ -89,6 +93,30 @@ impl Default for LoggingConfig {
         Self {
             level: default_log_level(),
             format: default_log_format(),
+        }
+    }
+}
+
+/// Observability settings.
+///
+/// Controls Prometheus metrics collection and Kubernetes-style health probes.
+/// Both are enabled by default.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ObservabilityConfig {
+    /// Enable Prometheus metrics collection and `/metrics` endpoint.
+    #[serde(default = "default_true")]
+    pub metrics: bool,
+
+    /// Enable `/healthz` and `/readyz` probes, and deep `/health` checks.
+    #[serde(default = "default_true")]
+    pub health_check: bool,
+}
+
+impl Default for ObservabilityConfig {
+    fn default() -> Self {
+        Self {
+            metrics: true,
+            health_check: true,
         }
     }
 }
@@ -260,6 +288,10 @@ pub struct ClusterConfig {
 }
 
 // -- Defaults ----------------------------------------------------------------
+
+fn default_true() -> bool {
+    true
+}
 
 fn default_host() -> String {
     "0.0.0.0".to_string()

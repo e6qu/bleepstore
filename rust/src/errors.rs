@@ -111,6 +111,38 @@ pub enum S3Error {
     #[error("Not Modified")]
     NotModified,
 
+    /// The Content-MD5 you specified did not match what we received.
+    #[error("The Content-MD5 you specified did not match what we received.")]
+    BadDigest,
+
+    /// The request body was incomplete.
+    #[error("You did not provide the number of bytes specified by the Content-Length HTTP header")]
+    IncompleteBody,
+
+    /// The Content-MD5 you specified is not valid.
+    #[error("The Content-MD5 you specified is not valid.")]
+    InvalidDigest,
+
+    /// The ACL XML you provided was not well-formed.
+    #[error("The XML you provided was not well-formed or did not validate against our published schema for ACLs.")]
+    MalformedACLError,
+
+    /// A request body is required but was not provided.
+    #[error("Request body is empty.")]
+    MissingRequestBodyError,
+
+    /// You have attempted to create more buckets than allowed.
+    #[error("You have attempted to create more buckets than allowed.")]
+    TooManyBuckets,
+
+    /// The service is temporarily unavailable.
+    #[error("Service is temporarily unavailable. Please slow down.")]
+    ServiceUnavailable,
+
+    /// The request time is too skewed from the server time.
+    #[error("The difference between the request time and the current time is too large.")]
+    RequestTimeTooSkewed,
+
     /// Catch-all for unexpected internal errors.
     #[error("We encountered an internal error, please try again.")]
     InternalError(#[from] anyhow::Error),
@@ -143,6 +175,14 @@ impl S3Error {
             S3Error::MissingContentLength => "MissingContentLength",
             S3Error::InvalidRange => "InvalidRange",
             S3Error::NotModified => "NotModified",
+            S3Error::BadDigest => "BadDigest",
+            S3Error::IncompleteBody => "IncompleteBody",
+            S3Error::InvalidDigest => "InvalidDigest",
+            S3Error::MalformedACLError => "MalformedACLError",
+            S3Error::MissingRequestBodyError => "MissingRequestBodyError",
+            S3Error::TooManyBuckets => "TooManyBuckets",
+            S3Error::ServiceUnavailable => "ServiceUnavailable",
+            S3Error::RequestTimeTooSkewed => "RequestTimeTooSkewed",
             S3Error::InternalError(_) => "InternalError",
         }
     }
@@ -173,6 +213,14 @@ impl S3Error {
             S3Error::MissingContentLength => StatusCode::LENGTH_REQUIRED,
             S3Error::InvalidRange => StatusCode::RANGE_NOT_SATISFIABLE,
             S3Error::NotModified => StatusCode::NOT_MODIFIED,
+            S3Error::BadDigest => StatusCode::BAD_REQUEST,
+            S3Error::IncompleteBody => StatusCode::BAD_REQUEST,
+            S3Error::InvalidDigest => StatusCode::BAD_REQUEST,
+            S3Error::MalformedACLError => StatusCode::BAD_REQUEST,
+            S3Error::MissingRequestBodyError => StatusCode::BAD_REQUEST,
+            S3Error::TooManyBuckets => StatusCode::BAD_REQUEST,
+            S3Error::ServiceUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+            S3Error::RequestTimeTooSkewed => StatusCode::FORBIDDEN,
             S3Error::InternalError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

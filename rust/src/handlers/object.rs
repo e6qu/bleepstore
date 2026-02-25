@@ -267,6 +267,40 @@ fn extract_content_type(headers: &HeaderMap) -> String {
         .to_string()
 }
 
+/// Validate the Content-MD5 header against the request body if present.
+///
+/// - Base64-decode the header value; return `InvalidDigest` if decode fails or result is not 16 bytes.
+/// - Compute MD5 of the body and compare; return `BadDigest` on mismatch.
+/// - If the header is absent, this is a no-op (returns Ok).
+fn validate_content_md5(headers: &HeaderMap, body: &[u8]) -> Result<(), S3Error> {
+    let md5_header = match headers.get("content-md5").and_then(|v| v.to_str().ok()) {
+        Some(v) => v,
+        None => return Ok(()),
+    };
+
+    // Base64-decode the provided MD5.
+    let decoded = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, md5_header)
+        .map_err(|_| S3Error::InvalidDigest)?;
+
+    // MD5 digest must be exactly 16 bytes.
+    if decoded.len() != 16 {
+        return Err(S3Error::InvalidDigest);
+    }
+
+    // Compute MD5 of the body.
+    use md5::{Digest, Md5};
+    let mut hasher = Md5::new();
+    hasher.update(body);
+    let computed = hasher.finalize();
+
+    // Compare.
+    if computed.as_slice() != decoded.as_slice() {
+        return Err(S3Error::BadDigest);
+    }
+
+    Ok(())
+}
+
 /// Build a default FULL_CONTROL ACL JSON for the given owner.
 fn default_acl_json(owner_id: &str, display_name: &str) -> String {
     let acl = Acl::full_control(owner_id, display_name);
@@ -331,6 +365,99 @@ fn canned_acl_to_json(canned: &str, owner_id: &str, display_name: &str) -> Resul
     };
 
     Ok(serde_json::to_string(&acl).unwrap_or_else(|_| "{}".to_string()))
+}
+
+/// Check whether any `x-amz-grant-*` headers are present.
+fn has_grant_headers(headers: &HeaderMap) -> bool {
+    headers.contains_key("x-amz-grant-full-control")
+        || headers.contains_key("x-amz-grant-read")
+        || headers.contains_key("x-amz-grant-read-acp")
+        || headers.contains_key("x-amz-grant-write")
+        || headers.contains_key("x-amz-grant-write-acp")
+}
+
+/// Validate that `x-amz-acl` and `x-amz-grant-*` headers are not both present.
+fn validate_acl_mode(headers: &HeaderMap) -> Result<(), S3Error> {
+    if headers.contains_key("x-amz-acl") && has_grant_headers(headers) {
+        return Err(S3Error::InvalidArgument {
+            message: "Specifying both x-amz-acl and x-amz-grant headers is not allowed".to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Parse `x-amz-grant-*` headers into an ACL JSON string.
+///
+/// Each header value is a comma-separated list of grantees in the form:
+///   `id="canonical-user-id"` or `uri="http://acs.amazonaws.com/groups/..."`
+///
+/// Returns `None` if no grant headers are present.
+fn parse_grant_headers(headers: &HeaderMap, owner_id: &str, display_name: &str) -> Option<String> {
+    if !has_grant_headers(headers) {
+        return None;
+    }
+
+    let mut grants = vec![AclGrant {
+        grantee: AclGrantee::CanonicalUser {
+            id: owner_id.to_string(),
+            display_name: display_name.to_string(),
+        },
+        permission: "FULL_CONTROL".to_string(),
+    }];
+
+    let grant_header_map: &[(&str, &str)] = &[
+        ("x-amz-grant-full-control", "FULL_CONTROL"),
+        ("x-amz-grant-read", "READ"),
+        ("x-amz-grant-read-acp", "READ_ACP"),
+        ("x-amz-grant-write", "WRITE"),
+        ("x-amz-grant-write-acp", "WRITE_ACP"),
+    ];
+
+    for (header_name, permission) in grant_header_map {
+        if let Some(value) = headers.get(*header_name).and_then(|v| v.to_str().ok()) {
+            for grantee_str in value.split(',') {
+                let grantee_str = grantee_str.trim();
+                if let Some(grant) = parse_single_grantee(grantee_str, permission) {
+                    grants.push(grant);
+                }
+            }
+        }
+    }
+
+    let acl = Acl {
+        owner: AclOwner {
+            id: owner_id.to_string(),
+            display_name: display_name.to_string(),
+        },
+        grants,
+    };
+
+    Some(serde_json::to_string(&acl).unwrap_or_else(|_| "{}".to_string()))
+}
+
+/// Parse a single grantee expression like `id="abc123"` or
+/// `uri="http://acs.amazonaws.com/groups/global/AllUsers"`.
+fn parse_single_grantee(grantee_str: &str, permission: &str) -> Option<AclGrant> {
+    let grantee_str = grantee_str.trim();
+
+    if let Some(rest) = grantee_str.strip_prefix("id=") {
+        let id = rest.trim_matches('"').trim_matches('\'').to_string();
+        Some(AclGrant {
+            grantee: AclGrantee::CanonicalUser {
+                id: id.clone(),
+                display_name: id,
+            },
+            permission: permission.to_string(),
+        })
+    } else if let Some(rest) = grantee_str.strip_prefix("uri=") {
+        let uri = rest.trim_matches('"').trim_matches('\'').to_string();
+        Some(AclGrant {
+            grantee: AclGrantee::Group { uri },
+            permission: permission.to_string(),
+        })
+    } else {
+        None
+    }
 }
 
 /// Convert an ISO-8601 timestamp to RFC 7231 format for Last-Modified header.
@@ -415,6 +542,13 @@ pub async fn put_object(
         });
     }
 
+    // If-None-Match: * — fail if object already exists (conditional PUT).
+    if let Some(if_none_match) = headers.get("if-none-match").and_then(|v| v.to_str().ok()) {
+        if if_none_match.trim() == "*" && state.metadata.object_exists(bucket, key).await? {
+            return Err(S3Error::PreconditionFailed);
+        }
+    }
+
     // Validate key length (max 1024 bytes).
     if key.len() > 1024 {
         return Err(S3Error::KeyTooLongError);
@@ -424,6 +558,9 @@ pub async fn put_object(
     if body.len() as u64 > state.config.server.max_object_size {
         return Err(S3Error::EntityTooLarge);
     }
+
+    // Validate Content-MD5 header if present.
+    validate_content_md5(headers, body)?;
 
     let data = bytes::Bytes::copy_from_slice(body);
     let size = data.len() as u64;
@@ -452,12 +589,17 @@ pub async fn put_object(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
-    // Determine ACL from x-amz-acl header or default to private.
+    // Validate mutually exclusive ACL modes.
+    validate_acl_mode(headers)?;
+
+    // Determine ACL from x-amz-acl header, x-amz-grant-* headers, or default.
     let owner_id = state.config.auth.access_key.clone();
     let owner_display = state.config.auth.access_key.clone();
     let acl_json = if let Some(canned) = headers.get("x-amz-acl") {
         let canned_str = canned.to_str().unwrap_or("private");
         canned_acl_to_json(canned_str, &owner_id, &owner_display)?
+    } else if let Some(grant_acl) = parse_grant_headers(headers, &owner_id, &owner_display) {
+        grant_acl
     } else {
         default_acl_json(&owner_id, &owner_display)
     };
@@ -800,6 +942,7 @@ pub async fn delete_object(
 pub async fn delete_objects(
     state: Arc<AppState>,
     bucket: &str,
+    headers: &HeaderMap,
     body: &[u8],
 ) -> Result<Response, S3Error> {
     // Check bucket exists.
@@ -808,6 +951,9 @@ pub async fn delete_objects(
             bucket: bucket.to_string(),
         });
     }
+
+    // Validate Content-MD5 if present (technically required by AWS, but allow missing for compatibility).
+    validate_content_md5(headers, body)?;
 
     // Parse the <Delete> XML body.
     let (keys, quiet) = parse_delete_xml(body)?;
@@ -1366,15 +1512,20 @@ pub async fn put_object_acl(
             key: key.to_string(),
         })?;
 
-    // Determine new ACL from x-amz-acl header (canned ACL) or keep existing.
+    // Validate mutually exclusive ACL modes.
+    validate_acl_mode(headers)?;
+
+    // Determine new ACL from x-amz-acl header, x-amz-grant-* headers, or default.
     let owner_id = state.config.auth.access_key.clone();
     let owner_display = state.config.auth.access_key.clone();
 
     let acl_json = if let Some(canned) = headers.get("x-amz-acl") {
         let canned_str = canned.to_str().unwrap_or("private");
         canned_acl_to_json(canned_str, &owner_id, &owner_display)?
+    } else if let Some(grant_acl) = parse_grant_headers(headers, &owner_id, &owner_display) {
+        grant_acl
     } else {
-        // If no canned ACL header, default to private.
+        // If no canned ACL or grant headers, default to private.
         default_acl_json(&owner_id, &owner_display)
     };
 

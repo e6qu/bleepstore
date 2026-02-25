@@ -429,3 +429,19 @@ class MetadataStore(Protocol):
             The number of objects in the bucket.
         """
         ...
+
+    async def reap_expired_uploads(self, ttl_seconds: int = 604800) -> list[dict]:
+        """Delete expired multipart uploads and their parts from metadata.
+
+        Finds uploads older than ``ttl_seconds`` (default 7 days), deletes
+        their part records and upload records, and returns details of the
+        reaped uploads so callers can clean up storage.
+
+        Args:
+            ttl_seconds: Maximum age of uploads in seconds before reaping.
+
+        Returns:
+            A list of dicts with ``upload_id``, ``bucket``, and ``key`` for
+            each reaped upload.
+        """
+        ...

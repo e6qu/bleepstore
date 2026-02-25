@@ -197,7 +197,7 @@ var (
 	// ErrServiceUnavailable is returned when the service is temporarily unavailable.
 	ErrServiceUnavailable = &S3Error{
 		Code:       "ServiceUnavailable",
-		Message:    "Service is unable to handle request",
+		Message:    "Service is not available. Please retry.",
 		HTTPStatus: 503,
 	}
 
@@ -212,6 +212,48 @@ var (
 	ErrInvalidRequest = &S3Error{
 		Code:       "InvalidRequest",
 		Message:    "Invalid Request",
+		HTTPStatus: 400,
+	}
+
+	// ErrBadDigest is returned when the Content-MD5 does not match the body.
+	ErrBadDigest = &S3Error{
+		Code:       "BadDigest",
+		Message:    "The Content-MD5 you specified did not match what we received",
+		HTTPStatus: 400,
+	}
+
+	// ErrIncompleteBody is returned when the body is shorter than Content-Length.
+	ErrIncompleteBody = &S3Error{
+		Code:       "IncompleteBody",
+		Message:    "You did not provide the number of bytes specified by the Content-Length HTTP header",
+		HTTPStatus: 400,
+	}
+
+	// ErrInvalidDigest is returned when the Content-MD5 header is not valid base64 or wrong length.
+	ErrInvalidDigest = &S3Error{
+		Code:       "InvalidDigest",
+		Message:    "The Content-MD5 you specified is not valid",
+		HTTPStatus: 400,
+	}
+
+	// ErrMalformedACLError is returned when the ACL XML is not well-formed.
+	ErrMalformedACLError = &S3Error{
+		Code:       "MalformedACLError",
+		Message:    "The XML you provided for the ACL is not well-formed or did not validate",
+		HTTPStatus: 400,
+	}
+
+	// ErrMissingRequestBodyError is returned when the request body is empty but required.
+	ErrMissingRequestBodyError = &S3Error{
+		Code:       "MissingRequestBodyError",
+		Message:    "Request body is empty",
+		HTTPStatus: 400,
+	}
+
+	// ErrTooManyBuckets is returned when the maximum number of buckets is exceeded.
+	ErrTooManyBuckets = &S3Error{
+		Code:       "TooManyBuckets",
+		Message:    "You have attempted to create more buckets than allowed",
 		HTTPStatus: 400,
 	}
 )

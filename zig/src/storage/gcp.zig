@@ -760,6 +760,11 @@ pub const GcpGatewayBackend = struct {
         current_sources.clearAndFree(self.allocator);
     }
 
+    fn healthCheck(ctx: *anyopaque) anyerror!void {
+        // Gateway mode: assume upstream is reachable (no-op probe).
+        _ = getSelf(ctx);
+    }
+
     const vtable_instance = StorageBackend.VTable{
         .putObject = putObject,
         .getObject = getObject,
@@ -771,6 +776,7 @@ pub const GcpGatewayBackend = struct {
         .deleteParts = deleteParts,
         .createBucket = createBucket,
         .deleteBucket = deleteBucket,
+        .healthCheck = healthCheck,
     };
 
     pub fn storageBackend(self: *Self) StorageBackend {
@@ -1132,6 +1138,7 @@ test "GcpGatewayBackend: vtable is complete" {
     try std.testing.expect(@intFromPtr(vt.deleteParts) != 0);
     try std.testing.expect(@intFromPtr(vt.createBucket) != 0);
     try std.testing.expect(@intFromPtr(vt.deleteBucket) != 0);
+    try std.testing.expect(@intFromPtr(vt.healthCheck) != 0);
 }
 
 test "GcpGatewayBackend: isUnreserved" {

@@ -92,8 +92,24 @@ func (h *BucketHandler) CreateBucket(w http.ResponseWriter, r *http.Request) {
 	// Parse optional canned ACL from header.
 	cannedACL := r.Header.Get("x-amz-acl")
 
-	// Build ACL: if canned ACL specified, use it; otherwise default to private.
-	acp := parseCannedACL(cannedACL, h.ownerID, h.ownerDisplay)
+	// Validate mutually exclusive ACL modes: canned ACL and grant headers
+	// cannot be specified together.
+	if cannedACL != "" && hasGrantHeaders(r.Header) {
+		xmlutil.WriteErrorResponse(w, r, &s3err.S3Error{
+			Code:       "InvalidArgument",
+			Message:    "Specifying both x-amz-acl and x-amz-grant headers is not allowed",
+			HTTPStatus: 400,
+		})
+		return
+	}
+
+	// Build ACL from grant headers, canned ACL, or default private.
+	var acp *xmlutil.AccessControlPolicy
+	if hasGrantHeaders(r.Header) {
+		acp = parseGrantHeaders(r.Header, h.ownerID, h.ownerDisplay)
+	} else {
+		acp = parseCannedACL(cannedACL, h.ownerID, h.ownerDisplay)
+	}
 	aclJSON := aclToJSON(acp)
 
 	// Determine region from request body (CreateBucketConfiguration) or config.
@@ -316,16 +332,30 @@ func (h *BucketHandler) PutBucketAcl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate mutually exclusive ACL modes: canned ACL and grant headers
+	// cannot be specified together.
+	cannedACL := r.Header.Get("x-amz-acl")
+	if cannedACL != "" && hasGrantHeaders(r.Header) {
+		xmlutil.WriteErrorResponse(w, r, &s3err.S3Error{
+			Code:       "InvalidArgument",
+			Message:    "Specifying both x-amz-acl and x-amz-grant headers is not allowed",
+			HTTPStatus: 400,
+		})
+		return
+	}
+
 	var acp *xmlutil.AccessControlPolicy
 
 	// Three mutually exclusive modes:
 	// 1. Canned ACL via x-amz-acl header
 	// 2. Explicit grants via x-amz-grant-* headers
 	// 3. XML body
-	cannedACL := r.Header.Get("x-amz-acl")
 	if cannedACL != "" {
 		// Mode 1: Canned ACL.
 		acp = parseCannedACL(cannedACL, bucket.OwnerID, bucket.OwnerDisplay)
+	} else if hasGrantHeaders(r.Header) {
+		// Mode 2: Explicit grants via x-amz-grant-* headers.
+		acp = parseGrantHeaders(r.Header, bucket.OwnerID, bucket.OwnerDisplay)
 	} else if r.ContentLength > 0 {
 		// Mode 3: XML body.
 		body, readErr := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MB max
@@ -339,7 +369,7 @@ func (h *BucketHandler) PutBucketAcl(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		// No canned ACL and no body: default to private.
+		// No canned ACL, no grant headers, and no body: default to private.
 		acp = parseCannedACL("private", bucket.OwnerID, bucket.OwnerDisplay)
 	}
 

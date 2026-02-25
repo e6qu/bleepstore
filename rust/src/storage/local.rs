@@ -24,12 +24,44 @@ impl LocalBackend {
     /// Create a new `LocalBackend` rooted at `root`.
     ///
     /// The directory will be created if it does not exist.
+    /// On startup, cleans up orphaned temp files from previous crashes.
     pub fn new(root: impl Into<PathBuf>) -> anyhow::Result<Self> {
         let root = root.into();
         std::fs::create_dir_all(&root)?;
         // Also create the .tmp directory for atomic writes.
         std::fs::create_dir_all(root.join(".tmp"))?;
-        Ok(Self { root })
+        let backend = Self { root };
+        // Crash-only recovery: clean up orphaned temp files from previous runs.
+        backend.clean_temp_files();
+        Ok(backend)
+    }
+
+    /// Remove all files in the `.tmp` directory.
+    ///
+    /// Called on startup as part of crash-only recovery. Any temp files left
+    /// behind indicate incomplete writes from a previous crash.
+    fn clean_temp_files(&self) {
+        let tmp_dir = self.root.join(".tmp");
+        let entries = match std::fs::read_dir(&tmp_dir) {
+            Ok(entries) => entries,
+            Err(_) => return,
+        };
+
+        let mut count = 0u64;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && std::fs::remove_file(&path).is_ok() {
+                count += 1;
+            }
+        }
+
+        if count > 0 {
+            tracing::info!(
+                "Cleaned up {} orphaned temp file(s) from {:?}",
+                count,
+                tmp_dir
+            );
+        }
     }
 
     /// Resolve a storage key to an absolute file path.
@@ -67,6 +99,20 @@ impl LocalBackend {
     fn temp_path(&self) -> PathBuf {
         let id = uuid::Uuid::new_v4();
         self.root.join(".tmp").join(format!("tmp-{id}"))
+    }
+}
+
+impl LocalBackend {
+    /// Delete the parts directory for a specific multipart upload.
+    ///
+    /// Used during expired upload reaping to clean up orphaned part files.
+    /// Idempotent: if the directory does not exist, returns Ok.
+    pub fn delete_upload_parts(&self, _bucket: &str, upload_id: &str) -> anyhow::Result<()> {
+        let part_dir = self.root.join(".multipart").join(upload_id);
+        if part_dir.exists() {
+            std::fs::remove_dir_all(&part_dir)?;
+        }
+        Ok(())
     }
 }
 

@@ -13,7 +13,7 @@ class TestHealthCheck:
         """GET /health returns JSON with status ok."""
         resp = await client.get("/health")
         data = resp.json()
-        assert data == {"status": "ok"}
+        assert data["status"] == "ok"
 
     async def test_health_has_common_headers(self, client):
         """GET /health includes common S3 headers."""

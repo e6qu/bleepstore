@@ -56,6 +56,7 @@ pub const StorageBackend = struct {
         deleteParts: *const fn (ctx: *anyopaque, bucket: []const u8, upload_id: []const u8) anyerror!void,
         createBucket: *const fn (ctx: *anyopaque, bucket: []const u8) anyerror!void,
         deleteBucket: *const fn (ctx: *anyopaque, bucket: []const u8) anyerror!void,
+        healthCheck: *const fn (ctx: *anyopaque) anyerror!void,
     };
 
     // --- Convenience wrappers ---
@@ -98,5 +99,9 @@ pub const StorageBackend = struct {
 
     pub fn deleteBucket(self: StorageBackend, bucket: []const u8) !void {
         return self.vtable.deleteBucket(self.ctx, bucket);
+    }
+
+    pub fn healthCheck(self: StorageBackend) !void {
+        return self.vtable.healthCheck(self.ctx);
     }
 };

@@ -185,6 +185,50 @@ impl SqliteMetadataStore {
         )?;
         Ok(())
     }
+
+    /// Reap expired multipart uploads older than `ttl_seconds`.
+    ///
+    /// Deletes both multipart_parts and multipart_uploads rows for each
+    /// expired upload in a single transaction. Returns the number of
+    /// reaped uploads and their (upload_id, bucket, key) tuples so the
+    /// caller can also clean up storage.
+    pub fn reap_expired_uploads(
+        &self,
+        ttl_seconds: i64,
+    ) -> anyhow::Result<Vec<(String, String, String)>> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let tx = conn.unchecked_transaction()?;
+
+        // Find expired uploads. Scope the statement so it's dropped before commit.
+        let expired: Vec<(String, String, String)> = {
+            let mut stmt = tx.prepare(
+                "SELECT upload_id, bucket, key FROM multipart_uploads
+                 WHERE initiated_at < datetime('now', '-' || ?1 || ' seconds')",
+            )?;
+
+            let result = stmt
+                .query_map(params![ttl_seconds], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            result
+        };
+
+        // Delete parts and uploads for each expired upload.
+        for (upload_id, _, _) in &expired {
+            tx.execute(
+                "DELETE FROM multipart_parts WHERE upload_id = ?1",
+                params![upload_id],
+            )?;
+            tx.execute(
+                "DELETE FROM multipart_uploads WHERE upload_id = ?1",
+                params![upload_id],
+            )?;
+        }
+
+        tx.commit()?;
+        Ok(expired)
+    }
 }
 
 /// Get current time as ISO-8601 string (e.g., "2026-02-23T12:00:00.000Z").

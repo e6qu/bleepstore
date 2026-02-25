@@ -1,0 +1,21 @@
+[DEFAULT]
+host = {host}
+port = {port}
+is_secure = false
+
+[fixtures]
+bucket prefix = s3test-
+
+[s3 main]
+display_name = BleepStore
+user_id = bleepstore
+email = bleepstore@test.local
+access_key = {access_key}
+secret_key = {secret_key}
+
+[s3 alt]
+display_name = BleepStore Alt
+user_id = bleepstore-alt
+email = alt@test.local
+access_key = {access_key}
+secret_key = {secret_key}

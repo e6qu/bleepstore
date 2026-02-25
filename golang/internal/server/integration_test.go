@@ -64,6 +64,10 @@ func newIntegrationServer(t *testing.T) *integrationServer {
 			Backend: "local",
 			Local:   config.LocalConfig{RootDir: storageDir},
 		},
+		Observability: config.ObservabilityConfig{
+			Metrics:     true,
+			HealthCheck: true,
+		},
 	}
 
 	metaStore, err := metadata.NewSQLiteStore(dbPath)

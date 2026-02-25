@@ -3,9 +3,13 @@ package metrics
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
+
+// registerOnce ensures Register() is idempotent.
+var registerOnce sync.Once
 
 // sizeBuckets are exponential buckets for request/response size histograms (bytes).
 var sizeBuckets = []float64{256, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216, 67108864}
@@ -96,18 +100,27 @@ var (
 	)
 )
 
-func init() {
-	prometheus.MustRegister(
-		HTTPRequestsTotal,
-		HTTPRequestDuration,
-		HTTPRequestSize,
-		HTTPResponseSize,
-		S3OperationsTotal,
-		ObjectsTotal,
-		BucketsTotal,
-		BytesReceivedTotal,
-		BytesSentTotal,
-	)
+// Register registers all Prometheus collectors with the default registry.
+// This must be called explicitly (typically from main) so that metrics
+// registration can be made conditional on configuration. It is safe to call
+// multiple times; subsequent calls are no-ops.
+func Register() {
+	registerOnce.Do(func() {
+		prometheus.MustRegister(
+			HTTPRequestsTotal,
+			HTTPRequestDuration,
+			HTTPRequestSize,
+			HTTPResponseSize,
+			S3OperationsTotal,
+			ObjectsTotal,
+			BucketsTotal,
+			BytesReceivedTotal,
+			BytesSentTotal,
+		)
+		// Initialize S3OperationsTotal so it appears in /metrics output
+		// even before any S3 operations have been performed.
+		S3OperationsTotal.WithLabelValues("ListBuckets", "success")
+	})
 }
 
 // NormalizePath maps actual request paths to normalized path templates
@@ -118,12 +131,16 @@ func NormalizePath(path string) string {
 	switch path {
 	case "/health":
 		return "/health"
+	case "/healthz":
+		return "/healthz"
+	case "/readyz":
+		return "/readyz"
 	case "/docs", "/docs/":
 		return "/docs"
 	case "/metrics":
 		return "/metrics"
 	case "/openapi.json":
-		return "/openapi"
+		return "/openapi.json"
 	case "/", "":
 		return "/"
 	}

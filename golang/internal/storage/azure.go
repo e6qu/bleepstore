@@ -301,6 +301,12 @@ func (b *AzureGatewayBackend) ObjectExists(ctx context.Context, bucket, key stri
 	return exists, nil
 }
 
+// HealthCheck verifies that the upstream Azure Blob container is accessible.
+func (b *AzureGatewayBackend) HealthCheck(ctx context.Context) error {
+	_, err := b.client.BlobExists(ctx, b.Container, "\x00nonexistent\x00")
+	return err
+}
+
 // isAzureNotFound checks if an Azure error is a not-found error.
 func isAzureNotFound(err error) bool {
 	if err == nil {

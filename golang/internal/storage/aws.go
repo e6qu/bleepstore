@@ -462,6 +462,14 @@ func (b *AWSGatewayBackend) ObjectExists(ctx context.Context, bucket, key string
 	return true, nil
 }
 
+// HealthCheck verifies that the upstream S3 bucket is accessible.
+func (b *AWSGatewayBackend) HealthCheck(ctx context.Context) error {
+	_, err := b.client.HeadBucket(ctx, &s3.HeadBucketInput{
+		Bucket: aws.String(b.Bucket),
+	})
+	return err
+}
+
 // isAWSNotFound checks if an AWS error is a 404/NoSuchKey/NotFound error.
 func isAWSNotFound(err error) bool {
 	var apiErr smithy.APIError

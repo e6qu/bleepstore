@@ -3,14 +3,16 @@
 import base64
 import email.utils
 import hashlib
+import json
 import logging
 import secrets
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
-from prometheus_fastapi_instrumentator import Instrumentator
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from bleepstore.auth import SigV4Authenticator
 from bleepstore.config import BleepStoreConfig
@@ -23,21 +25,47 @@ from bleepstore.storage.backend import StorageBackend
 from bleepstore.storage.local import LocalStorageBackend
 from bleepstore.xml_utils import render_error, xml_response
 
-# Ensure custom metrics are registered in the Prometheus default registry on
-# import.  The metrics module defines module-level Counter/Gauge/Histogram
-# objects that are created when first imported.
-import bleepstore.metrics as _metrics  # noqa: F401
-
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Canonical OpenAPI spec loader
+# ---------------------------------------------------------------------------
+
+_CANONICAL_SPEC_PATH = Path(__file__).resolve().parents[3] / "schemas" / "s3-api.openapi.json"
+
+
+def _load_openapi_spec(port: int = 9000) -> dict:
+    """Load the canonical OpenAPI spec from schemas/s3-api.openapi.json.
+
+    Patches the ``servers`` array to point at the local BleepStore instance.
+
+    Args:
+        port: The port the server is listening on (used for the servers URL).
+
+    Returns:
+        The parsed and patched OpenAPI spec as a dict.
+    """
+    with open(_CANONICAL_SPEC_PATH) as f:
+        spec = json.load(f)
+    spec["servers"] = [
+        {
+            "url": f"http://localhost:{port}",
+            "description": "BleepStore Python",
+        }
+    ]
+    return spec
+
 
 # Module-level singleton so multiple create_app() calls (e.g. in tests)
 # don't re-register the same Prometheus gauge in the global registry.
-_instrumentator: Instrumentator | None = None
+_instrumentator = None
 
 
-def _get_instrumentator() -> Instrumentator:
+def _get_instrumentator():
     global _instrumentator
     if _instrumentator is None:
+        from prometheus_fastapi_instrumentator import Instrumentator
+
         _instrumentator = Instrumentator(
             should_instrument_requests_inprogress=True,
             excluded_handlers=["/metrics"],
@@ -102,6 +130,33 @@ def create_app(config: BleepStoreConfig) -> FastAPI:
             region=config.server.region,
         )
 
+        # Reap expired multipart uploads (crash-only: clean up on startup)
+        reaped_uploads = await metadata.reap_expired_uploads()
+        if reaped_uploads:
+            # Clean up storage files for reaped uploads
+            for upload in reaped_uploads:
+                try:
+                    if hasattr(storage, "delete_upload_parts"):
+                        await storage.delete_upload_parts(upload["upload_id"])
+                    else:
+                        await storage.delete_parts(
+                            upload["bucket"], upload["key"], upload["upload_id"]
+                        )
+                except Exception:
+                    logger.warning(
+                        "Failed to clean storage for reaped upload %s",
+                        upload["upload_id"],
+                    )
+            logger.info("Reaped %d expired multipart uploads", len(reaped_uploads))
+
+        # Load canonical OpenAPI spec with patched server URL
+        try:
+            app.state.openapi_spec = _load_openapi_spec(port=config.server.port)
+            logger.info("Loaded canonical OpenAPI spec from %s", _CANONICAL_SPEC_PATH)
+        except FileNotFoundError:
+            logger.warning("Canonical OpenAPI spec not found at %s", _CANONICAL_SPEC_PATH)
+            app.state.openapi_spec = None
+
         logger.info("Metadata store initialized, credentials seeded")
         logger.info("Storage backend initialized: %s", config.storage.backend)
 
@@ -112,22 +167,35 @@ def create_app(config: BleepStoreConfig) -> FastAPI:
         await metadata.close()
         logger.info("Metadata store and storage backend closed")
 
-    app = FastAPI(title="BleepStore S3 API", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(
+        title="BleepStore S3 API",
+        version="0.1.0",
+        lifespan=lifespan,
+        openapi_url=None,
+        docs_url=None,
+        redoc_url=None,
+    )
     app.state.config = config
 
     # Register exception handler for S3Error
     _register_exception_handlers(app)
 
     # Register middleware for common headers
-    _register_middleware(app)
+    _register_middleware(app, config)
 
     # Wire Prometheus metrics instrumentation BEFORE S3 routes so /metrics
     # is registered first and not shadowed by the /{bucket} catch-all.
-    _get_instrumentator().instrument(app).expose(app, endpoint="/metrics")
+    if config.observability.metrics:
+        import bleepstore.metrics as _metrics
+
+        _metrics.init_metrics()
+        _get_instrumentator().instrument(app, metric_namespace="bleepstore").expose(
+            app, endpoint="/metrics"
+        )
 
     # Register all routes (S3 catch-all routes like /{bucket} must come after
     # fixed routes like /health and /metrics)
-    _setup_routes(app)
+    _setup_routes(app, config)
 
     return app
 
@@ -275,7 +343,7 @@ def _register_exception_handlers(app: FastAPI) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _register_middleware(app: FastAPI) -> None:
+def _register_middleware(app: FastAPI, config: BleepStoreConfig) -> None:
     """Register middleware on the FastAPI app.
 
     In FastAPI, middleware is registered in reverse order (last registered
@@ -286,12 +354,17 @@ def _register_middleware(app: FastAPI) -> None:
     # Paths that skip auth -- health, metrics, docs, openapi
     AUTH_SKIP_PATHS = {
         "/health",
+        "/healthz",
+        "/readyz",
         "/metrics",
         "/docs",
-        "/docs/oauth2-redirect",
         "/openapi.json",
-        "/redoc",
     }
+
+    # Paths to suppress from per-request logging
+    _QUIET_PATHS = {"/metrics", "/health", "/healthz", "/readyz"}
+
+    metrics_enabled = config.observability.metrics
 
     @app.middleware("http")
     async def common_headers_middleware(request: Request, call_next) -> Response:
@@ -300,6 +373,9 @@ def _register_middleware(app: FastAPI) -> None:
         Generates x-amz-request-id (16-char uppercase hex), x-amz-id-2 (base64),
         Date (RFC 1123), and Server header. Stores request_id on request.state
         so exception handlers can use it.
+
+        When metrics are enabled, also observes request/response body sizes in
+        the size histograms and increments byte counters.
         """
         request_id = secrets.token_hex(8).upper()
         request.state.request_id = request_id
@@ -314,8 +390,39 @@ def _register_middleware(app: FastAPI) -> None:
         response.headers["Date"] = email.utils.formatdate(usegmt=True)
         response.headers["Server"] = "BleepStore"
 
-        # Per-request structured log (skip /metrics and /health to reduce noise)
-        if request.url.path not in ("/metrics", "/health"):
+        # Track byte counters when enabled (best-effort, never block request).
+        # Size histograms (http_request_size_bytes, http_response_size_bytes)
+        # are handled by the prometheus-fastapi-instrumentator middleware.
+        if metrics_enabled:
+            try:
+                import bleepstore.metrics as _m
+
+                # Request bytes from Content-Length header
+                req_size = 0
+                cl = request.headers.get("content-length")
+                if cl:
+                    try:
+                        req_size = int(cl)
+                    except (ValueError, TypeError):
+                        pass
+                if req_size > 0 and _m.bytes_received_total is not None:
+                    _m.bytes_received_total.inc(req_size)
+
+                # Response bytes from Content-Length header
+                resp_size = 0
+                rcl = response.headers.get("content-length")
+                if rcl:
+                    try:
+                        resp_size = int(rcl)
+                    except (ValueError, TypeError):
+                        pass
+                if resp_size > 0 and _m.bytes_sent_total is not None:
+                    _m.bytes_sent_total.inc(resp_size)
+            except Exception:
+                pass  # Best-effort: never block a request for metrics
+
+        # Per-request structured log (skip noisy endpoints)
+        if request.url.path not in _QUIET_PATHS:
             logger.info(
                 "%s %s %d %.2fms",
                 request.method,
@@ -393,11 +500,61 @@ def _register_middleware(app: FastAPI) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Health check helpers
+# ---------------------------------------------------------------------------
+
+
+async def _check_metadata(app: FastAPI) -> dict:
+    """Probe the metadata store with ``SELECT 1``.
+
+    Returns a dict with ``status`` and ``latency_ms`` keys.
+    """
+    metadata = getattr(app.state, "metadata", None)
+    if metadata is None:
+        return {"status": "error", "error": "metadata store not initialized", "latency_ms": 0}
+    try:
+        start = time.monotonic()
+        db = metadata._db
+        if db is None:
+            return {"status": "error", "error": "database connection closed", "latency_ms": 0}
+        async with db.execute("SELECT 1") as cursor:
+            await cursor.fetchone()
+        latency = round((time.monotonic() - start) * 1000, 1)
+        return {"status": "ok", "latency_ms": latency}
+    except Exception as exc:
+        return {"status": "error", "error": str(exc), "latency_ms": 0}
+
+
+async def _check_storage(app: FastAPI) -> dict:
+    """Probe the storage backend (check root directory exists).
+
+    Returns a dict with ``status`` and ``latency_ms`` keys.
+    """
+    storage = getattr(app.state, "storage", None)
+    if storage is None:
+        return {"status": "error", "error": "storage backend not initialized", "latency_ms": 0}
+    try:
+        start = time.monotonic()
+        root = getattr(storage, "root", None)
+        if root is not None:
+            if not Path(root).is_dir():
+                return {
+                    "status": "error",
+                    "error": "data directory not found",
+                    "latency_ms": round((time.monotonic() - start) * 1000, 1),
+                }
+        latency = round((time.monotonic() - start) * 1000, 1)
+        return {"status": "ok", "latency_ms": latency}
+    except Exception as exc:
+        return {"status": "error", "error": str(exc), "latency_ms": 0}
+
+
+# ---------------------------------------------------------------------------
 # Route handlers
 # ---------------------------------------------------------------------------
 
 
-def _setup_routes(app: FastAPI) -> None:
+def _setup_routes(app: FastAPI, config: BleepStoreConfig) -> None:
     """Register all S3-compatible routes on the application.
 
     Bucket operations are wired to BucketHandler. Object operations for
@@ -406,19 +563,98 @@ def _setup_routes(app: FastAPI) -> None:
 
     Args:
         app: The FastAPI application to attach routes to.
+        config: The BleepStore configuration.
     """
     bucket_handler = BucketHandler(app)
     object_handler = ObjectHandler(app)
     multipart_handler = MultipartHandler(app)
 
-    # Health check (non-S3)
+    health_check_enabled = config.observability.health_check
+
+    # Health check (non-S3) -- always served, behaviour depends on config
     @app.get("/health")
-    async def health_check() -> dict:
+    async def health_check(request: Request) -> Response:
         """Return health status.
 
-        GET /health -> {"status": "ok"}
+        When health_check is enabled: deep-probe metadata and storage,
+        return JSON with component checks and latency_ms.
+        When disabled: return static ``{"status": "ok"}``.
         """
-        return {"status": "ok"}
+        if not health_check_enabled:
+            return Response(
+                content='{"status":"ok"}',
+                media_type="application/json",
+            )
+
+        meta_check = await _check_metadata(app)
+        storage_check = await _check_storage(app)
+        all_ok = meta_check["status"] == "ok" and storage_check["status"] == "ok"
+
+        body = json.dumps(
+            {
+                "status": "ok" if all_ok else "degraded",
+                "checks": {
+                    "metadata": meta_check,
+                    "storage": storage_check,
+                },
+            }
+        )
+        return Response(
+            content=body,
+            status_code=200 if all_ok else 503,
+            media_type="application/json",
+        )
+
+    # Kubernetes liveness probe
+    if health_check_enabled:
+
+        @app.get("/healthz")
+        async def healthz() -> Response:
+            """Liveness probe. Returns 200 with empty body."""
+            return Response(status_code=200)
+
+        @app.get("/readyz")
+        async def readyz() -> Response:
+            """Readiness probe. Probes metadata and storage.
+
+            Returns 200 (empty) if all pass, 503 (empty) if any fail.
+            """
+            meta_check = await _check_metadata(app)
+            storage_check = await _check_storage(app)
+            all_ok = meta_check["status"] == "ok" and storage_check["status"] == "ok"
+            return Response(status_code=200 if all_ok else 503)
+
+    # OpenAPI spec and Swagger UI (canonical spec from schemas/)
+    @app.get("/openapi.json")
+    async def openapi_json() -> Response:
+        """Serve the canonical OpenAPI spec (patched with local server URL)."""
+        spec = getattr(app.state, "openapi_spec", None)
+        if spec is None:
+            # Lazy-load if lifespan didn't run (e.g. tests without lifespan)
+            spec = _load_openapi_spec(port=config.server.port)
+            app.state.openapi_spec = spec
+        return JSONResponse(content=spec)
+
+    @app.get("/docs")
+    async def swagger_ui() -> Response:
+        """Serve Swagger UI pointing at the canonical OpenAPI spec."""
+        html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>BleepStore API - Swagger UI</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui.css">
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui-bundle.js"></script>
+  <script>
+    SwaggerUIBundle({ url: '/openapi.json', dom_id: '#swagger-ui',
+      presets: [SwaggerUIBundle.presets.apis], layout: 'BaseLayout' });
+  </script>
+</body>
+</html>"""
+        return HTMLResponse(content=html)
 
     # Service-level
     @app.get("/")

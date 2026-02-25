@@ -66,4 +66,5 @@ class TestMetricsEndpoint:
         """/health continues to work after metrics are wired."""
         resp = await client.get("/health")
         assert resp.status_code == 200
-        assert resp.json() == {"status": "ok"}
+        data = resp.json()
+        assert data["status"] == "ok"

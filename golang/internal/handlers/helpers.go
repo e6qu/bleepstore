@@ -168,6 +168,102 @@ func parseCannedACL(cannedACL, ownerID, ownerDisplay string) *xmlutil.AccessCont
 	return acp
 }
 
+// grantHeaderMap maps x-amz-grant-* header names to the corresponding S3
+// permission string.
+var grantHeaderMap = map[string]string{
+	"X-Amz-Grant-Full-Control": "FULL_CONTROL",
+	"X-Amz-Grant-Read":         "READ",
+	"X-Amz-Grant-Read-Acp":     "READ_ACP",
+	"X-Amz-Grant-Write":        "WRITE",
+	"X-Amz-Grant-Write-Acp":    "WRITE_ACP",
+}
+
+// hasGrantHeaders returns true if any x-amz-grant-* header is present in the request.
+func hasGrantHeaders(headers http.Header) bool {
+	for headerName := range grantHeaderMap {
+		if headers.Get(headerName) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// parseGrantHeaders parses x-amz-grant-* headers into an AccessControlPolicy.
+// The header values use the format: id="canonical-user-id" or
+// uri="http://acs.amazonaws.com/groups/...", comma-separated for multiple grantees.
+// Returns nil if no grant headers are present.
+func parseGrantHeaders(headers http.Header, ownerID, ownerDisplay string) *xmlutil.AccessControlPolicy {
+	var grants []xmlutil.Grant
+
+	for headerName, permission := range grantHeaderMap {
+		headerVal := headers.Get(headerName)
+		if headerVal == "" {
+			continue
+		}
+
+		// Split by comma for multiple grantees.
+		entries := strings.Split(headerVal, ",")
+		for _, entry := range entries {
+			entry = strings.TrimSpace(entry)
+			if entry == "" {
+				continue
+			}
+
+			// Parse key="value" pairs within each entry.
+			// An entry may contain multiple key=value separated by commas,
+			// but we already split by comma above, so each entry is a single grantee.
+			grant := xmlutil.Grant{
+				Permission: permission,
+			}
+
+			if strings.HasPrefix(entry, "id=") {
+				// Canonical user grant: id="user-id"
+				idVal := strings.TrimPrefix(entry, "id=")
+				idVal = strings.Trim(idVal, `"`)
+				grant.Grantee = xmlutil.Grantee{
+					Type: "CanonicalUser",
+					ID:   idVal,
+				}
+			} else if strings.HasPrefix(entry, "uri=") {
+				// Group grant: uri="http://acs.amazonaws.com/groups/..."
+				uriVal := strings.TrimPrefix(entry, "uri=")
+				uriVal = strings.Trim(uriVal, `"`)
+				grant.Grantee = xmlutil.Grantee{
+					Type: "Group",
+					URI:  uriVal,
+				}
+			} else if strings.HasPrefix(entry, "emailAddress=") {
+				// Email grant: emailAddress="email@example.com" — treat as canonical user.
+				emailVal := strings.TrimPrefix(entry, "emailAddress=")
+				emailVal = strings.Trim(emailVal, `"`)
+				grant.Grantee = xmlutil.Grantee{
+					Type: "AmazonCustomerByEmail",
+					ID:   emailVal,
+				}
+			} else {
+				// Unknown format: skip.
+				continue
+			}
+
+			grants = append(grants, grant)
+		}
+	}
+
+	if len(grants) == 0 {
+		return nil
+	}
+
+	return &xmlutil.AccessControlPolicy{
+		Owner: xmlutil.Owner{
+			ID:          ownerID,
+			DisplayName: ownerDisplay,
+		},
+		AccessControlList: xmlutil.ACL{
+			Grants: grants,
+		},
+	}
+}
+
 // aclToJSON converts an AccessControlPolicy to a JSON-encoded RawMessage.
 func aclToJSON(acp *xmlutil.AccessControlPolicy) json.RawMessage {
 	data, _ := json.Marshal(acp)

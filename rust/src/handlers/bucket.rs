@@ -153,6 +153,99 @@ fn canned_acl_to_json(canned: &str, owner_id: &str, display_name: &str) -> Resul
     Ok(serde_json::to_string(&acl).unwrap_or_else(|_| "{}".to_string()))
 }
 
+/// Check whether any `x-amz-grant-*` headers are present.
+fn has_grant_headers(headers: &HeaderMap) -> bool {
+    headers.contains_key("x-amz-grant-full-control")
+        || headers.contains_key("x-amz-grant-read")
+        || headers.contains_key("x-amz-grant-read-acp")
+        || headers.contains_key("x-amz-grant-write")
+        || headers.contains_key("x-amz-grant-write-acp")
+}
+
+/// Validate that `x-amz-acl` and `x-amz-grant-*` headers are not both present.
+fn validate_acl_mode(headers: &HeaderMap) -> Result<(), S3Error> {
+    if headers.contains_key("x-amz-acl") && has_grant_headers(headers) {
+        return Err(S3Error::InvalidArgument {
+            message: "Specifying both x-amz-acl and x-amz-grant headers is not allowed".to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Parse `x-amz-grant-*` headers into an ACL structure.
+///
+/// Each header value is a comma-separated list of grantees in the form:
+///   `id="canonical-user-id"` or `uri="http://acs.amazonaws.com/groups/..."`
+///
+/// Returns `None` if no grant headers are present.
+fn parse_grant_headers(headers: &HeaderMap, owner_id: &str, display_name: &str) -> Option<String> {
+    if !has_grant_headers(headers) {
+        return None;
+    }
+
+    let mut grants = vec![AclGrant {
+        grantee: AclGrantee::CanonicalUser {
+            id: owner_id.to_string(),
+            display_name: display_name.to_string(),
+        },
+        permission: "FULL_CONTROL".to_string(),
+    }];
+
+    let grant_header_map: &[(&str, &str)] = &[
+        ("x-amz-grant-full-control", "FULL_CONTROL"),
+        ("x-amz-grant-read", "READ"),
+        ("x-amz-grant-read-acp", "READ_ACP"),
+        ("x-amz-grant-write", "WRITE"),
+        ("x-amz-grant-write-acp", "WRITE_ACP"),
+    ];
+
+    for (header_name, permission) in grant_header_map {
+        if let Some(value) = headers.get(*header_name).and_then(|v| v.to_str().ok()) {
+            for grantee_str in value.split(',') {
+                let grantee_str = grantee_str.trim();
+                if let Some(grant) = parse_single_grantee(grantee_str, permission) {
+                    grants.push(grant);
+                }
+            }
+        }
+    }
+
+    let acl = Acl {
+        owner: crate::metadata::store::AclOwner {
+            id: owner_id.to_string(),
+            display_name: display_name.to_string(),
+        },
+        grants,
+    };
+
+    Some(serde_json::to_string(&acl).unwrap_or_else(|_| "{}".to_string()))
+}
+
+/// Parse a single grantee expression like `id="abc123"` or
+/// `uri="http://acs.amazonaws.com/groups/global/AllUsers"`.
+fn parse_single_grantee(grantee_str: &str, permission: &str) -> Option<AclGrant> {
+    let grantee_str = grantee_str.trim();
+
+    if let Some(rest) = grantee_str.strip_prefix("id=") {
+        let id = rest.trim_matches('"').trim_matches('\'').to_string();
+        Some(AclGrant {
+            grantee: AclGrantee::CanonicalUser {
+                id: id.clone(),
+                display_name: id,
+            },
+            permission: permission.to_string(),
+        })
+    } else if let Some(rest) = grantee_str.strip_prefix("uri=") {
+        let uri = rest.trim_matches('"').trim_matches('\'').to_string();
+        Some(AclGrant {
+            grantee: AclGrantee::Group { uri },
+            permission: permission.to_string(),
+        })
+    } else {
+        None
+    }
+}
+
 /// Get current time as ISO-8601 string. Duplicates the one in sqlite.rs for
 /// handler-level use (bucket creation timestamps).
 fn now_iso8601() -> String {
@@ -251,10 +344,15 @@ pub async fn create_bucket(
     let owner_id = state.config.auth.access_key.clone();
     let owner_display = state.config.auth.access_key.clone();
 
-    // Determine ACL from x-amz-acl header or default to private.
+    // Validate mutually exclusive ACL modes.
+    validate_acl_mode(headers)?;
+
+    // Determine ACL from x-amz-acl header, x-amz-grant-* headers, or default.
     let acl_json = if let Some(canned) = headers.get("x-amz-acl") {
         let canned_str = canned.to_str().unwrap_or("private");
         canned_acl_to_json(canned_str, &owner_id, &owner_display)?
+    } else if let Some(grant_acl) = parse_grant_headers(headers, &owner_id, &owner_display) {
+        grant_acl
     } else {
         default_acl_json(&owner_id, &owner_display)
     };
@@ -438,7 +536,7 @@ pub async fn put_bucket_acl(
     state: Arc<AppState>,
     bucket: &str,
     headers: &HeaderMap,
-    _body: &[u8],
+    body: &[u8],
 ) -> Result<Response, S3Error> {
     // Check bucket exists.
     let record = state
@@ -452,13 +550,20 @@ pub async fn put_bucket_acl(
     let owner_id = &record.owner_id;
     let owner_display = &record.owner_display;
 
-    // Determine ACL from x-amz-acl header (canned ACL).
+    // Validate mutually exclusive ACL modes.
+    validate_acl_mode(headers)?;
+
+    // Determine ACL: canned header takes priority, then grant headers, then XML body, then default.
     let acl_json = if let Some(canned) = headers.get("x-amz-acl") {
         let canned_str = canned.to_str().unwrap_or("private");
         canned_acl_to_json(canned_str, owner_id, owner_display)?
+    } else if let Some(grant_acl) = parse_grant_headers(headers, owner_id, owner_display) {
+        grant_acl
+    } else if !body.is_empty() {
+        // Parse AccessControlPolicy XML body.
+        parse_acl_xml_body(body, owner_id, owner_display)?
     } else {
-        // If no canned ACL header, check for XML body.
-        // For now, default to private if no body or header.
+        // No ACL specified -- default to private.
         default_acl_json(owner_id, owner_display)
     };
 
@@ -468,6 +573,155 @@ pub async fn put_bucket_acl(
 }
 
 // -- XML parsing helpers ------------------------------------------------------
+
+/// Parse an `<AccessControlPolicy>` XML body into ACL JSON.
+///
+/// Extracts Owner and Grants from the XML, converts them to our internal
+/// ACL representation. Returns `MalformedACLError` if parsing fails.
+fn parse_acl_xml_body(
+    body: &[u8],
+    default_owner_id: &str,
+    default_owner_display: &str,
+) -> Result<String, S3Error> {
+    use quick_xml::events::Event;
+    use quick_xml::Reader;
+
+    let mut reader = Reader::from_reader(body);
+    reader.trim_text(true);
+    let mut buf = Vec::new();
+
+    let mut owner_id = default_owner_id.to_string();
+    let mut owner_display = default_owner_display.to_string();
+
+    // State tracking for nested XML elements.
+    let mut in_owner = false;
+    let mut in_acl_list = false;
+    let mut in_grant = false;
+    let mut in_grantee = false;
+    let mut current_tag = String::new();
+
+    // Current grant being built.
+    let mut grant_permission = String::new();
+    let mut grantee_type = String::new(); // "CanonicalUser" or "Group"
+    let mut grantee_id = String::new();
+    let mut grantee_display_name = String::new();
+    let mut grantee_uri = String::new();
+
+    let mut grants: Vec<AclGrant> = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) => {
+                let tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                // Strip namespace prefix if present (e.g., "s3:Owner" -> "Owner").
+                let tag = tag.rsplit(':').next().unwrap_or(&tag).to_string();
+                current_tag = tag.clone();
+
+                match tag.as_str() {
+                    "Owner" => in_owner = true,
+                    "AccessControlList" => in_acl_list = true,
+                    "Grant" => {
+                        if in_acl_list {
+                            in_grant = true;
+                            grant_permission.clear();
+                            grantee_type.clear();
+                            grantee_id.clear();
+                            grantee_display_name.clear();
+                            grantee_uri.clear();
+                        }
+                    }
+                    "Grantee" => {
+                        if in_grant {
+                            in_grantee = true;
+                            // Extract xsi:type attribute.
+                            for attr in e.attributes().flatten() {
+                                let attr_name =
+                                    String::from_utf8_lossy(attr.key.as_ref()).to_string();
+                                if attr_name.ends_with("type") || attr_name == "type" {
+                                    grantee_type = String::from_utf8_lossy(&attr.value).to_string();
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::End(ref e)) => {
+                let tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                let tag = tag.rsplit(':').next().unwrap_or(&tag).to_string();
+
+                match tag.as_str() {
+                    "Owner" => in_owner = false,
+                    "AccessControlList" => in_acl_list = false,
+                    "Grant" => {
+                        if in_grant {
+                            // Build the grant and add to list.
+                            let grantee = if grantee_type == "Group" || !grantee_uri.is_empty() {
+                                AclGrantee::Group {
+                                    uri: grantee_uri.clone(),
+                                }
+                            } else {
+                                AclGrantee::CanonicalUser {
+                                    id: grantee_id.clone(),
+                                    display_name: grantee_display_name.clone(),
+                                }
+                            };
+                            grants.push(AclGrant {
+                                grantee,
+                                permission: grant_permission.clone(),
+                            });
+                            in_grant = false;
+                        }
+                    }
+                    "Grantee" => in_grantee = false,
+                    _ => {}
+                }
+                current_tag.clear();
+            }
+            Ok(Event::Text(ref e)) => {
+                let text = e.unescape().unwrap_or_default().to_string();
+                if text.is_empty() {
+                    buf.clear();
+                    continue;
+                }
+
+                // Strip namespace prefix from current_tag for matching.
+                let tag = current_tag.rsplit(':').next().unwrap_or(&current_tag);
+
+                if in_owner && !in_grantee {
+                    match tag {
+                        "ID" => owner_id = text,
+                        "DisplayName" => owner_display = text,
+                        _ => {}
+                    }
+                } else if in_grantee {
+                    match tag {
+                        "ID" => grantee_id = text,
+                        "DisplayName" => grantee_display_name = text,
+                        "URI" => grantee_uri = text,
+                        _ => {}
+                    }
+                } else if in_grant && tag == "Permission" {
+                    grant_permission = text;
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => return Err(S3Error::MalformedACLError),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    let acl = Acl {
+        owner: crate::metadata::store::AclOwner {
+            id: owner_id,
+            display_name: owner_display,
+        },
+        grants,
+    };
+
+    Ok(serde_json::to_string(&acl).unwrap_or_else(|_| "{}".to_string()))
+}
 
 /// Parse `<CreateBucketConfiguration>` XML body to extract `<LocationConstraint>`.
 fn parse_location_constraint(body: &[u8]) -> Option<String> {

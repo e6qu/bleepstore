@@ -3,7 +3,11 @@ package server
 
 import (
 	"context"
+	_ "embed"
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/bleepstore/bleepstore/internal/auth"
 	"github.com/bleepstore/bleepstore/internal/config"
@@ -19,19 +23,40 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+//go:embed s3-api.openapi.json
+var canonicalSpec []byte
+
+const swaggerUIHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>BleepStore API - Swagger UI</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui.css">
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui-bundle.js"></script>
+  <script>
+    SwaggerUIBundle({ url: '/openapi.json', dom_id: '#swagger-ui',
+      presets: [SwaggerUIBundle.presets.apis], layout: 'BaseLayout' });
+  </script>
+</body>
+</html>`
+
 // Server is the BleepStore HTTP server. It routes incoming requests to the
 // appropriate S3-compatible handler based on the request method and path.
 type Server struct {
-	cfg        *config.Config
-	router     chi.Router
-	api        huma.API
-	meta       metadata.MetadataStore
-	store      storage.StorageBackend
-	verifier   *auth.SigV4Verifier
-	bucket     *handlers.BucketHandler
-	object     *handlers.ObjectHandler
-	multi      *handlers.MultipartHandler
-	httpServer *http.Server
+	cfg         *config.Config
+	router      chi.Router
+	api         huma.API
+	meta        metadata.MetadataStore
+	store       storage.StorageBackend
+	verifier    *auth.SigV4Verifier
+	bucket      *handlers.BucketHandler
+	object      *handlers.ObjectHandler
+	multi       *handlers.MultipartHandler
+	httpServer  *http.Server
+	patchedSpec []byte
 }
 
 // HealthBody is the JSON body returned by the health check endpoint.
@@ -42,6 +67,18 @@ type HealthBody struct {
 // HealthOutput is the Huma output struct for the health check endpoint.
 type HealthOutput struct {
 	Body HealthBody
+}
+
+// componentCheck represents the health status of a single component.
+type componentCheck struct {
+	Status    string `json:"status"`
+	LatencyMs int64  `json:"latency_ms"`
+}
+
+// healthDetailResponse is the enhanced health response with component checks.
+type healthDetailResponse struct {
+	Status string                    `json:"status"`
+	Checks map[string]componentCheck `json:"checks"`
 }
 
 // ServerOption is a functional option for configuring the Server.
@@ -69,14 +106,32 @@ func New(cfg *config.Config, args ...interface{}) (*Server, error) {
 	router := chi.NewMux()
 
 	humaConfig := huma.DefaultConfig("BleepStore S3 API", "1.0.0")
-	humaConfig.DocsPath = "/docs"
-	humaConfig.OpenAPIPath = "/openapi"
+	humaConfig.DocsPath = ""
+	humaConfig.OpenAPIPath = ""
 	api := humachi.New(router, humaConfig)
 
+	// Parse canonical OpenAPI spec and patch the servers array with the
+	// configured port so Swagger UI points at the running instance.
+	var specMap map[string]interface{}
+	if err := json.Unmarshal(canonicalSpec, &specMap); err != nil {
+		return nil, fmt.Errorf("parsing embedded OpenAPI spec: %w", err)
+	}
+	specMap["servers"] = []interface{}{
+		map[string]interface{}{
+			"url":         fmt.Sprintf("http://localhost:%d", cfg.Server.Port),
+			"description": "BleepStore Go",
+		},
+	}
+	patchedBytes, err := json.Marshal(specMap)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling patched OpenAPI spec: %w", err)
+	}
+
 	s := &Server{
-		cfg:    cfg,
-		router: router,
-		api:    api,
+		cfg:         cfg,
+		router:      router,
+		api:         api,
+		patchedSpec: patchedBytes,
 	}
 
 	// Process arguments: support both old-style (MetadataStore) and new-style (ServerOption).
@@ -122,7 +177,9 @@ func (s *Server) ListenAndServe(addr string) error {
 	}
 	handler = transferEncodingCheck(handler)
 	handler = commonHeaders(handler)
-	handler = metricsMiddleware(handler)
+	if s.cfg.Observability.Metrics {
+		handler = metricsMiddleware(handler)
+	}
 
 	s.httpServer = &http.Server{
 		Addr:    addr,
@@ -144,31 +201,126 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // Huma routes (/health, /docs, /openapi.json) and /metrics are registered first.
 // The S3 catch-all /* is registered last. Chi matches more specific routes first.
 func (s *Server) registerRoutes() {
-	// Register /health via Huma for auto-OpenAPI documentation.
-	huma.Register(s.api, huma.Operation{
-		OperationID: "get-health",
-		Method:      http.MethodGet,
-		Path:        "/health",
-		Summary:     "Health check",
-		Description: "Returns the health status of the BleepStore server.",
-		Tags:        []string{"System"},
-	}, func(ctx context.Context, input *struct{}) (*HealthOutput, error) {
-		return &HealthOutput{Body: HealthBody{Status: "ok"}}, nil
-	})
-
-	// Register HEAD /health separately (Huma only does one method per registration).
+	// Register /health with enhanced JSON when health_check is enabled.
+	s.router.Get("/health", s.handleHealth)
 	s.router.Head("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// Register /metrics via promhttp.Handler().
-	s.router.Handle("/metrics", promhttp.Handler())
+	// Register /healthz and /readyz liveness/readiness probes (conditional).
+	if s.cfg.Observability.HealthCheck {
+		s.router.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+		s.router.Head("/healthz", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+		s.router.Get("/readyz", s.handleReadyz)
+		s.router.Head("/readyz", s.handleReadyz)
+	}
+
+	// Serve the canonical OpenAPI spec (patched with the configured port).
+	s.router.Get("/openapi.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(s.patchedSpec)
+	})
+
+	// Serve Swagger UI docs page pointing at the canonical spec.
+	s.router.Get("/docs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte(swaggerUIHTML))
+	})
+
+	// Register /metrics via promhttp.Handler() (conditional).
+	if s.cfg.Observability.Metrics {
+		s.router.Handle("/metrics", promhttp.Handler())
+	}
 
 	// S3 catch-all: all remaining requests go through the dispatch function.
 	// Chi matches more specific routes (health, docs, metrics, openapi) first,
 	// then falls through to the catch-all.
 	s.router.HandleFunc("/*", s.dispatch)
+}
+
+// handleHealth returns enhanced health JSON with component checks when
+// health_check is enabled, or a static {"status": "ok"} when disabled.
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if !s.cfg.Observability.HealthCheck {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		return
+	}
+
+	checks := make(map[string]componentCheck)
+	allOK := true
+
+	// Probe metadata store.
+	if s.meta != nil {
+		start := time.Now()
+		err := s.meta.Ping(r.Context())
+		latency := time.Since(start).Milliseconds()
+		if err != nil {
+			checks["metadata"] = componentCheck{Status: "error", LatencyMs: latency}
+			allOK = false
+		} else {
+			checks["metadata"] = componentCheck{Status: "ok", LatencyMs: latency}
+		}
+	}
+
+	// Probe storage backend.
+	if s.store != nil {
+		start := time.Now()
+		err := s.store.HealthCheck(r.Context())
+		latency := time.Since(start).Milliseconds()
+		if err != nil {
+			checks["storage"] = componentCheck{Status: "error", LatencyMs: latency}
+			allOK = false
+		} else {
+			checks["storage"] = componentCheck{Status: "ok", LatencyMs: latency}
+		}
+	}
+
+	status := "ok"
+	httpStatus := http.StatusOK
+	if !allOK {
+		status = "degraded"
+		httpStatus = http.StatusServiceUnavailable
+	}
+
+	resp := healthDetailResponse{
+		Status: status,
+		Checks: checks,
+	}
+	w.WriteHeader(httpStatus)
+	json.NewEncoder(w).Encode(resp)
+}
+
+// handleReadyz checks whether all backend dependencies are reachable.
+// Returns 200 with empty body if all pass, 503 with empty body if any fail.
+func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	allOK := true
+
+	if s.meta != nil {
+		if err := s.meta.Ping(ctx); err != nil {
+			allOK = false
+		}
+	}
+
+	if s.store != nil {
+		if err := s.store.HealthCheck(ctx); err != nil {
+			allOK = false
+		}
+	}
+
+	if allOK {
+		w.WriteHeader(http.StatusOK)
+	} else {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
 }
 
 // parsePath extracts bucket and object key from the request path.

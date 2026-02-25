@@ -13,82 +13,89 @@ use axum::{
     extract::{DefaultBodyLimit, Path, RawQuery, State},
     http::{HeaderMap, HeaderValue, Request, StatusCode},
     middleware::{self, Next},
-    response::{IntoResponse, Response},
+    response::{Html, IntoResponse, Response},
     routing::{delete, get, head, post, put},
-    Router,
+    Json, Router,
 };
 use sha2::Digest;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 use tracing::{debug, warn};
-use utoipa::OpenApi;
-use utoipa_swagger_ui::SwaggerUi;
 
 use crate::auth;
 use crate::errors::{generate_request_id, S3Error};
 use crate::metrics::{metrics_handler, metrics_middleware};
 use crate::AppState;
 
-// -- OpenAPI specification ----------------------------------------------------
+// -- Canonical OpenAPI specification ------------------------------------------
 
-/// OpenAPI documentation for the BleepStore S3-compatible API.
-#[derive(OpenApi)]
-#[openapi(
-    info(
-        title = "BleepStore S3-Compatible API",
-        version = "0.1.0",
-        description = "S3-compatible object storage server"
-    ),
-    paths(
-        // Health check
-        health_check,
-        // Bucket operations
-        crate::handlers::bucket::list_buckets,
-        crate::handlers::bucket::create_bucket,
-        crate::handlers::bucket::delete_bucket,
-        crate::handlers::bucket::head_bucket,
-        crate::handlers::bucket::get_bucket_location,
-        crate::handlers::bucket::get_bucket_acl,
-        crate::handlers::bucket::put_bucket_acl,
-        // Object operations
-        crate::handlers::object::put_object,
-        crate::handlers::object::get_object,
-        crate::handlers::object::head_object,
-        crate::handlers::object::delete_object,
-        crate::handlers::object::delete_objects,
-        crate::handlers::object::copy_object,
-        crate::handlers::object::list_objects_v2,
-        crate::handlers::object::list_objects_v1,
-        crate::handlers::object::get_object_acl,
-        crate::handlers::object::put_object_acl,
-        // Multipart operations
-        crate::handlers::multipart::create_multipart_upload,
-        crate::handlers::multipart::upload_part,
-        crate::handlers::multipart::complete_multipart_upload,
-        crate::handlers::multipart::abort_multipart_upload,
-        crate::handlers::multipart::list_multipart_uploads,
-        crate::handlers::multipart::list_parts,
-    ),
-    tags(
-        (name = "Health", description = "Health check endpoints"),
-        (name = "Bucket", description = "S3 bucket operations"),
-        (name = "Object", description = "S3 object operations"),
-        (name = "Multipart", description = "S3 multipart upload operations"),
-    )
-)]
-struct ApiDoc;
+/// Canonical OpenAPI spec embedded from `schemas/s3-api.openapi.json`.
+const CANONICAL_SPEC: &str = include_str!("../../schemas/s3-api.openapi.json");
+
+/// Patch the canonical OpenAPI spec's `servers` array with the actual port.
+fn patch_openapi_spec(port: u16) -> String {
+    let mut spec: serde_json::Value =
+        serde_json::from_str(CANONICAL_SPEC).expect("invalid canonical OpenAPI JSON");
+    spec["servers"] = serde_json::json!([
+        {
+            "url": format!("http://localhost:{}", port),
+            "description": "BleepStore Rust"
+        }
+    ]);
+    serde_json::to_string(&spec).expect("failed to serialize patched OpenAPI spec")
+}
+
+/// Swagger UI HTML page that loads the spec from `/openapi.json`.
+const SWAGGER_UI_HTML: &str = r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>BleepStore API - Swagger UI</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui.css">
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui-bundle.js"></script>
+  <script>
+    SwaggerUIBundle({ url: '/openapi.json', dom_id: '#swagger-ui',
+      presets: [SwaggerUIBundle.presets.apis], layout: 'BaseLayout' });
+  </script>
+</body>
+</html>"#;
 
 /// Build the axum [`Router`] with all S3-compatible routes.
 ///
 /// The returned router is ready to be passed to `axum::serve`.
+/// Routes are conditionally registered based on `config.observability`.
 pub fn app(state: Arc<AppState>) -> Router {
-    let openapi = ApiDoc::openapi();
+    // Patch the canonical spec with the configured port, then leak it so we
+    // can hand out a `&'static str` to the handler without cloning per request.
+    let port = state.config.server.port;
+    let spec_string = patch_openapi_spec(port);
+    let spec_static: &'static str = Box::leak(spec_string.into_boxed_str());
 
-    Router::new()
-        // Health check endpoint (not part of S3 API).
-        .route("/health", get(health_check))
-        // Prometheus metrics endpoint.
-        .route("/metrics", get(metrics_handler))
+    let metrics_enabled = state.config.observability.metrics;
+    let health_check_enabled = state.config.observability.health_check;
+
+    // Phase 1: build the stateful router (Router<Arc<AppState>>).
+    let mut stateful = Router::new()
+        // Health check endpoint (always served, but depth depends on config).
+        .route("/health", get(health_check));
+
+    // Prometheus metrics endpoint (conditional).
+    if metrics_enabled {
+        stateful = stateful.route("/metrics", get(metrics_handler));
+    }
+
+    // Kubernetes-style health probes (conditional).
+    if health_check_enabled {
+        stateful = stateful
+            .route("/healthz", get(healthz_handler))
+            .route("/readyz", get(readyz_handler));
+    }
+
+    stateful = stateful
         // Service-level: GET / -> ListBuckets
         .route("/", get(handle_get_service))
         // Bucket-level routes
@@ -103,25 +110,41 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/:bucket/*key", delete(handle_delete_object))
         .route("/:bucket/*key", head(handle_head_object))
         .route("/:bucket/*key", post(handle_post_object))
-        // Swagger UI at /docs, OpenAPI spec at /openapi.json
-        .merge(SwaggerUi::new("/docs").url("/openapi.json", openapi))
-        // Application state shared across all handlers.
+        // OpenAPI spec and Swagger UI (served from canonical spec)
+        .route(
+            "/openapi.json",
+            get(move || async move {
+                (
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    spec_static,
+                )
+            }),
+        )
+        .route("/docs", get(|| async { Html(SWAGGER_UI_HTML) }));
+
+    // Phase 2: apply state and layers (converts to Router<()>).
+    let mut router = stateful
         .with_state(state.clone())
         // Layer ordering: inner layers run first, outer layers wrap them.
         // auth_middleware is innermost (closest to handlers, after routing).
         .layer(middleware::from_fn_with_state(state, auth_middleware))
         // common_headers_middleware is next (adds standard S3 headers).
-        .layer(middleware::from_fn(common_headers_middleware))
-        // metrics_middleware is outer (captures full request lifecycle).
-        .layer(middleware::from_fn(metrics_middleware))
-        // Disable the default 2MB body size limit (S3 objects can be large).
-        .layer(DefaultBodyLimit::disable())
+        .layer(middleware::from_fn(common_headers_middleware));
+
+    // metrics_middleware is outer (captures full request lifecycle) -- conditional.
+    if metrics_enabled {
+        router = router.layer(middleware::from_fn(metrics_middleware));
+    }
+
+    // Disable the default 2MB body size limit (S3 objects can be large).
+    router.layer(DefaultBodyLimit::disable())
 }
 
 // -- Common headers middleware -----------------------------------------------
 
 /// Tower middleware that adds common S3 response headers to every response:
 /// - `x-amz-request-id`: 16-character uppercase hex string
+/// - `x-amz-id-2`: Base64-encoded 24-byte random value (extended request ID)
 /// - `Date`: RFC 7231 formatted timestamp
 /// - `Server`: `BleepStore`
 async fn common_headers_middleware(req: Request<axum::body::Body>, next: Next) -> Response {
@@ -137,6 +160,13 @@ async fn common_headers_middleware(req: Request<axum::body::Body>, next: Next) -
         );
     }
 
+    // Generate x-amz-id-2: Base64-encoded 24 random bytes.
+    if !headers.contains_key("x-amz-id-2") {
+        let random_bytes: [u8; 24] = rand::random();
+        let id2 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, random_bytes);
+        headers.insert("x-amz-id-2", HeaderValue::from_str(&id2).unwrap());
+    }
+
     let date = httpdate::fmt_http_date(std::time::SystemTime::now());
     // Always overwrite Date and Server to ensure consistency
     headers.insert("date", HeaderValue::from_str(&date).unwrap());
@@ -148,7 +178,14 @@ async fn common_headers_middleware(req: Request<axum::body::Body>, next: Next) -
 // -- Auth middleware ---------------------------------------------------------
 
 /// Paths that bypass authentication.
-const AUTH_SKIP_PATHS: &[&str] = &["/health", "/metrics", "/docs", "/openapi.json"];
+const AUTH_SKIP_PATHS: &[&str] = &[
+    "/health",
+    "/healthz",
+    "/readyz",
+    "/metrics",
+    "/docs",
+    "/openapi.json",
+];
 
 /// SigV4 authentication middleware.
 ///
@@ -224,7 +261,7 @@ async fn auth_middleware(
                     }
                 };
 
-            // Check clock skew using x-amz-date header.
+            // Check clock skew using x-amz-date header (fail fast before signature computation).
             let amz_date = req
                 .headers()
                 .get("x-amz-date")
@@ -235,11 +272,7 @@ async fn auth_middleware(
                     "Clock skew too large for access key {}: {}",
                     parsed.access_key_id, amz_date
                 );
-                return Err(S3Error::AccessDenied {
-                    message:
-                        "The difference between the request time and the server's time is too large"
-                            .to_string(),
-                });
+                return Err(S3Error::RequestTimeTooSkewed);
             }
 
             // Validate credential date matches x-amz-date date portion.
@@ -429,24 +462,91 @@ async fn auth_middleware(
     Ok(next.run(req).await)
 }
 
-// -- Health check ------------------------------------------------------------
+// -- Health check endpoints ---------------------------------------------------
 
-/// `GET /health` -- Returns `{"status": "ok"}` with 200 OK.
+/// `GET /health` -- Returns JSON health status with component checks.
+///
+/// When `observability.health_check` is enabled, performs deep checks on
+/// metadata store and storage backend, returning latency information.
+/// When disabled, returns a static `{"status":"ok"}` response.
+/// Returns 503 with `"status":"degraded"` if any component check fails.
 #[utoipa::path(
     get,
     path = "/health",
     tag = "Health",
     operation_id = "HealthCheck",
     responses(
-        (status = 200, description = "Health check OK")
+        (status = 200, description = "Health check OK"),
+        (status = 503, description = "Health check degraded")
     )
 )]
-async fn health_check() -> impl IntoResponse {
-    (
-        StatusCode::OK,
-        [("content-type", "application/json")],
-        r#"{"status":"ok"}"#,
-    )
+async fn health_check(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    if !state.config.observability.health_check {
+        // Static response when deep health checks are disabled.
+        return (StatusCode::OK, Json(serde_json::json!({"status": "ok"})));
+    }
+
+    // Deep check: probe metadata store.
+    let meta_start = Instant::now();
+    let meta_ok = state.metadata.list_buckets().await.is_ok();
+    let meta_latency = meta_start.elapsed().as_millis() as u64;
+
+    // Deep check: probe storage backend.
+    let storage_start = Instant::now();
+    let storage_ok = state.storage.exists("__health_probe__").await.is_ok();
+    let storage_latency = storage_start.elapsed().as_millis() as u64;
+
+    let all_ok = meta_ok && storage_ok;
+    let status_str = if all_ok { "ok" } else { "degraded" };
+    let http_status = if all_ok {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+
+    let meta_check = if meta_ok {
+        serde_json::json!({"status": "ok", "latency_ms": meta_latency})
+    } else {
+        serde_json::json!({"status": "error", "latency_ms": meta_latency})
+    };
+
+    let storage_check = if storage_ok {
+        serde_json::json!({"status": "ok", "latency_ms": storage_latency})
+    } else {
+        serde_json::json!({"status": "error", "latency_ms": storage_latency})
+    };
+
+    let body = serde_json::json!({
+        "status": status_str,
+        "checks": {
+            "metadata": meta_check,
+            "storage": storage_check,
+        }
+    });
+
+    (http_status, Json(body))
+}
+
+/// `GET /healthz` -- Kubernetes liveness probe.
+///
+/// Returns 200 with empty body. Confirms the process is running.
+async fn healthz_handler() -> impl IntoResponse {
+    StatusCode::OK
+}
+
+/// `GET /readyz` -- Kubernetes readiness probe.
+///
+/// Probes metadata store and storage backend. Returns 200 if all pass,
+/// 503 if any fail. Empty body in both cases.
+async fn readyz_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let meta_ok = state.metadata.list_buckets().await.is_ok();
+    let storage_ok = state.storage.exists("__health_probe__").await.is_ok();
+
+    if meta_ok && storage_ok {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    }
 }
 
 // -- Query parameter parsing helper ------------------------------------------
@@ -554,12 +654,13 @@ async fn handle_post_bucket(
     State(state): State<Arc<AppState>>,
     Path(bucket): Path<String>,
     RawQuery(raw_query): RawQuery,
+    headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<Response, S3Error> {
     let query = parse_query(raw_query);
 
     if query.contains_key("delete") {
-        crate::handlers::object::delete_objects(state, &bucket, &body).await
+        crate::handlers::object::delete_objects(state, &bucket, &headers, &body).await
     } else {
         Err(S3Error::NotImplemented)
     }
@@ -665,5 +766,201 @@ async fn handle_post_object(
             .await
     } else {
         Err(S3Error::NotImplemented)
+    }
+}
+
+// -- Tests --------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::metadata::sqlite::SqliteMetadataStore;
+    use crate::storage::local::LocalBackend;
+    use axum::body::Body;
+    use http::Request as HttpRequest;
+    use tower::ServiceExt;
+
+    /// Create a test `AppState` with in-memory SQLite and a temp local storage.
+    fn test_state(metrics: bool, health_check: bool) -> (Arc<AppState>, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().expect("failed to create temp dir");
+        let storage_root = tmp.path().join("objects");
+        std::fs::create_dir_all(&storage_root).expect("create objects dir");
+
+        let metadata =
+            SqliteMetadataStore::new(":memory:").expect("failed to create in-memory store");
+        let storage =
+            LocalBackend::new(storage_root.to_str().unwrap()).expect("failed to create backend");
+
+        let mut config: Config = serde_yaml::from_str("{}").expect("failed to parse empty config");
+        config.observability.metrics = metrics;
+        config.observability.health_check = health_check;
+
+        let state = Arc::new(AppState {
+            config,
+            metadata: Arc::new(metadata),
+            storage: Arc::new(storage),
+            auth_cache: crate::auth::AuthCache::new(),
+        });
+
+        (state, tmp)
+    }
+
+    // -- /healthz tests -------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_healthz_returns_200_empty_body() {
+        let (state, _tmp) = test_state(true, true);
+        let router = app(state);
+
+        let req = HttpRequest::builder()
+            .uri("/healthz")
+            .body(Body::empty())
+            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(body.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_healthz_disabled_returns_404() {
+        let (state, _tmp) = test_state(true, false);
+        let router = app(state);
+
+        let req = HttpRequest::builder()
+            .uri("/healthz")
+            .body(Body::empty())
+            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    // -- /readyz tests --------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_readyz_returns_200_empty_body() {
+        let (state, _tmp) = test_state(true, true);
+        let router = app(state);
+
+        let req = HttpRequest::builder()
+            .uri("/readyz")
+            .body(Body::empty())
+            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(body.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_readyz_disabled_returns_404() {
+        let (state, _tmp) = test_state(true, false);
+        let router = app(state);
+
+        let req = HttpRequest::builder()
+            .uri("/readyz")
+            .body(Body::empty())
+            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    // -- /health tests --------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_health_returns_json_with_checks() {
+        let (state, _tmp) = test_state(true, true);
+        let router = app(state);
+
+        let req = HttpRequest::builder()
+            .uri("/health")
+            .body(Body::empty())
+            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "ok");
+        assert!(json["checks"]["metadata"]["status"] == "ok");
+        assert!(json["checks"]["storage"]["status"] == "ok");
+        assert!(json["checks"]["metadata"]["latency_ms"].is_number());
+        assert!(json["checks"]["storage"]["latency_ms"].is_number());
+    }
+
+    #[tokio::test]
+    async fn test_health_disabled_returns_static_json() {
+        let (state, _tmp) = test_state(true, false);
+        let router = app(state);
+
+        let req = HttpRequest::builder()
+            .uri("/health")
+            .body(Body::empty())
+            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "ok");
+        // Should not have checks when disabled.
+        assert!(json.get("checks").is_none());
+    }
+
+    // -- /metrics tests -------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_metrics_disabled_returns_404() {
+        let (state, _tmp) = test_state(false, true);
+        let router = app(state);
+
+        let req = HttpRequest::builder()
+            .uri("/metrics")
+            .body(Body::empty())
+            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+}
+
+#[cfg(test)]
+mod openapi_tests {
+    use super::*;
+
+    #[test]
+    fn test_spec_matches_canonical() {
+        let embedded: serde_json::Value =
+            serde_json::from_str(CANONICAL_SPEC).expect("failed to parse embedded spec");
+
+        let canonical_bytes =
+            std::fs::read_to_string("../schemas/s3-api.openapi.json").expect("read canonical spec");
+        let canonical: serde_json::Value =
+            serde_json::from_str(&canonical_bytes).expect("failed to parse canonical spec");
+
+        // Strip servers array for comparison (patched at runtime).
+        let mut embedded_map = embedded.as_object().unwrap().clone();
+        let mut canonical_map = canonical.as_object().unwrap().clone();
+        embedded_map.remove("servers");
+        canonical_map.remove("servers");
+
+        assert_eq!(
+            serde_json::Value::Object(embedded_map),
+            serde_json::Value::Object(canonical_map),
+            "Embedded OpenAPI spec does not match canonical schema"
+        );
     }
 }

@@ -92,10 +92,14 @@ async fn main() -> anyhow::Result<()> {
     // Crash-only startup: every startup IS recovery.
     info!("Crash-only startup: performing recovery checks");
 
-    // Initialize Prometheus metrics recorder and register metric descriptions.
-    bleepstore::metrics::init_metrics();
-    bleepstore::metrics::describe_metrics();
-    info!("Prometheus metrics initialized");
+    // Initialize Prometheus metrics recorder and register metric descriptions (conditional).
+    if config.observability.metrics {
+        bleepstore::metrics::init_metrics();
+        bleepstore::metrics::describe_metrics();
+        info!("Prometheus metrics initialized");
+    } else {
+        info!("Prometheus metrics disabled by configuration");
+    }
 
     // Initialize metadata store (SQLite).
     let metadata_path = &config.metadata.sqlite.path;
@@ -109,6 +113,12 @@ async fn main() -> anyhow::Result<()> {
     // Seed default credentials from config (crash-only: idempotent on every startup).
     metadata_store.seed_credential(&config.auth.access_key, &config.auth.secret_key)?;
     info!("Default credentials seeded");
+
+    // Crash-only recovery: reap expired multipart uploads (default TTL: 7 days).
+    let expired_uploads = metadata_store.reap_expired_uploads(604800)?;
+    if !expired_uploads.is_empty() {
+        info!("Reaped {} expired multipart uploads", expired_uploads.len());
+    }
 
     let metadata: Arc<dyn bleepstore::metadata::store::MetadataStore> = Arc::new(metadata_store);
 
@@ -174,6 +184,12 @@ async fn main() -> anyhow::Result<()> {
                 let storage_root = &config.storage.local.root_dir;
                 let local_backend = bleepstore::storage::local::LocalBackend::new(storage_root)?;
                 info!("Local storage backend initialized at {}", storage_root);
+
+                // Clean up storage for reaped expired multipart uploads.
+                for (upload_id, bucket, _key) in &expired_uploads {
+                    let _ = local_backend.delete_upload_parts(bucket, upload_id);
+                }
+
                 Arc::new(local_backend)
             }
         };

@@ -13,6 +13,7 @@ Implements object operations through Stage 5b:
     - PutObjectAcl (PUT /{bucket}/{key}?acl)
 """
 
+import base64
 import email.utils
 import hashlib
 import json
@@ -26,6 +27,9 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import StreamingResponse
 
 from bleepstore.errors import (
+    BadDigest,
+    InvalidArgument,
+    InvalidDigest,
     InvalidRange,
     MalformedXML,
     NoSuchBucket,
@@ -37,7 +41,9 @@ from bleepstore.handlers.acl import (
     acl_from_json,
     acl_to_json,
     build_default_acl,
+    has_grant_headers,
     parse_canned_acl,
+    parse_grant_headers,
     render_acl_xml,
 )
 from bleepstore.validation import validate_max_keys, validate_object_key
@@ -366,6 +372,13 @@ class ObjectHandler:
         # Validate the object key
         validate_object_key(key)
 
+        # If-None-Match: * — reject if object already exists (412 Precondition Failed)
+        if_none_match = request.headers.get("if-none-match")
+        if if_none_match is not None and if_none_match.strip() == "*":
+            exists = await self.metadata.object_exists(bucket, key)
+            if exists:
+                raise PreconditionFailed()
+
         # Extract content type (default to application/octet-stream)
         content_type = request.headers.get("content-type", "application/octet-stream")
 
@@ -380,9 +393,16 @@ class ObjectHandler:
         user_metadata = self._extract_user_metadata(request)
         user_metadata_json = json.dumps(user_metadata) if user_metadata else "{}"
 
-        # Handle x-amz-acl header for canned ACL on PutObject
+        # Handle ACL: x-amz-acl header or x-amz-grant-* headers on PutObject
         acl_json = "{}"
         canned_acl = request.headers.get("x-amz-acl")
+
+        # Mutual exclusion: x-amz-acl and x-amz-grant-* cannot coexist
+        if canned_acl and has_grant_headers(request.headers):
+            raise InvalidArgument(
+                "Specifying both x-amz-acl and x-amz-grant headers is not allowed"
+            )
+
         if canned_acl:
             access_key = self.config.auth.access_key
             owner_id = hashlib.sha256(access_key.encode()).hexdigest()[:32]
@@ -391,9 +411,14 @@ class ObjectHandler:
                 acl = parse_canned_acl(canned_acl, owner_id, owner_display)
                 acl_json = acl_to_json(acl)
             except ValueError:
-                from bleepstore.errors import InvalidArgument
-
                 raise InvalidArgument(f"Invalid canned ACL: {canned_acl}")
+        elif has_grant_headers(request.headers):
+            access_key = self.config.auth.access_key
+            owner_id = hashlib.sha256(access_key.encode()).hexdigest()[:32]
+            owner_display = access_key
+            grant_acl = parse_grant_headers(request.headers, owner_id, owner_display)
+            if grant_acl is not None:
+                acl_json = acl_to_json(grant_acl)
 
         # Reject uploads exceeding max_object_size early if Content-Length is known
         max_size = self.config.server.max_object_size
@@ -406,6 +431,23 @@ class ObjectHandler:
                     raise EntityTooLarge()
             except ValueError:
                 pass
+
+        # Validate Content-MD5 if present — requires reading the full body
+        content_md5 = request.headers.get("content-md5")
+        if content_md5:
+            # Force-read the body so we can validate the MD5
+            data = await request.body()
+            try:
+                expected_md5 = base64.b64decode(content_md5)
+                if len(expected_md5) != 16:
+                    raise InvalidDigest("The Content-MD5 you specified is not valid.")
+            except InvalidDigest:
+                raise
+            except Exception:
+                raise InvalidDigest("The Content-MD5 you specified is not valid.")
+            actual_md5 = hashlib.md5(data).digest()
+            if actual_md5 != expected_md5:
+                raise BadDigest("The Content-MD5 you specified did not match what we received.")
 
         # Use streaming write to avoid buffering the entire body in memory.
         # Check if the body has already been consumed (e.g. by auth middleware
@@ -788,6 +830,22 @@ class ObjectHandler:
 
         # Read and parse XML body
         body_bytes = await request.body()
+
+        # Validate Content-MD5 if present
+        content_md5 = request.headers.get("content-md5")
+        if content_md5:
+            try:
+                expected_md5 = base64.b64decode(content_md5)
+                if len(expected_md5) != 16:
+                    raise InvalidDigest("The Content-MD5 you specified is not valid.")
+            except InvalidDigest:
+                raise
+            except Exception:
+                raise InvalidDigest("The Content-MD5 you specified is not valid.")
+            actual_md5 = hashlib.md5(body_bytes).digest()
+            if actual_md5 != expected_md5:
+                raise BadDigest("The Content-MD5 you specified did not match what we received.")
+
         try:
             root = ET.fromstring(body_bytes)
         except ET.ParseError:
@@ -1051,16 +1109,27 @@ class ObjectHandler:
         owner_id = hashlib.sha256(access_key.encode()).hexdigest()[:32]
         owner_display = access_key
 
-        # Check for canned ACL header
+        # Mutual exclusion: x-amz-acl and x-amz-grant-* cannot coexist
         canned_acl = request.headers.get("x-amz-acl")
+        if canned_acl and has_grant_headers(request.headers):
+            raise InvalidArgument(
+                "Specifying both x-amz-acl and x-amz-grant headers is not allowed"
+            )
+
+        # Check for canned ACL header
         if canned_acl:
             try:
                 acl = parse_canned_acl(canned_acl, owner_id, owner_display)
             except ValueError:
-                from bleepstore.errors import InvalidArgument
-
                 raise InvalidArgument(f"Invalid canned ACL: {canned_acl}")
             acl_json = acl_to_json(acl)
+            await self.metadata.update_object_acl(bucket, key, acl_json)
+            return Response(status_code=200)
+
+        # Check for x-amz-grant-* headers
+        grant_acl = parse_grant_headers(request.headers, owner_id, owner_display)
+        if grant_acl is not None:
+            acl_json = acl_to_json(grant_acl)
             await self.metadata.update_object_acl(bucket, key, acl_json)
             return Response(status_code=200)
 

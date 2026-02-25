@@ -18,6 +18,7 @@ from fastapi import FastAPI, Request, Response
 
 from bleepstore.errors import (
     BucketNotEmpty,
+    InvalidArgument,
     InvalidBucketName,
     MalformedXML,
     NoSuchBucket,
@@ -26,7 +27,9 @@ from bleepstore.handlers.acl import (
     acl_from_json,
     acl_to_json,
     build_default_acl,
+    has_grant_headers,
     parse_canned_acl,
+    parse_grant_headers,
     render_acl_xml,
 )
 from bleepstore.validation import validate_bucket_name
@@ -161,11 +164,22 @@ class BucketHandler:
         acl = build_default_acl(owner_id, owner_display)
         acl_json = acl_to_json(acl)
 
-        # Determine canned ACL from header
+        # Mutual exclusion: x-amz-acl and x-amz-grant-* cannot coexist
         canned_acl = request.headers.get("x-amz-acl")
+        if canned_acl and has_grant_headers(request.headers):
+            raise InvalidArgument(
+                "Specifying both x-amz-acl and x-amz-grant headers is not allowed"
+            )
+
+        # Determine ACL from canned header or grant headers
         if canned_acl:
             acl = parse_canned_acl(canned_acl, owner_id, owner_display)
             acl_json = acl_to_json(acl)
+        else:
+            grant_acl = parse_grant_headers(request.headers, owner_id, owner_display)
+            if grant_acl is not None:
+                acl = grant_acl
+                acl_json = acl_to_json(acl)
 
         # Create the bucket in metadata store
         await self.metadata.create_bucket(
@@ -315,14 +329,27 @@ class BucketHandler:
         owner_id = bucket_meta.get("owner_id", "")
         owner_display = bucket_meta.get("owner_display", "")
 
-        # Check for canned ACL header
+        # Mutual exclusion: x-amz-acl and x-amz-grant-* cannot coexist
         canned_acl = request.headers.get("x-amz-acl")
+        if canned_acl and has_grant_headers(request.headers):
+            raise InvalidArgument(
+                "Specifying both x-amz-acl and x-amz-grant headers is not allowed"
+            )
+
+        # Check for canned ACL header
         if canned_acl:
             try:
                 acl = parse_canned_acl(canned_acl, owner_id, owner_display)
             except ValueError:
-                raise InvalidBucketName()  # S3 returns InvalidArgument for bad ACL names
+                raise InvalidArgument(f"Invalid canned ACL: {canned_acl}")
             acl_json = acl_to_json(acl)
+            await self.metadata.update_bucket_acl(bucket, acl_json)
+            return Response(status_code=200)
+
+        # Check for x-amz-grant-* headers
+        grant_acl = parse_grant_headers(request.headers, owner_id, owner_display)
+        if grant_acl is not None:
+            acl_json = acl_to_json(grant_acl)
             await self.metadata.update_bucket_acl(bucket, acl_json)
             return Response(status_code=200)
 

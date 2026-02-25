@@ -441,6 +441,33 @@ class LocalStorageBackend:
         except OSError:
             pass
 
+    async def delete_upload_parts(self, upload_id: str) -> None:
+        """Delete all stored parts for a multipart upload by upload ID only.
+
+        Removes the upload directory and all part files within it.
+        Used during expired upload reaping where bucket/key are not needed
+        since parts are stored under ``{root}/.parts/{upload_id}/``.
+
+        Args:
+            upload_id: The multipart upload identifier.
+        """
+        parts_dir = self.root / ".parts" / upload_id
+        if not parts_dir.exists():
+            return
+
+        # Remove all part files
+        for child in parts_dir.iterdir():
+            try:
+                child.unlink()
+            except OSError:
+                pass
+
+        # Remove the directory
+        try:
+            parts_dir.rmdir()
+        except OSError:
+            pass
+
     async def copy_object(
         self,
         src_bucket: str,

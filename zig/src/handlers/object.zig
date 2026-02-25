@@ -2,6 +2,7 @@ const std = @import("std");
 const tk = @import("tokamak");
 const server = @import("../server.zig");
 const sendS3Error = server.sendS3Error;
+const sendS3ErrorWithMessage = server.sendS3ErrorWithMessage;
 const sendResponse = server.sendResponse;
 const store = @import("../metadata/store.zig");
 const metrics_mod = @import("../metrics.zig");
@@ -158,12 +159,38 @@ pub fn putObject(
         return sendS3Error(res, req_alloc, .NoSuchBucket, bucket_name, request_id);
     }
 
+    // If-None-Match: * -- reject if object already exists (conditional PUT).
+    if (req.header("if-none-match")) |inm| {
+        if (std.mem.eql(u8, std.mem.trim(u8, inm, " "), "*")) {
+            const obj_exists = try ms.objectExists(bucket_name, object_key);
+            if (obj_exists) {
+                return sendS3Error(res, req_alloc, .PreconditionFailed, object_key, request_id);
+            }
+        }
+    }
+
     // Read the request body.
     const body = req.body() orelse "";
 
     // Check max object size.
     if (body.len > server.global_max_object_size) {
         return sendS3Error(res, req_alloc, .EntityTooLarge, object_key, request_id);
+    }
+
+    // Validate Content-MD5 header if present.
+    if (req.header("content-md5")) |content_md5| {
+        // Base64-decode the provided MD5.
+        var decoded_md5: [16]u8 = undefined;
+        std.base64.standard.Decoder.decode(&decoded_md5, content_md5) catch {
+            return sendS3Error(res, req_alloc, .InvalidDigest, object_key, request_id);
+        };
+        // Compute MD5 of the request body.
+        var computed_md5: [std.crypto.hash.Md5.digest_length]u8 = undefined;
+        std.crypto.hash.Md5.hash(body, &computed_md5, .{});
+        // Compare digests.
+        if (!std.mem.eql(u8, &decoded_md5, &computed_md5)) {
+            return sendS3Error(res, req_alloc, .BadDigest, object_key, request_id);
+        }
     }
 
     // Write to storage backend (atomic: temp + fsync + rename).
@@ -180,11 +207,23 @@ pub fn putObject(
     const owner_id = try deriveOwnerId(req_alloc, access_key);
     const owner_display = access_key;
 
-    // Build ACL -- check for x-amz-acl canned ACL header.
+    // --- ACL processing ---
+    // 1D: Mutual exclusion -- x-amz-acl and x-amz-grant-* cannot coexist.
+    const canned_acl_val = req.header("x-amz-acl");
+    const has_grant_headers = hasAnyGrantHeader(req);
+    if (canned_acl_val != null and has_grant_headers) {
+        return sendS3ErrorWithMessage(res, req_alloc, .InvalidArgument, "Specifying both x-amz-acl and x-amz-grant headers is not allowed", object_key, request_id);
+    }
+
+    // Build ACL from canned header, grant headers, or default.
     var acl_json = try buildDefaultAclJson(req_alloc, owner_id, owner_display);
-    if (req.header("x-amz-acl")) |ca| {
+    if (canned_acl_val) |ca| {
         if (try buildCannedAclJson(req_alloc, ca, owner_id, owner_display)) |canned| {
             acl_json = canned;
+        }
+    } else if (has_grant_headers) {
+        if (try parseGrantHeaders(req_alloc, req, owner_id, owner_display)) |grant_acl| {
+            acl_json = grant_acl;
         }
     }
 
@@ -324,6 +363,9 @@ pub fn getObject(
 
             // Clamp to actual body size.
             if (range_start >= full_body.len) {
+                // Set Content-Range header per S3 spec for 416 responses.
+                const cr_hdr = try std.fmt.allocPrint(req_alloc, "bytes */{d}", .{total_size});
+                res.header("Content-Range", cr_hdr);
                 return sendS3Error(res, req_alloc, .InvalidRange, object_key, request_id);
             }
             const actual_end = @min(range_end, full_body.len - 1);
@@ -365,6 +407,9 @@ pub fn getObject(
             return;
         } else {
             // Invalid range (unsatisfiable).
+            // Set Content-Range header per S3 spec for 416 responses.
+            const cr_hdr = try std.fmt.allocPrint(req_alloc, "bytes */{d}", .{meta.size});
+            res.header("Content-Range", cr_hdr);
             return sendS3Error(res, req_alloc, .InvalidRange, object_key, request_id);
         }
     }
@@ -537,6 +582,22 @@ pub fn deleteObjects(
     const body = req.body() orelse "";
     if (body.len == 0) {
         return sendS3Error(res, req_alloc, .MissingRequestBodyError, "/", request_id);
+    }
+
+    // Validate Content-MD5 header if present.
+    if (req.header("content-md5")) |content_md5| {
+        // Base64-decode the provided MD5.
+        var decoded_md5: [16]u8 = undefined;
+        std.base64.standard.Decoder.decode(&decoded_md5, content_md5) catch {
+            return sendS3Error(res, req_alloc, .InvalidDigest, "/", request_id);
+        };
+        // Compute MD5 of the request body.
+        var computed_md5: [std.crypto.hash.Md5.digest_length]u8 = undefined;
+        std.crypto.hash.Md5.hash(body, &computed_md5, .{});
+        // Compare digests.
+        if (!std.mem.eql(u8, &decoded_md5, &computed_md5)) {
+            return sendS3Error(res, req_alloc, .BadDigest, "/", request_id);
+        }
     }
 
     // Extract <Quiet>true</Quiet> if present.
@@ -930,8 +991,15 @@ pub fn putObjectAcl(
     const owner_id = try deriveOwnerId(req_alloc, access_key);
     const owner_display = access_key;
 
+    // 1D: Mutual exclusion -- x-amz-acl and x-amz-grant-* cannot coexist.
+    const canned_acl_hdr = req.header("x-amz-acl");
+    const has_grants = hasAnyGrantHeader(req);
+    if (canned_acl_hdr != null and has_grants) {
+        return sendS3ErrorWithMessage(res, req_alloc, .InvalidArgument, "Specifying both x-amz-acl and x-amz-grant headers is not allowed", object_key, request_id);
+    }
+
     // Check for x-amz-acl canned ACL header.
-    if (req.header("x-amz-acl")) |ca| {
+    if (canned_acl_hdr) |ca| {
         if (try buildCannedAclJson(req_alloc, ca, owner_id, owner_display)) |acl_json| {
             try ms.updateObjectAcl(bucket_name, object_key, acl_json);
             server.setCommonHeaders(res, request_id);
@@ -942,8 +1010,18 @@ pub fn putObjectAcl(
         // Unknown canned ACL -- fall through to default.
     }
 
-    // No canned ACL -- just keep the existing ACL or set default.
-    // For Phase 1, canned ACLs via header are the primary mechanism.
+    // 1C: Check for x-amz-grant-* headers.
+    if (has_grants) {
+        if (try parseGrantHeaders(req_alloc, req, owner_id, owner_display)) |grant_acl| {
+            try ms.updateObjectAcl(bucket_name, object_key, grant_acl);
+            server.setCommonHeaders(res, request_id);
+            res.status = 200;
+            res.body = "";
+            return;
+        }
+    }
+
+    // No canned ACL or grant headers -- set default private ACL.
     const acl_json = try buildDefaultAclJson(req_alloc, owner_id, owner_display);
     try ms.updateObjectAcl(bucket_name, object_key, acl_json);
 
@@ -1131,6 +1209,101 @@ fn dateToEpoch(year: u16, month: u8, day: u8, hours: u8, minutes: u8, seconds: u
 // ---------------------------------------------------------------------------
 // Canned ACL helper (shared with bucket handlers)
 // ---------------------------------------------------------------------------
+
+/// Check whether any x-amz-grant-* header is present in the request.
+fn hasAnyGrantHeader(req: *tk.Request) bool {
+    const grant_headers = [_][]const u8{
+        "x-amz-grant-full-control",
+        "x-amz-grant-read",
+        "x-amz-grant-read-acp",
+        "x-amz-grant-write",
+        "x-amz-grant-write-acp",
+    };
+    for (grant_headers) |hdr| {
+        if (req.header(hdr) != null) return true;
+    }
+    return false;
+}
+
+/// Parse x-amz-grant-* headers and build an ACL JSON string.
+/// Returns null if no grant headers are present.
+/// Value format: `id="canonical-user-id"` or `uri="http://acs.amazonaws.com/groups/..."`, comma-separated.
+fn parseGrantHeaders(alloc: std.mem.Allocator, req: *tk.Request, owner_id: []const u8, owner_display: []const u8) !?[]u8 {
+    const GrantHeader = struct {
+        header_name: []const u8,
+        permission: []const u8,
+    };
+    const grant_mappings = [_]GrantHeader{
+        .{ .header_name = "x-amz-grant-full-control", .permission = "FULL_CONTROL" },
+        .{ .header_name = "x-amz-grant-read", .permission = "READ" },
+        .{ .header_name = "x-amz-grant-read-acp", .permission = "READ_ACP" },
+        .{ .header_name = "x-amz-grant-write", .permission = "WRITE" },
+        .{ .header_name = "x-amz-grant-write-acp", .permission = "WRITE_ACP" },
+    };
+
+    var found_any = false;
+    for (grant_mappings) |mapping| {
+        if (req.header(mapping.header_name) != null) {
+            found_any = true;
+            break;
+        }
+    }
+    if (!found_any) return null;
+
+    // Build the grants array JSON.
+    var grants_buf = std.ArrayList(u8).empty;
+    defer grants_buf.deinit(alloc);
+    var first_grant = true;
+
+    for (grant_mappings) |mapping| {
+        const header_val = req.header(mapping.header_name) orelse continue;
+
+        // Parse comma-separated grantees: id="...", uri="..."
+        var grantee_iter = std.mem.splitScalar(u8, header_val, ',');
+        while (grantee_iter.next()) |raw_grantee| {
+            const grantee = std.mem.trim(u8, raw_grantee, " ");
+            if (grantee.len == 0) continue;
+
+            if (!first_grant) {
+                try grants_buf.append(alloc, ',');
+            }
+            first_grant = false;
+
+            if (std.mem.startsWith(u8, grantee, "id=\"")) {
+                // CanonicalUser: id="canonical-user-id"
+                const id_start = 4; // len of `id="`
+                const id_end = std.mem.indexOfScalarPos(u8, grantee, id_start, '"') orelse grantee.len;
+                const user_id = grantee[id_start..id_end];
+
+                const grant_json = try std.fmt.allocPrint(alloc,
+                    \\{{"grantee":{{"type":"CanonicalUser","id":"{s}","display_name":"{s}"}},"permission":"{s}"}}
+                , .{ user_id, user_id, mapping.permission });
+                defer alloc.free(grant_json);
+                try grants_buf.appendSlice(alloc, grant_json);
+            } else if (std.mem.startsWith(u8, grantee, "uri=\"")) {
+                // Group: uri="http://..."
+                const uri_start = 5; // len of `uri="`
+                const uri_end = std.mem.indexOfScalarPos(u8, grantee, uri_start, '"') orelse grantee.len;
+                const uri = grantee[uri_start..uri_end];
+
+                const grant_json = try std.fmt.allocPrint(alloc,
+                    \\{{"grantee":{{"type":"Group","uri":"{s}"}},"permission":"{s}"}}
+                , .{ uri, mapping.permission });
+                defer alloc.free(grant_json);
+                try grants_buf.appendSlice(alloc, grant_json);
+            }
+            // Skip unrecognized grantee formats.
+        }
+    }
+
+    // Build full ACL JSON with owner.
+    const grants_str = try grants_buf.toOwnedSlice(alloc);
+    defer alloc.free(grants_str);
+
+    return try std.fmt.allocPrint(alloc,
+        \\{{"owner":{{"id":"{s}","display_name":"{s}"}},"grants":[{s}]}}
+    , .{ owner_id, owner_display, grants_str });
+}
 
 /// Build a canned ACL JSON string. Returns null for unknown canned ACL names.
 fn buildCannedAclJson(alloc: std.mem.Allocator, canned_acl: []const u8, owner_id: []const u8, owner_display: []const u8) !?[]u8 {

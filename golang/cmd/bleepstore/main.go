@@ -16,6 +16,7 @@ import (
 	"github.com/bleepstore/bleepstore/internal/config"
 	"github.com/bleepstore/bleepstore/internal/logging"
 	"github.com/bleepstore/bleepstore/internal/metadata"
+	"github.com/bleepstore/bleepstore/internal/metrics"
 	"github.com/bleepstore/bleepstore/internal/server"
 	"github.com/bleepstore/bleepstore/internal/storage"
 )
@@ -165,6 +166,30 @@ func main() {
 		}
 		storageBackend = localBackend
 		slog.Info("Storage backend initialized", "backend", "local", "root", storageRoot)
+	}
+
+	// Crash-only recovery: reap expired multipart uploads (7-day TTL).
+	expired, reapErr := metaStore.ReapExpiredUploads(604800)
+	if reapErr != nil {
+		slog.Warn("Failed to reap expired multipart uploads", "error", reapErr)
+	} else if len(expired) > 0 {
+		slog.Info(fmt.Sprintf("Reaped %d expired multipart uploads", len(expired)))
+		// Clean up storage files for reaped uploads (local backend only).
+		if localBackend, ok := storageBackend.(*storage.LocalBackend); ok {
+			for _, u := range expired {
+				if err := localBackend.DeleteUploadParts(u.UploadID); err != nil {
+					slog.Warn("Failed to clean up parts for reaped upload",
+						"upload_id", u.UploadID, "error", err)
+				}
+			}
+		}
+	}
+
+	// Conditionally register Prometheus metrics and seed gauges.
+	if cfg.Observability.Metrics {
+		metrics.Register()
+		metrics.ObjectsTotal.Set(0)
+		metrics.BucketsTotal.Set(0)
 	}
 
 	srv, err := server.New(cfg, metaStore, server.WithStorageBackend(storageBackend))

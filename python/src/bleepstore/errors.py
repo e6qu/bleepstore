@@ -277,6 +277,65 @@ class ExpiredPresignedUrl(S3Error):
         super().__init__(code="AccessDenied", message=message, http_status=403)
 
 
+class BadDigest(S3Error):
+    """The Content-MD5 you specified did not match what we received."""
+
+    def __init__(
+        self, message: str = "The Content-MD5 you specified did not match what we received."
+    ) -> None:
+        super().__init__(code="BadDigest", message=message, http_status=400)
+
+
+class IncompleteBody(S3Error):
+    """You did not provide the number of bytes specified by the Content-Length HTTP header."""
+
+    def __init__(
+        self,
+        message: str = "You did not provide the number of bytes specified by the Content-Length HTTP header.",
+    ) -> None:
+        super().__init__(code="IncompleteBody", message=message, http_status=400)
+
+
+class InvalidDigest(S3Error):
+    """The Content-MD5 you specified is not valid."""
+
+    def __init__(self, message: str = "The Content-MD5 you specified is not valid.") -> None:
+        super().__init__(code="InvalidDigest", message=message, http_status=400)
+
+
+class MalformedACLError(S3Error):
+    """The XML you provided for the ACL is not well-formed or did not validate."""
+
+    def __init__(
+        self,
+        message: str = "The XML you provided for the ACL is not well-formed or did not validate against our published schema.",
+    ) -> None:
+        super().__init__(code="MalformedACLError", message=message, http_status=400)
+
+
+class MissingRequestBodyError(S3Error):
+    """Request body is empty."""
+
+    def __init__(self, message: str = "Request body is empty.") -> None:
+        super().__init__(code="MissingRequestBodyError", message=message, http_status=400)
+
+
+class TooManyBuckets(S3Error):
+    """You have attempted to create more buckets than allowed."""
+
+    def __init__(
+        self, message: str = "You have attempted to create more buckets than allowed."
+    ) -> None:
+        super().__init__(code="TooManyBuckets", message=message, http_status=400)
+
+
+class ServiceUnavailable(S3Error):
+    """Service is not available. Please retry."""
+
+    def __init__(self, message: str = "Service is not available. Please retry.") -> None:
+        super().__init__(code="ServiceUnavailable", message=message, http_status=503)
+
+
 class NotImplementedS3Error(S3Error):
     """The requested functionality is not implemented."""
 

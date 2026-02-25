@@ -28,7 +28,6 @@ clap = { version = "4", features = ["derive"] }
 rand = "0.8"
 httpdate = "1"
 utoipa = { version = "5", features = ["axum_extras"] }
-utoipa-swagger-ui = { version = "8", features = ["axum"] }
 garde = { version = "0.22", features = ["derive", "regex"] }
 metrics = "0.24"
 metrics-exporter-prometheus = "0.16"
@@ -64,3 +63,4 @@ aws-sdk-sts = "=1.97.0"
 
 [dev-dependencies]
 tempfile = "3"
+tower = { version = "0.5", features = ["util"] }

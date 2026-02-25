@@ -13,7 +13,9 @@ to every stage, similar to crash-only design.
 | `/docs` | Swagger UI (interactive API documentation) | HTML |
 | `/openapi.json` | OpenAPI 3.x JSON specification | `application/json` |
 | `/metrics` | Prometheus exposition format metrics | `text/plain; version=0.0.4` |
-| `/health` | Health check (existing from Stage 1) | `application/json` |
+| `/health` | Health check — detailed JSON with component status | `application/json` |
+| `/healthz` | Kubernetes liveness probe — empty body | 200 (empty) |
+| `/readyz` | Kubernetes readiness probe — empty body | 200 or 503 (empty) |
 
 ---
 
@@ -196,3 +198,76 @@ Stage 1b tests must verify:
 | Swagger UI availability | Static asset or CDN -- no external dependency required at runtime. |
 | OpenAPI spec generation | Generated at startup or on first request. No persistent state needed. |
 | Validation errors | Must produce S3 error XML, not framework-specific error format. |
+
+---
+
+## Health Check Endpoints
+
+### `/healthz` — Liveness
+
+Confirms the process is running. No dependency probing.
+
+- **200** (empty body) — process alive
+- Always returns 200 if the server can handle HTTP.
+
+### `/readyz` — Readiness
+
+Deep check: probes metadata store (`SELECT 1` or equivalent) and storage backend (directory accessible).
+
+- **200** (empty body) — all checks pass, ready to serve traffic
+- **503** (empty body) — one or more checks failed, not ready
+
+### `/health` — Combined (JSON, detailed)
+
+Returns a JSON body with component-level status. This is the human-/dashboard-readable endpoint.
+
+When healthy (200):
+```json
+{
+  "status": "ok",
+  "checks": {
+    "metadata": {"status": "ok", "latency_ms": 1},
+    "storage":  {"status": "ok", "latency_ms": 0}
+  }
+}
+```
+
+When degraded (503):
+```json
+{
+  "status": "degraded",
+  "checks": {
+    "metadata": {"status": "ok", "latency_ms": 1},
+    "storage":  {"status": "error", "error": "data directory not found", "latency_ms": 0}
+  }
+}
+```
+
+All three endpoints bypass authentication.
+
+### Toggleability
+
+`/health` is always served. When `observability.health_check` is `false`:
+- `/health` falls back to the static `{"status":"ok"}` response (no deep checks, no latency overhead)
+- `/healthz` and `/readyz` return 404
+
+---
+
+## Observability Configuration
+
+New top-level `observability` section in YAML config (all enabled by default):
+
+```yaml
+observability:
+  metrics: true        # Prometheus metrics collection + /metrics endpoint
+  health_check: true   # /healthz (liveness), /readyz (readiness), deep /health checks
+```
+
+When `metrics: false`:
+- `/metrics` returns 404
+- Per-request metrics middleware is skipped (zero overhead on S3 hot path)
+- Gauge seeding on startup is skipped
+
+When `health_check: false`:
+- `/healthz` and `/readyz` return 404
+- `/health` reverts to the static `{"status":"ok"}` (always available, never disabled)
