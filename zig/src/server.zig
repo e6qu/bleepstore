@@ -57,6 +57,7 @@ const canonical_spec = @embedFile("s3-api.openapi.json");
 /// process lifetime (never freed -- crash-only design).
 pub var global_openapi_json: []const u8 = canonical_spec;
 
+
 pub const ServerState = struct {
     allocator: std.mem.Allocator,
     config: config_mod.Config,
@@ -314,6 +315,7 @@ fn handleS3CatchAll(ctx: *tk.Context) anyerror!void {
 
     // Start timing for metrics.
     const s3_start_us = getTimestampUs();
+
 
     // Increment HTTP request counter for S3 routes.
     if (global_metrics_enabled) metrics_mod.incrementHttpRequests();
