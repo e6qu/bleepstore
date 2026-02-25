@@ -40,6 +40,10 @@
 ## Known Test Issues
 - None — all 86 E2E tests pass
 
+## Cross-Language Storage Identity (2026-02-25)
+- Multipart temp directory normalized from `.parts` to `.multipart` (matches Go/Rust/Zig)
+- All unit tests pass (619/619), E2E tests pass (86/86)
+
 ## Storage Backends
 - **Local filesystem** (`storage/local.py`): Default backend, stores objects as files on disk
 - **Memory** (`storage/memory.py`): In-memory dict-based storage with optional SQLite snapshot persistence. Supports `max_size_bytes` limit and `persistence: "none"|"snapshot"` modes.

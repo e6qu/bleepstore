@@ -198,7 +198,7 @@ func (b *LocalBackend) PutPart(ctx context.Context, bucket, key, uploadID string
 		return "", fmt.Errorf("creating part directory: %w", err)
 	}
 
-	partPath := filepath.Join(partDir, fmt.Sprintf("%05d", partNumber))
+	partPath := filepath.Join(partDir, fmt.Sprintf("%d", partNumber))
 
 	// Write to temp file, compute MD5, atomic rename.
 	tmpPath := b.tempPath()
@@ -254,7 +254,7 @@ func (b *LocalBackend) AssembleParts(ctx context.Context, bucket, key, uploadID 
 	// Concatenate parts and compute composite ETag from individual part MD5s.
 	compositeMD5 := md5.New()
 	for _, pn := range partNumbers {
-		partPath := filepath.Join(partDir, fmt.Sprintf("%05d", pn))
+		partPath := filepath.Join(partDir, fmt.Sprintf("%d", pn))
 		partFile, err := os.Open(partPath)
 		if err != nil {
 			tmpFile.Close()

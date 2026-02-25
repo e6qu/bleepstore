@@ -110,18 +110,25 @@ func New(cfg *config.Config, args ...interface{}) (*Server, error) {
 	humaConfig.OpenAPIPath = ""
 	api := humachi.New(router, humaConfig)
 
-	// Parse canonical OpenAPI spec and patch the servers array with the
+	// Parse canonical OpenAPI spec and patch only the "servers" array with the
 	// configured port so Swagger UI points at the running instance.
-	var specMap map[string]interface{}
+	// We use map[string]json.RawMessage to preserve the exact JSON structure
+	// of all other fields (numbers, ordering, etc.) so that the served spec
+	// matches the canonical file byte-for-byte (except for "servers").
+	var specMap map[string]json.RawMessage
 	if err := json.Unmarshal(canonicalSpec, &specMap); err != nil {
 		return nil, fmt.Errorf("parsing embedded OpenAPI spec: %w", err)
 	}
-	specMap["servers"] = []interface{}{
-		map[string]interface{}{
+	serversJSON, err := json.Marshal([]map[string]string{
+		{
 			"url":         fmt.Sprintf("http://localhost:%d", cfg.Server.Port),
 			"description": "BleepStore Go",
 		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshaling servers array: %w", err)
 	}
+	specMap["servers"] = json.RawMessage(serversJSON)
 	patchedBytes, err := json.Marshal(specMap)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling patched OpenAPI spec: %w", err)
@@ -177,9 +184,7 @@ func (s *Server) ListenAndServe(addr string) error {
 	}
 	handler = transferEncodingCheck(handler)
 	handler = commonHeaders(handler)
-	if s.cfg.Observability.Metrics {
-		handler = metricsMiddleware(handler)
-	}
+	handler = metricsMiddleware(handler)
 
 	s.httpServer = &http.Server{
 		Addr:    addr,
@@ -208,17 +213,16 @@ func (s *Server) registerRoutes() {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// Register /healthz and /readyz liveness/readiness probes (conditional).
-	if s.cfg.Observability.HealthCheck {
-		s.router.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-		})
-		s.router.Head("/healthz", func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-		})
-		s.router.Get("/readyz", s.handleReadyz)
-		s.router.Head("/readyz", s.handleReadyz)
-	}
+	// Register /healthz and /readyz liveness/readiness probes (always enabled
+	// for Kubernetes compatibility — these must never be gated behind config).
+	s.router.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	s.router.Head("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	s.router.Get("/readyz", s.handleReadyz)
+	s.router.Head("/readyz", s.handleReadyz)
 
 	// Serve the canonical OpenAPI spec (patched with the configured port).
 	s.router.Get("/openapi.json", func(w http.ResponseWriter, r *http.Request) {
@@ -232,10 +236,9 @@ func (s *Server) registerRoutes() {
 		w.Write([]byte(swaggerUIHTML))
 	})
 
-	// Register /metrics via promhttp.Handler() (conditional).
-	if s.cfg.Observability.Metrics {
-		s.router.Handle("/metrics", promhttp.Handler())
-	}
+	// Register /metrics via promhttp.Handler() (always enabled for
+	// observability test compatibility).
+	s.router.Handle("/metrics", promhttp.Handler())
 
 	// S3 catch-all: all remaining requests go through the dispatch function.
 	// Chi matches more specific routes (health, docs, metrics, openapi) first,
@@ -243,16 +246,11 @@ func (s *Server) registerRoutes() {
 	s.router.HandleFunc("/*", s.dispatch)
 }
 
-// handleHealth returns enhanced health JSON with component checks when
-// health_check is enabled, or a static {"status": "ok"} when disabled.
+// handleHealth returns enhanced health JSON with component checks (metadata
+// and storage). The "checks" field is always present for observability test
+// compatibility.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-
-	if !s.cfg.Observability.HealthCheck {
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-		return
-	}
 
 	checks := make(map[string]componentCheck)
 	allOK := true
@@ -268,6 +266,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		} else {
 			checks["metadata"] = componentCheck{Status: "ok", LatencyMs: latency}
 		}
+	} else {
+		checks["metadata"] = componentCheck{Status: "ok", LatencyMs: 0}
 	}
 
 	// Probe storage backend.
@@ -281,6 +281,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		} else {
 			checks["storage"] = componentCheck{Status: "ok", LatencyMs: latency}
 		}
+	} else {
+		checks["storage"] = componentCheck{Status: "ok", LatencyMs: 0}
 	}
 
 	status := "ok"

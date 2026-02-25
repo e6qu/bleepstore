@@ -112,6 +112,15 @@ func metricsMiddleware(next http.Handler) http.Handler {
 			metrics.HTTPResponseSize.WithLabelValues(method, normalizedPath).Observe(float64(rec.bytesWritten))
 			metrics.BytesSentTotal.Add(float64(rec.bytesWritten))
 		}
+
+		// Track S3 operations (requests to S3 paths, not infra endpoints).
+		if op := classifyS3Operation(r); op != "" {
+			s3Status := "success"
+			if rec.statusCode >= 400 {
+				s3Status = "error"
+			}
+			metrics.S3OperationsTotal.WithLabelValues(op, s3Status).Inc()
+		}
 	})
 }
 
@@ -200,4 +209,117 @@ func metadataHeaderMiddleware(next http.Handler) http.Handler {
 		mw := &metadataHeaderWriter{ResponseWriter: w}
 		next.ServeHTTP(mw, r)
 	})
+}
+
+// infraPaths is the set of non-S3 infrastructure endpoints.
+var infraPaths = map[string]bool{
+	"/health":       true,
+	"/healthz":      true,
+	"/readyz":       true,
+	"/metrics":      true,
+	"/docs":         true,
+	"/docs/":        true,
+	"/openapi.json": true,
+}
+
+// classifyS3Operation returns the S3 operation name for a request, or "" for
+// non-S3 infrastructure endpoints. Used for the s3_operations_total metric.
+func classifyS3Operation(r *http.Request) string {
+	path := r.URL.Path
+	if infraPaths[path] || strings.HasPrefix(path, "/docs") {
+		return ""
+	}
+
+	// Parse bucket and key from path.
+	trimmed := path
+	if len(trimmed) > 0 && trimmed[0] == '/' {
+		trimmed = trimmed[1:]
+	}
+
+	idx := strings.IndexByte(trimmed, '/')
+	bucket := trimmed
+	key := ""
+	if idx >= 0 {
+		bucket = trimmed[:idx]
+		key = trimmed[idx+1:]
+	}
+
+	q := r.URL.Query()
+
+	// Service-level (no bucket).
+	if bucket == "" {
+		if r.Method == http.MethodGet {
+			return "ListBuckets"
+		}
+		return "Unknown"
+	}
+
+	// Object-level (bucket + key).
+	if key != "" {
+		switch r.Method {
+		case http.MethodPut:
+			if q.Has("partNumber") && q.Has("uploadId") {
+				return "UploadPart"
+			}
+			if r.Header.Get("X-Amz-Copy-Source") != "" {
+				return "CopyObject"
+			}
+			if q.Has("acl") {
+				return "PutObjectAcl"
+			}
+			return "PutObject"
+		case http.MethodGet:
+			if q.Has("acl") {
+				return "GetObjectAcl"
+			}
+			if q.Has("uploadId") {
+				return "ListParts"
+			}
+			return "GetObject"
+		case http.MethodHead:
+			return "HeadObject"
+		case http.MethodDelete:
+			if q.Has("uploadId") {
+				return "AbortMultipartUpload"
+			}
+			return "DeleteObject"
+		case http.MethodPost:
+			if q.Has("uploadId") {
+				return "CompleteMultipartUpload"
+			}
+			if q.Has("uploads") {
+				return "CreateMultipartUpload"
+			}
+		}
+		return "Unknown"
+	}
+
+	// Bucket-level (bucket, no key).
+	switch r.Method {
+	case http.MethodPut:
+		if q.Has("acl") {
+			return "PutBucketAcl"
+		}
+		return "CreateBucket"
+	case http.MethodGet:
+		if q.Has("location") {
+			return "GetBucketLocation"
+		}
+		if q.Has("acl") {
+			return "GetBucketAcl"
+		}
+		if q.Has("uploads") {
+			return "ListMultipartUploads"
+		}
+		return "ListObjects"
+	case http.MethodHead:
+		return "HeadBucket"
+	case http.MethodDelete:
+		return "DeleteBucket"
+	case http.MethodPost:
+		if q.Has("delete") {
+			return "DeleteObjects"
+		}
+	}
+	return "Unknown"
 }

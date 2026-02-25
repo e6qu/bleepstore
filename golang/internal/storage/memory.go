@@ -82,7 +82,7 @@ func objectKey(bucket, key string) string {
 
 // partKey builds the map key for a multipart part from its upload ID and part number.
 func partKey(uploadID string, partNumber int) string {
-	return fmt.Sprintf("%s/%05d", uploadID, partNumber)
+	return fmt.Sprintf("%s/%d", uploadID, partNumber)
 }
 
 // computeETag returns the quoted MD5 hex digest of data.

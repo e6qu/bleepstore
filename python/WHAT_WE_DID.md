@@ -1,5 +1,18 @@
 # BleepStore Python -- What We Did
 
+## Cross-Language Storage Identity Normalization (2026-02-25)
+
+Normalized multipart temp directory from `.parts` to `.multipart` to match Go/Rust/Zig convention.
+
+### Changes:
+- **storage/local.py**: Changed all references from `.parts` to `.multipart` (put_part, put_part_stream, assemble_parts, delete_parts, delete_upload_parts, _clean_temp_files, docstrings)
+- **tests/test_multipart.py**: Updated `.parts` → `.multipart` in disk path assertions
+- **tests/test_multipart_complete.py**: Updated `.parts` → `.multipart` in disk path assertions
+
+### Verification:
+- 619/619 unit tests pass
+- All E2E tests pass (86/86)
+
 ## Session 19 -- Stage 15: Performance Optimization & Production Readiness (2026-02-24)
 
 Skipped Stages 12–14 (Raft clustering) — Stage 15 is independent of clustering, targets single-node performance.

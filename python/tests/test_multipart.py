@@ -257,7 +257,7 @@ class TestUploadPart:
         assert resp.status_code == 400
 
     async def test_part_stored_on_disk(self, mp_client: AsyncClient, tmp_path) -> None:
-        """Uploaded part data exists on disk in .parts/{upload_id}/{part_number}."""
+        """Uploaded part data exists on disk in .multipart/{upload_id}/{part_number}."""
         await _create_bucket(mp_client)
         upload_id = await _initiate_upload(mp_client, "test-bucket", "my-key")
         data = b"stored data"
@@ -265,7 +265,7 @@ class TestUploadPart:
             f"/test-bucket/my-key?partNumber=1&uploadId={upload_id}",
             content=data,
         )
-        part_path = tmp_path / "objects" / ".parts" / upload_id / "1"
+        part_path = tmp_path / "objects" / ".multipart" / upload_id / "1"
         assert part_path.exists()
         assert part_path.read_bytes() == data
 
@@ -304,7 +304,7 @@ class TestAbortMultipartUpload:
         )
 
         # Verify part exists on disk
-        parts_dir = tmp_path / "objects" / ".parts" / upload_id
+        parts_dir = tmp_path / "objects" / ".multipart" / upload_id
         assert parts_dir.exists()
 
         # Abort
@@ -624,7 +624,7 @@ class TestMultipartLifecycle:
         assert resp.status_code == 204
 
         # Verify parts cleaned up from disk
-        parts_dir = tmp_path / "objects" / ".parts" / upload_id
+        parts_dir = tmp_path / "objects" / ".multipart" / upload_id
         assert not parts_dir.exists()
 
         # Verify upload no longer listed

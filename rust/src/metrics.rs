@@ -81,7 +81,10 @@ pub fn describe_metrics() {
 
     // Seed all metrics so they appear in /metrics output immediately,
     // even before any requests have been processed.
-    counter!(S3_OPERATIONS_TOTAL, "operation" => "ListBuckets", "status" => "success").increment(0);
+    // Note: counters must be incremented with a non-zero value to appear in
+    // Prometheus output; gauges appear with set(0.0) because that is an
+    // explicit value assignment.
+    counter!(S3_OPERATIONS_TOTAL, "operation" => "seed", "status" => "success").absolute(0);
     gauge!(OBJECTS_TOTAL).set(0.0);
     gauge!(BUCKETS_TOTAL).set(0.0);
 }
@@ -97,10 +100,12 @@ pub async fn metrics_middleware(
     next: axum::middleware::Next,
 ) -> Response {
     let method = req.method().to_string();
-    let path = normalize_path(req.uri().path());
+    let raw_path = req.uri().path().to_string();
+    let raw_query = req.uri().query().map(|s| s.to_string());
+    let path = normalize_path(&raw_path);
 
     // Do not instrument the metrics endpoint itself.
-    if req.uri().path() == "/metrics" {
+    if raw_path == "/metrics" {
         return next.run(req).await;
     }
 
@@ -125,7 +130,7 @@ pub async fn metrics_middleware(
     let resp_size = resp_bytes.len() as f64;
     let response = Response::from_parts(resp_parts, axum::body::Body::from(resp_bytes));
 
-    counter!(HTTP_REQUESTS_TOTAL, "method" => method.clone(), "path" => path.clone(), "status" => status).increment(1);
+    counter!(HTTP_REQUESTS_TOTAL, "method" => method.clone(), "path" => path.clone(), "status" => status.clone()).increment(1);
     histogram!(HTTP_REQUEST_DURATION_SECONDS, "method" => method.clone(), "path" => path.clone())
         .record(duration);
     histogram!(HTTP_REQUEST_SIZE_BYTES, "method" => method.clone(), "path" => path.clone())
@@ -135,7 +140,106 @@ pub async fn metrics_middleware(
     counter!(BYTES_RECEIVED_TOTAL).increment(req_size as u64);
     counter!(BYTES_SENT_TOTAL).increment(resp_size as u64);
 
+    // Track S3 operations by mapping method + path to an operation name.
+    if let Some(operation) = map_s3_operation(&method, &path, raw_query.as_deref()) {
+        let op_status = if response.status().is_success() {
+            "success"
+        } else {
+            "error"
+        };
+        counter!(S3_OPERATIONS_TOTAL, "operation" => operation, "status" => op_status.to_string())
+            .increment(1);
+    }
+
     response
+}
+
+// -- S3 operation mapping -----------------------------------------------------
+
+/// Map an HTTP method + normalized path + optional query string to an S3
+/// operation name. Returns `None` for non-S3 endpoints (health, metrics, etc.).
+fn map_s3_operation(method: &str, path: &str, query: Option<&str>) -> Option<String> {
+    let qs = query.unwrap_or("");
+
+    match path {
+        "/" => match method {
+            "GET" => Some("ListBuckets".to_string()),
+            _ => None,
+        },
+        "/{bucket}" => {
+            match method {
+                "GET" => {
+                    if qs.contains("location") {
+                        Some("GetBucketLocation".to_string())
+                    } else if qs.contains("acl") {
+                        Some("GetBucketAcl".to_string())
+                    } else if qs.contains("uploads") {
+                        Some("ListMultipartUploads".to_string())
+                    } else {
+                        Some("ListObjects".to_string())
+                    }
+                }
+                "PUT" => {
+                    if qs.contains("acl") {
+                        Some("PutBucketAcl".to_string())
+                    } else {
+                        Some("CreateBucket".to_string())
+                    }
+                }
+                "DELETE" => Some("DeleteBucket".to_string()),
+                "HEAD" => Some("HeadBucket".to_string()),
+                "POST" => {
+                    if qs.contains("delete") {
+                        Some("DeleteObjects".to_string())
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        }
+        "/{bucket}/{key}" => {
+            match method {
+                "GET" => {
+                    if qs.contains("acl") {
+                        Some("GetObjectAcl".to_string())
+                    } else if qs.contains("uploadId") {
+                        Some("ListParts".to_string())
+                    } else {
+                        Some("GetObject".to_string())
+                    }
+                }
+                "PUT" => {
+                    if qs.contains("acl") {
+                        Some("PutObjectAcl".to_string())
+                    } else if qs.contains("partNumber") {
+                        Some("UploadPart".to_string())
+                    } else {
+                        Some("PutObject".to_string())
+                    }
+                }
+                "DELETE" => {
+                    if qs.contains("uploadId") {
+                        Some("AbortMultipartUpload".to_string())
+                    } else {
+                        Some("DeleteObject".to_string())
+                    }
+                }
+                "HEAD" => Some("HeadObject".to_string()),
+                "POST" => {
+                    if qs.contains("uploads") {
+                        Some("CreateMultipartUpload".to_string())
+                    } else if qs.contains("uploadId") {
+                        Some("CompleteMultipartUpload".to_string())
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
 }
 
 // -- Path normalization -------------------------------------------------------
@@ -256,6 +360,66 @@ mod tests {
             HTTP_RESPONSE_SIZE_BYTES,
             "bleepstore_http_response_size_bytes"
         );
+    }
+
+    #[test]
+    fn test_map_s3_operation_service_level() {
+        assert_eq!(
+            map_s3_operation("GET", "/", None),
+            Some("ListBuckets".to_string())
+        );
+        assert_eq!(map_s3_operation("POST", "/", None), None);
+    }
+
+    #[test]
+    fn test_map_s3_operation_bucket_level() {
+        assert_eq!(
+            map_s3_operation("PUT", "/{bucket}", None),
+            Some("CreateBucket".to_string())
+        );
+        assert_eq!(
+            map_s3_operation("PUT", "/{bucket}", Some("acl")),
+            Some("PutBucketAcl".to_string())
+        );
+        assert_eq!(
+            map_s3_operation("GET", "/{bucket}", None),
+            Some("ListObjects".to_string())
+        );
+        assert_eq!(
+            map_s3_operation("GET", "/{bucket}", Some("acl")),
+            Some("GetBucketAcl".to_string())
+        );
+        assert_eq!(
+            map_s3_operation("DELETE", "/{bucket}", None),
+            Some("DeleteBucket".to_string())
+        );
+    }
+
+    #[test]
+    fn test_map_s3_operation_object_level() {
+        assert_eq!(
+            map_s3_operation("PUT", "/{bucket}/{key}", None),
+            Some("PutObject".to_string())
+        );
+        assert_eq!(
+            map_s3_operation("GET", "/{bucket}/{key}", None),
+            Some("GetObject".to_string())
+        );
+        assert_eq!(
+            map_s3_operation("DELETE", "/{bucket}/{key}", None),
+            Some("DeleteObject".to_string())
+        );
+        assert_eq!(
+            map_s3_operation("HEAD", "/{bucket}/{key}", None),
+            Some("HeadObject".to_string())
+        );
+    }
+
+    #[test]
+    fn test_map_s3_operation_non_s3() {
+        assert_eq!(map_s3_operation("GET", "/health", None), None);
+        assert_eq!(map_s3_operation("GET", "/docs", None), None);
+        assert_eq!(map_s3_operation("GET", "/openapi.json", None), None);
     }
 
     #[test]

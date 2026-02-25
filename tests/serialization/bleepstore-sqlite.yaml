@@ -1,0 +1,22 @@
+# BleepStore config for SQLite storage backend identity tests.
+# All data (metadata + object BLOBs) stored in a single SQLite file.
+
+server:
+  host: "0.0.0.0"
+  port: 9000
+  region: "us-east-1"
+
+auth:
+  access_key: "bleepstore"
+  secret_key: "bleepstore-secret"
+
+metadata:
+  engine: "sqlite"
+  sqlite:
+    path: "./data/metadata.db"
+
+storage:
+  backend: "sqlite"
+
+  local:
+    root_dir: "./data/objects"

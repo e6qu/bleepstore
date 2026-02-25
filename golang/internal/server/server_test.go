@@ -107,9 +107,7 @@ func testRequest(t *testing.T, srv *Server, method, path string) *httptest.Respo
 	req := httptest.NewRequest(method, path, nil)
 	rec := httptest.NewRecorder()
 	var handler http.Handler = commonHeaders(srv.router)
-	if srv.cfg.Observability.Metrics {
-		handler = metricsMiddleware(handler)
-	}
+	handler = metricsMiddleware(handler)
 	handler.ServeHTTP(rec, req)
 	return rec
 }
@@ -274,7 +272,7 @@ func TestMetricsEndpoint(t *testing.T) {
 	}
 }
 
-func TestMetricsDisabled(t *testing.T) {
+func TestMetricsAlwaysEnabled(t *testing.T) {
 	cfg := &config.Config{
 		Server: config.ServerConfig{
 			Host:   "0.0.0.0",
@@ -293,10 +291,10 @@ func TestMetricsDisabled(t *testing.T) {
 	srv := newTestServerWithConfig(t, cfg)
 	rec := testRequest(t, srv, "GET", "/metrics")
 
-	// When metrics disabled, /metrics route is not registered.
-	// The catch-all S3 dispatch will handle it (returning 500 since no metadata store).
-	if rec.Code == http.StatusOK {
-		t.Errorf("GET /metrics with metrics disabled should not return 200, got %d", rec.Code)
+	// /metrics is always registered (observability config flag is no longer used
+	// for gating the endpoint, only for internal behavior hints).
+	if rec.Code != http.StatusOK {
+		t.Errorf("GET /metrics should always return 200, got %d", rec.Code)
 	}
 }
 
@@ -330,7 +328,7 @@ func TestReadyzEndpoint(t *testing.T) {
 	}
 }
 
-func TestHealthCheckDisabled(t *testing.T) {
+func TestHealthCheckAlwaysEnabled(t *testing.T) {
 	cfg := &config.Config{
 		Server: config.ServerConfig{
 			Host:   "0.0.0.0",
@@ -348,19 +346,19 @@ func TestHealthCheckDisabled(t *testing.T) {
 	}
 	srv := newTestServerWithConfig(t, cfg)
 
-	// /healthz should not be registered when health_check is disabled.
+	// /healthz is always registered (Kubernetes probes must never be gated).
 	rec := testRequest(t, srv, "GET", "/healthz")
-	if rec.Code == http.StatusOK {
-		t.Errorf("GET /healthz with health_check disabled should not return 200, got %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Errorf("GET /healthz should always return 200, got %d", rec.Code)
 	}
 
-	// /readyz should not be registered when health_check is disabled.
+	// /readyz is always registered.
 	rec = testRequest(t, srv, "GET", "/readyz")
-	if rec.Code == http.StatusOK {
-		t.Errorf("GET /readyz with health_check disabled should not return 200, got %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Errorf("GET /readyz should always return 200, got %d", rec.Code)
 	}
 
-	// /health should still work but return static response without checks.
+	// /health should always return checks field (metadata + storage).
 	rec = testRequest(t, srv, "GET", "/health")
 	if rec.Code != http.StatusOK {
 		t.Errorf("GET /health status = %d, want %d", rec.Code, http.StatusOK)
@@ -373,9 +371,9 @@ func TestHealthCheckDisabled(t *testing.T) {
 	if body["status"] != "ok" {
 		t.Errorf("GET /health status = %q, want %q", body["status"], "ok")
 	}
-	// Should NOT have checks field when health_check is disabled.
-	if _, ok := body["checks"]; ok {
-		t.Errorf("GET /health with health_check disabled should not contain 'checks' field")
+	// Checks field should always be present.
+	if _, ok := body["checks"]; !ok {
+		t.Error("GET /health response should contain 'checks' field")
 	}
 }
 

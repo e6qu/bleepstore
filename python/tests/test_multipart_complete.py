@@ -432,7 +432,7 @@ class TestPartCleanup:
         etag = await _upload_part(mp_client, "test-bucket", "my-key", upload_id, 1, data)
 
         # Verify part exists before completion
-        parts_dir = tmp_path / "objects" / ".parts" / upload_id
+        parts_dir = tmp_path / "objects" / ".multipart" / upload_id
         assert parts_dir.exists()
         assert (parts_dir / "1").exists()
 
@@ -681,7 +681,7 @@ class TestMultipartCompleteLifecycle:
             etags.append(etag)
 
         # Verify parts exist on disk
-        parts_dir = tmp_path / "objects" / ".parts" / upload_id
+        parts_dir = tmp_path / "objects" / ".multipart" / upload_id
         assert parts_dir.exists()
 
         # Complete

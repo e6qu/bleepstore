@@ -2,7 +2,7 @@
 
 Implements the StorageBackend protocol using the local filesystem.
 Objects are stored under ``{root}/{bucket}/{key}``. Multipart parts
-are stored under ``{root}/.parts/{upload_id}/{part_number}``.
+are stored under ``{root}/.multipart/{upload_id}/{part_number}``.
 
 Crash-only design:
     - Atomic writes via temp-fsync-rename pattern.
@@ -28,7 +28,7 @@ class LocalStorageBackend:
     """Storage backend that persists objects on the local filesystem.
 
     Objects are stored under ``{root}/{bucket}/{key}``. Multipart parts
-    are stored under ``{root}/.parts/{upload_id}/{part_number}``.
+    are stored under ``{root}/.multipart/{upload_id}/{part_number}``.
 
     Attributes:
         root: The root directory for all stored data.
@@ -75,8 +75,8 @@ class LocalStorageBackend:
         """
         count = 0
         for dirpath, dirnames, filenames in os.walk(self.root):
-            # Skip hidden directories other than .parts (e.g. .git)
-            dirnames[:] = [d for d in dirnames if not d.startswith(".") or d == ".parts"]
+            # Skip hidden directories other than .multipart (e.g. .git)
+            dirnames[:] = [d for d in dirnames if not d.startswith(".") or d == ".multipart"]
             for fname in filenames:
                 if ".tmp." in fname:
                     try:
@@ -199,7 +199,7 @@ class LocalStorageBackend:
         Returns:
             A tuple of (hex-encoded MD5, total bytes written).
         """
-        part_dir = self.root / ".parts" / upload_id
+        part_dir = self.root / ".multipart" / upload_id
         part_dir.mkdir(parents=True, exist_ok=True)
         part_path = part_dir / str(part_number)
 
@@ -327,7 +327,7 @@ class LocalStorageBackend:
     ) -> str:
         """Store a multipart upload part on the local filesystem.
 
-        Parts are stored under ``{root}/.parts/{upload_id}/{part_number}``.
+        Parts are stored under ``{root}/.multipart/{upload_id}/{part_number}``.
         Uses atomic temp-fsync-rename for crash safety.
 
         Args:
@@ -340,7 +340,7 @@ class LocalStorageBackend:
         Returns:
             The hex-encoded MD5 ETag of the part.
         """
-        part_dir = self.root / ".parts" / upload_id
+        part_dir = self.root / ".multipart" / upload_id
         part_dir.mkdir(parents=True, exist_ok=True)
         part_path = part_dir / str(part_number)
 
@@ -397,7 +397,7 @@ class LocalStorageBackend:
             fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
             try:
                 for pn in part_numbers:
-                    part_path = self.root / ".parts" / upload_id / str(pn)
+                    part_path = self.root / ".multipart" / upload_id / str(pn)
                     data = part_path.read_bytes()
                     os.write(fd, data)
                     md5.update(data)
@@ -424,7 +424,7 @@ class LocalStorageBackend:
             key: The object key.
             upload_id: The multipart upload identifier.
         """
-        parts_dir = self.root / ".parts" / upload_id
+        parts_dir = self.root / ".multipart" / upload_id
         if not parts_dir.exists():
             return
 
@@ -446,12 +446,12 @@ class LocalStorageBackend:
 
         Removes the upload directory and all part files within it.
         Used during expired upload reaping where bucket/key are not needed
-        since parts are stored under ``{root}/.parts/{upload_id}/``.
+        since parts are stored under ``{root}/.multipart/{upload_id}/``.
 
         Args:
             upload_id: The multipart upload identifier.
         """
-        parts_dir = self.root / ".parts" / upload_id
+        parts_dir = self.root / ".multipart" / upload_id
         if not parts_dir.exists():
             return
 

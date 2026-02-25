@@ -22,6 +22,29 @@ use super::backend::{StorageBackend, StoredObject};
 /// Map from storage key to (data, etag).
 type EntryMap = HashMap<String, (Bytes, String)>;
 
+/// Split a `"bucket/key"` string into `(bucket, key)`.
+fn split_snapshot_key(storage_key: &str) -> (String, String) {
+    match storage_key.find('/') {
+        Some(pos) => (
+            storage_key[..pos].to_string(),
+            storage_key[pos + 1..].to_string(),
+        ),
+        None => (storage_key.to_string(), String::new()),
+    }
+}
+
+/// Split a `"upload_id/part_number"` string into `(upload_id, part_number)`.
+fn split_part_key(part_key: &str) -> (String, u32) {
+    match part_key.rfind('/') {
+        Some(pos) => {
+            let upload_id = part_key[..pos].to_string();
+            let part_number: u32 = part_key[pos + 1..].parse().unwrap_or(0);
+            (upload_id, part_number)
+        }
+        None => (part_key.to_string(), 0),
+    }
+}
+
 /// In-memory storage backend.
 ///
 /// Stores all object and part data in hash maps protected by async
@@ -174,34 +197,40 @@ impl MemoryBackend {
 
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS object_snapshots (
-                 storage_key TEXT PRIMARY KEY,
-                 data        BLOB NOT NULL,
-                 etag        TEXT NOT NULL
+                 bucket TEXT NOT NULL,
+                 key    TEXT NOT NULL,
+                 data   BLOB NOT NULL,
+                 etag   TEXT NOT NULL,
+                 PRIMARY KEY (bucket, key)
              );
              CREATE TABLE IF NOT EXISTS part_snapshots (
-                 part_key    TEXT PRIMARY KEY,
+                 upload_id   TEXT NOT NULL,
+                 part_number INTEGER NOT NULL,
                  data        BLOB NOT NULL,
-                 etag        TEXT NOT NULL
+                 etag        TEXT NOT NULL,
+                 PRIMARY KEY (upload_id, part_number)
              );",
         )?;
 
-        // Write objects.
+        // Write objects — split "bucket/key" into separate columns.
         {
             let mut stmt = conn.prepare(
-                "INSERT OR REPLACE INTO object_snapshots (storage_key, data, etag) VALUES (?1, ?2, ?3)",
+                "INSERT OR REPLACE INTO object_snapshots (bucket, key, data, etag) VALUES (?1, ?2, ?3, ?4)",
             )?;
-            for (key, (data, etag)) in objects.iter() {
-                stmt.execute(params![key, data.as_ref(), etag])?;
+            for (storage_key, (data, etag)) in objects.iter() {
+                let (bucket, key) = split_snapshot_key(storage_key);
+                stmt.execute(params![bucket, key, data.as_ref(), etag])?;
             }
         }
 
-        // Write parts.
+        // Write parts — split "upload_id/part_number" into separate columns.
         {
             let mut stmt = conn.prepare(
-                "INSERT OR REPLACE INTO part_snapshots (part_key, data, etag) VALUES (?1, ?2, ?3)",
+                "INSERT OR REPLACE INTO part_snapshots (upload_id, part_number, data, etag) VALUES (?1, ?2, ?3, ?4)",
             )?;
-            for (key, (data, etag)) in parts.iter() {
-                stmt.execute(params![key, data.as_ref(), etag])?;
+            for (part_key, (data, etag)) in parts.iter() {
+                let (upload_id, part_number) = split_part_key(part_key);
+                stmt.execute(params![upload_id, part_number, data.as_ref(), etag])?;
             }
         }
 
@@ -233,35 +262,40 @@ impl MemoryBackend {
         let mut parts_map: EntryMap = HashMap::new();
         let mut total_size: u64 = 0;
 
-        // Load objects.
+        // Load objects — reconstruct "bucket/key" map keys from separate columns.
         {
-            let mut stmt = conn.prepare("SELECT storage_key, data, etag FROM object_snapshots")?;
+            let mut stmt = conn.prepare("SELECT bucket, key, data, etag FROM object_snapshots")?;
             let rows = stmt.query_map([], |row| {
-                let key: String = row.get(0)?;
-                let data: Vec<u8> = row.get(1)?;
-                let etag: String = row.get(2)?;
-                Ok((key, data, etag))
+                let bucket: String = row.get(0)?;
+                let key: String = row.get(1)?;
+                let data: Vec<u8> = row.get(2)?;
+                let etag: String = row.get(3)?;
+                Ok((bucket, key, data, etag))
             })?;
             for row in rows {
-                let (key, data, etag) = row?;
+                let (bucket, key, data, etag) = row?;
                 total_size += data.len() as u64;
-                objects_map.insert(key, (Bytes::from(data), etag));
+                let storage_key = format!("{bucket}/{key}");
+                objects_map.insert(storage_key, (Bytes::from(data), etag));
             }
         }
 
-        // Load parts.
+        // Load parts — reconstruct "upload_id/part_number" map keys from separate columns.
         {
-            let mut stmt = conn.prepare("SELECT part_key, data, etag FROM part_snapshots")?;
+            let mut stmt =
+                conn.prepare("SELECT upload_id, part_number, data, etag FROM part_snapshots")?;
             let rows = stmt.query_map([], |row| {
-                let key: String = row.get(0)?;
-                let data: Vec<u8> = row.get(1)?;
-                let etag: String = row.get(2)?;
-                Ok((key, data, etag))
+                let upload_id: String = row.get(0)?;
+                let part_number: u32 = row.get(1)?;
+                let data: Vec<u8> = row.get(2)?;
+                let etag: String = row.get(3)?;
+                Ok((upload_id, part_number, data, etag))
             })?;
             for row in rows {
-                let (key, data, etag) = row?;
+                let (upload_id, part_number, data, etag) = row?;
                 total_size += data.len() as u64;
-                parts_map.insert(key, (Bytes::from(data), etag));
+                let part_key = format!("{upload_id}/{part_number}");
+                parts_map.insert(part_key, (Bytes::from(data), etag));
             }
         }
 
