@@ -57,7 +57,6 @@ const canonical_spec = @embedFile("s3-api.openapi.json");
 /// process lifetime (never freed -- crash-only design).
 pub var global_openapi_json: []const u8 = canonical_spec;
 
-
 pub const ServerState = struct {
     allocator: std.mem.Allocator,
     config: config_mod.Config,
@@ -138,8 +137,7 @@ fn handleHealth(res: *tk.Response) void {
     const overall_status: []const u8 = if (all_ok) "ok" else "degraded";
     res.status = if (all_ok) 200 else 503;
 
-    const body = std.fmt.allocPrint(res.arena,
-        "{{\"status\":\"{s}\",\"checks\":{{\"metadata\":{{\"status\":\"{s}\",\"latency_ms\":{d}}},\"storage\":{{\"status\":\"{s}\",\"latency_ms\":{d}}}}}}}", .{
+    const body = std.fmt.allocPrint(res.arena, "{{\"status\":\"{s}\",\"checks\":{{\"metadata\":{{\"status\":\"{s}\",\"latency_ms\":{d}}},\"storage\":{{\"status\":\"{s}\",\"latency_ms\":{d}}}}}}}", .{
         overall_status,
         meta_status,
         meta_latency_ms,
@@ -315,7 +313,6 @@ fn handleS3CatchAll(ctx: *tk.Context) anyerror!void {
 
     // Start timing for metrics.
     const s3_start_us = getTimestampUs();
-
 
     // Increment HTTP request counter for S3 routes.
     if (global_metrics_enabled) metrics_mod.incrementHttpRequests();

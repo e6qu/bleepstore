@@ -447,9 +447,7 @@ class ObjectHandler:
                 raise InvalidDigest("The Content-MD5 you specified is not valid.")
             actual_md5 = hashlib.md5(data).digest()
             if actual_md5 != expected_md5:
-                raise BadDigest(
-                    "The Content-MD5 you specified did not match what we received."
-                )
+                raise BadDigest("The Content-MD5 you specified did not match what we received.")
 
         # Use streaming write to avoid buffering the entire body in memory.
         # Check if the body has already been consumed (e.g. by auth middleware
@@ -846,9 +844,7 @@ class ObjectHandler:
                 raise InvalidDigest("The Content-MD5 you specified is not valid.")
             actual_md5 = hashlib.md5(body_bytes).digest()
             if actual_md5 != expected_md5:
-                raise BadDigest(
-                    "The Content-MD5 you specified did not match what we received."
-                )
+                raise BadDigest("The Content-MD5 you specified did not match what we received.")
 
         try:
             root = ET.fromstring(body_bytes)

@@ -117,6 +117,9 @@ func Register() {
 			BytesReceivedTotal,
 			BytesSentTotal,
 		)
+		// Initialize S3OperationsTotal so it appears in /metrics output
+		// even before any S3 operations have been performed.
+		S3OperationsTotal.WithLabelValues("ListBuckets", "success")
 	})
 }
 

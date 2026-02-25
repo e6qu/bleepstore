@@ -279,11 +279,8 @@ fn validate_content_md5(headers: &HeaderMap, body: &[u8]) -> Result<(), S3Error>
     };
 
     // Base64-decode the provided MD5.
-    let decoded = base64::Engine::decode(
-        &base64::engine::general_purpose::STANDARD,
-        md5_header,
-    )
-    .map_err(|_| S3Error::InvalidDigest)?;
+    let decoded = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, md5_header)
+        .map_err(|_| S3Error::InvalidDigest)?;
 
     // MD5 digest must be exactly 16 bytes.
     if decoded.len() != 16 {
@@ -383,8 +380,7 @@ fn has_grant_headers(headers: &HeaderMap) -> bool {
 fn validate_acl_mode(headers: &HeaderMap) -> Result<(), S3Error> {
     if headers.contains_key("x-amz-acl") && has_grant_headers(headers) {
         return Err(S3Error::InvalidArgument {
-            message: "Specifying both x-amz-acl and x-amz-grant headers is not allowed"
-                .to_string(),
+            message: "Specifying both x-amz-acl and x-amz-grant headers is not allowed".to_string(),
         });
     }
     Ok(())
@@ -396,11 +392,7 @@ fn validate_acl_mode(headers: &HeaderMap) -> Result<(), S3Error> {
 ///   `id="canonical-user-id"` or `uri="http://acs.amazonaws.com/groups/..."`
 ///
 /// Returns `None` if no grant headers are present.
-fn parse_grant_headers(
-    headers: &HeaderMap,
-    owner_id: &str,
-    display_name: &str,
-) -> Option<String> {
+fn parse_grant_headers(headers: &HeaderMap, owner_id: &str, display_name: &str) -> Option<String> {
     if !has_grant_headers(headers) {
         return None;
     }

@@ -42,8 +42,7 @@ pub const HTTP_RESPONSE_SIZE_BYTES: &str = "bleepstore_http_response_size_bytes"
 
 /// Histogram bucket boundaries for body size metrics (bytes).
 pub const SIZE_HISTOGRAM_BUCKETS: [f64; 10] = [
-    256.0, 1024.0, 4096.0, 16384.0, 65536.0, 262144.0, 1048576.0, 4194304.0, 16777216.0,
-    67108864.0,
+    256.0, 1024.0, 4096.0, 16384.0, 65536.0, 262144.0, 1048576.0, 4194304.0, 16777216.0, 67108864.0,
 ];
 
 // -- Global recorder installation ---------------------------------------------
@@ -77,14 +76,8 @@ pub fn describe_metrics() {
         "Total bytes received (request bodies)"
     );
     describe_counter!(BYTES_SENT_TOTAL, "Total bytes sent (response bodies)");
-    describe_histogram!(
-        HTTP_REQUEST_SIZE_BYTES,
-        "HTTP request body size in bytes"
-    );
-    describe_histogram!(
-        HTTP_RESPONSE_SIZE_BYTES,
-        "HTTP response body size in bytes"
-    );
+    describe_histogram!(HTTP_REQUEST_SIZE_BYTES, "HTTP request body size in bytes");
+    describe_histogram!(HTTP_RESPONSE_SIZE_BYTES, "HTTP response body size in bytes");
 }
 
 // -- Metrics middleware -------------------------------------------------------
@@ -127,9 +120,12 @@ pub async fn metrics_middleware(
     let response = Response::from_parts(resp_parts, axum::body::Body::from(resp_bytes));
 
     counter!(HTTP_REQUESTS_TOTAL, "method" => method.clone(), "path" => path.clone(), "status" => status).increment(1);
-    histogram!(HTTP_REQUEST_DURATION_SECONDS, "method" => method.clone(), "path" => path.clone()).record(duration);
-    histogram!(HTTP_REQUEST_SIZE_BYTES, "method" => method.clone(), "path" => path.clone()).record(req_size);
-    histogram!(HTTP_RESPONSE_SIZE_BYTES, "method" => method.clone(), "path" => path.clone()).record(resp_size);
+    histogram!(HTTP_REQUEST_DURATION_SECONDS, "method" => method.clone(), "path" => path.clone())
+        .record(duration);
+    histogram!(HTTP_REQUEST_SIZE_BYTES, "method" => method.clone(), "path" => path.clone())
+        .record(req_size);
+    histogram!(HTTP_RESPONSE_SIZE_BYTES, "method" => method.clone(), "path" => path.clone())
+        .record(resp_size);
     counter!(BYTES_RECEIVED_TOTAL).increment(req_size as u64);
     counter!(BYTES_SENT_TOTAL).increment(resp_size as u64);
 

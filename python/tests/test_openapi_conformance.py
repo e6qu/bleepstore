@@ -1,4 +1,5 @@
 """OpenAPI conformance test -- served spec must match canonical schema exactly."""
+
 import json
 from pathlib import Path
 

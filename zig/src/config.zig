@@ -59,7 +59,6 @@ pub const ObservabilityConfig = struct {
     health_check: bool = true,
 };
 
-
 pub const ClusterConfig = struct {
     enabled: bool = false,
     node_id: []const u8 = "",

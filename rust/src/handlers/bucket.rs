@@ -166,8 +166,7 @@ fn has_grant_headers(headers: &HeaderMap) -> bool {
 fn validate_acl_mode(headers: &HeaderMap) -> Result<(), S3Error> {
     if headers.contains_key("x-amz-acl") && has_grant_headers(headers) {
         return Err(S3Error::InvalidArgument {
-            message: "Specifying both x-amz-acl and x-amz-grant headers is not allowed"
-                .to_string(),
+            message: "Specifying both x-amz-acl and x-amz-grant headers is not allowed".to_string(),
         });
     }
     Ok(())
@@ -179,11 +178,7 @@ fn validate_acl_mode(headers: &HeaderMap) -> Result<(), S3Error> {
 ///   `id="canonical-user-id"` or `uri="http://acs.amazonaws.com/groups/..."`
 ///
 /// Returns `None` if no grant headers are present.
-fn parse_grant_headers(
-    headers: &HeaderMap,
-    owner_id: &str,
-    display_name: &str,
-) -> Option<String> {
+fn parse_grant_headers(headers: &HeaderMap, owner_id: &str, display_name: &str) -> Option<String> {
     if !has_grant_headers(headers) {
         return None;
     }
@@ -583,7 +578,11 @@ pub async fn put_bucket_acl(
 ///
 /// Extracts Owner and Grants from the XML, converts them to our internal
 /// ACL representation. Returns `MalformedACLError` if parsing fails.
-fn parse_acl_xml_body(body: &[u8], default_owner_id: &str, default_owner_display: &str) -> Result<String, S3Error> {
+fn parse_acl_xml_body(
+    body: &[u8],
+    default_owner_id: &str,
+    default_owner_display: &str,
+) -> Result<String, S3Error> {
     use quick_xml::events::Event;
     use quick_xml::Reader;
 
@@ -636,7 +635,8 @@ fn parse_acl_xml_body(body: &[u8], default_owner_id: &str, default_owner_display
                             in_grantee = true;
                             // Extract xsi:type attribute.
                             for attr in e.attributes().flatten() {
-                                let attr_name = String::from_utf8_lossy(attr.key.as_ref()).to_string();
+                                let attr_name =
+                                    String::from_utf8_lossy(attr.key.as_ref()).to_string();
                                 if attr_name.ends_with("type") || attr_name == "type" {
                                     grantee_type = String::from_utf8_lossy(&attr.value).to_string();
                                 }

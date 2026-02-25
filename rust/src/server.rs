@@ -111,9 +111,15 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/:bucket/*key", head(handle_head_object))
         .route("/:bucket/*key", post(handle_post_object))
         // OpenAPI spec and Swagger UI (served from canonical spec)
-        .route("/openapi.json", get(move || async move {
-            ([(axum::http::header::CONTENT_TYPE, "application/json")], spec_static)
-        }))
+        .route(
+            "/openapi.json",
+            get(move || async move {
+                (
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    spec_static,
+                )
+            }),
+        )
         .route("/docs", get(|| async { Html(SWAGGER_UI_HTML) }));
 
     // Phase 2: apply state and layers (converts to Router<()>).
@@ -157,14 +163,8 @@ async fn common_headers_middleware(req: Request<axum::body::Body>, next: Next) -
     // Generate x-amz-id-2: Base64-encoded 24 random bytes.
     if !headers.contains_key("x-amz-id-2") {
         let random_bytes: [u8; 24] = rand::random();
-        let id2 = base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            random_bytes,
-        );
-        headers.insert(
-            "x-amz-id-2",
-            HeaderValue::from_str(&id2).unwrap(),
-        );
+        let id2 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, random_bytes);
+        headers.insert("x-amz-id-2", HeaderValue::from_str(&id2).unwrap());
     }
 
     let date = httpdate::fmt_http_date(std::time::SystemTime::now());
@@ -483,10 +483,7 @@ async fn auth_middleware(
 async fn health_check(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     if !state.config.observability.health_check {
         // Static response when deep health checks are disabled.
-        return (
-            StatusCode::OK,
-            Json(serde_json::json!({"status": "ok"})),
-        );
+        return (StatusCode::OK, Json(serde_json::json!({"status": "ok"})));
     }
 
     // Deep check: probe metadata store.
@@ -795,8 +792,7 @@ mod tests {
         let storage =
             LocalBackend::new(storage_root.to_str().unwrap()).expect("failed to create backend");
 
-        let mut config: Config =
-            serde_yaml::from_str("{}").expect("failed to parse empty config");
+        let mut config: Config = serde_yaml::from_str("{}").expect("failed to parse empty config");
         config.observability.metrics = metrics;
         config.observability.health_check = health_check;
 

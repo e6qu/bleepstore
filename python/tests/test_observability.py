@@ -109,9 +109,7 @@ class TestHealthzEndpoint:
 
     async def test_healthz_returns_404_when_disabled(self, tmp_path):
         """/healthz returns 404 when health_check is disabled."""
-        config = _base_config(
-            observability=ObservabilityConfig(metrics=False, health_check=False)
-        )
+        config = _base_config(observability=ObservabilityConfig(metrics=False, health_check=False))
         async with await _make_client(config, tmp_path) as client:
             resp = await client.get("/healthz")
             assert resp.status_code == 404
@@ -146,9 +144,7 @@ class TestReadyzEndpoint:
 
     async def test_readyz_returns_404_when_disabled(self, tmp_path):
         """/readyz returns 404 when health_check is disabled."""
-        config = _base_config(
-            observability=ObservabilityConfig(metrics=False, health_check=False)
-        )
+        config = _base_config(observability=ObservabilityConfig(metrics=False, health_check=False))
         async with await _make_client(config, tmp_path) as client:
             resp = await client.get("/readyz")
             assert resp.status_code == 404
@@ -192,9 +188,7 @@ class TestHealthEndpoint:
 
     async def test_health_static_when_health_check_disabled(self, tmp_path):
         """/health returns static {"status":"ok"} when health_check is disabled."""
-        config = _base_config(
-            observability=ObservabilityConfig(metrics=False, health_check=False)
-        )
+        config = _base_config(observability=ObservabilityConfig(metrics=False, health_check=False))
         async with await _make_client(config, tmp_path) as client:
             resp = await client.get("/health")
             assert resp.status_code == 200

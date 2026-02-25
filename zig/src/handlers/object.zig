@@ -193,7 +193,6 @@ pub fn putObject(
         }
     }
 
-
     // Write to storage backend (atomic: temp + fsync + rename).
     const put_result = try sb.putObject(bucket_name, object_key, body, .{
         .content_type = req.header("content-type") orelse "application/octet-stream",
@@ -213,9 +212,7 @@ pub fn putObject(
     const canned_acl_val = req.header("x-amz-acl");
     const has_grant_headers = hasAnyGrantHeader(req);
     if (canned_acl_val != null and has_grant_headers) {
-        return sendS3ErrorWithMessage(res, req_alloc, .InvalidArgument,
-            "Specifying both x-amz-acl and x-amz-grant headers is not allowed",
-            object_key, request_id);
+        return sendS3ErrorWithMessage(res, req_alloc, .InvalidArgument, "Specifying both x-amz-acl and x-amz-grant headers is not allowed", object_key, request_id);
     }
 
     // Build ACL from canned header, grant headers, or default.
@@ -998,9 +995,7 @@ pub fn putObjectAcl(
     const canned_acl_hdr = req.header("x-amz-acl");
     const has_grants = hasAnyGrantHeader(req);
     if (canned_acl_hdr != null and has_grants) {
-        return sendS3ErrorWithMessage(res, req_alloc, .InvalidArgument,
-            "Specifying both x-amz-acl and x-amz-grant headers is not allowed",
-            object_key, request_id);
+        return sendS3ErrorWithMessage(res, req_alloc, .InvalidArgument, "Specifying both x-amz-acl and x-amz-grant headers is not allowed", object_key, request_id);
     }
 
     // Check for x-amz-acl canned ACL header.

@@ -277,9 +277,7 @@ pub fn createBucket(
     const canned_acl = req.header("x-amz-acl");
     const has_grants = hasAnyGrantHeader(req);
     if (canned_acl != null and has_grants) {
-        return sendS3ErrorWithMessage(res, req_alloc, .InvalidArgument,
-            "Specifying both x-amz-acl and x-amz-grant headers is not allowed",
-            bucket_name, request_id);
+        return sendS3ErrorWithMessage(res, req_alloc, .InvalidArgument, "Specifying both x-amz-acl and x-amz-grant headers is not allowed", bucket_name, request_id);
     }
 
     // Build ACL from canned header, grant headers, or default.
@@ -475,9 +473,7 @@ pub fn putBucketAcl(
     const canned_acl = req.header("x-amz-acl");
     const has_grants = hasAnyGrantHeader(req);
     if (canned_acl != null and has_grants) {
-        return sendS3ErrorWithMessage(res, req_alloc, .InvalidArgument,
-            "Specifying both x-amz-acl and x-amz-grant headers is not allowed",
-            bucket_name, request_id);
+        return sendS3ErrorWithMessage(res, req_alloc, .InvalidArgument, "Specifying both x-amz-acl and x-amz-grant headers is not allowed", bucket_name, request_id);
     }
 
     // Check for canned ACL header.

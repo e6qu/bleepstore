@@ -1043,9 +1043,7 @@ class SQLiteMetadataStore:
         # Delete parts and uploads for each expired upload
         for upload in reaped:
             upload_id = upload["upload_id"]
-            await self._db.execute(
-                "DELETE FROM multipart_parts WHERE upload_id = ?", (upload_id,)
-            )
+            await self._db.execute("DELETE FROM multipart_parts WHERE upload_id = ?", (upload_id,))
             await self._db.execute(
                 "DELETE FROM multipart_uploads WHERE upload_id = ?", (upload_id,)
             )
