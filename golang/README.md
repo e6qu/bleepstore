@@ -1,22 +1,21 @@
-# BleepStore — Python Implementation
+# BleepStore — Go Implementation
 
-An S3-compatible object store implemented in Python using FastAPI.
+An S3-compatible object store implemented in Go using net/http and Huma.
 
 ## Prerequisites
 
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/) package manager
+- Go 1.21+
 
 ## Quick Start
 
 ```bash
-# Setup
-cd python/
-uv venv .venv && source .venv/bin/activate
-uv pip install -e ".[dev]"
+# Setup and build
+cd golang/
+go mod download
+go build -o bleepstore ./cmd/bleepstore
 
 # Run
-bleepstore --config ../bleepstore.example.yaml --port 9010
+./bleepstore --config ../bleepstore.example.yaml --port 9011
 ```
 
 ## Documentation
@@ -27,7 +26,10 @@ bleepstore --config ../bleepstore.example.yaml --port 9010
 
 ```bash
 # Unit tests
-uv run pytest tests/ -v
+go test ./... -v
+
+# With race detector
+go test ./... -v -race
 
 # E2E tests (requires running server)
 ./run_e2e.sh
@@ -36,12 +38,14 @@ uv run pytest tests/ -v
 ## Development
 
 ```bash
-# Type checking
-uv run mypy src/bleepstore/
+# Format
+go fmt ./...
 
-# Linting
-uv run ruff check src/
-uv run ruff format src/
+# Vet
+go vet ./...
+
+# Build optimized
+go build -ldflags="-s -w" -o bleepstore ./cmd/bleepstore
 ```
 
 ## Configuration

@@ -1,22 +1,21 @@
-# BleepStore — Python Implementation
+# BleepStore — Zig Implementation
 
-An S3-compatible object store implemented in Python using FastAPI.
+An S3-compatible object store implemented in Zig using tokamak/httpz.
 
 ## Prerequisites
 
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/) package manager
+- Zig 0.15.0+
+- SQLite 3.x (system library)
 
 ## Quick Start
 
 ```bash
-# Setup
-cd python/
-uv venv .venv && source .venv/bin/activate
-uv pip install -e ".[dev]"
+# Setup and build
+cd zig/
+zig build -Doptimize=ReleaseFast
 
 # Run
-bleepstore --config ../bleepstore.example.yaml --port 9010
+./zig-out/bin/bleepstore --config ../bleepstore.example.yaml --port 9013
 ```
 
 ## Documentation
@@ -27,7 +26,7 @@ bleepstore --config ../bleepstore.example.yaml --port 9010
 
 ```bash
 # Unit tests
-uv run pytest tests/ -v
+zig build test
 
 # E2E tests (requires running server)
 ./run_e2e.sh
@@ -36,12 +35,14 @@ uv run pytest tests/ -v
 ## Development
 
 ```bash
-# Type checking
-uv run mypy src/bleepstore/
+# Build (debug)
+zig build
 
-# Linting
-uv run ruff check src/
-uv run ruff format src/
+# Format
+zig fmt src/
+
+# Check formatting
+zig fmt --check src/
 ```
 
 ## Configuration
