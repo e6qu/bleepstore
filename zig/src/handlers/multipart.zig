@@ -686,6 +686,7 @@ pub fn listMultipartUploads(
     const key_marker = server.getQueryParamDecoded(req_alloc, query, "key-marker") orelse "";
     const upload_id_marker = server.getQueryParamValue(query, "upload-id-marker") orelse "";
     const max_uploads_str = server.getQueryParamValue(query, "max-uploads") orelse "1000";
+    const encoding_type = server.getQueryParamValue(query, "encoding-type") orelse "";
     var max_uploads: u32 = std.fmt.parseInt(u32, max_uploads_str, 10) catch 1000;
     if (max_uploads > 1000) max_uploads = 1000;
 
@@ -754,6 +755,7 @@ pub fn listMultipartUploads(
         prefix,
         delimiter,
         &.{}, // common_prefixes (not implementing delimiter grouping for multipart uploads in Stage 7)
+        encoding_type,
     );
 
     server.setCommonHeaders(res, request_id);

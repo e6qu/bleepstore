@@ -57,19 +57,20 @@ Cloud backends now support enhanced configuration:
 - **GCP**: `credentials_file`
 - **Azure**: `connection_string`, `use_managed_identity`
 
-## Next Milestone: S3 API Completeness (Stage 16)
+## Next Milestone: S3 API Completeness — COMPLETE
 
-Based on gap analysis in `S3_GAP_REMAINING.md`, the core S3 API is feature-complete (86/86 E2E tests). Remaining gaps are polish items:
+Based on gap analysis in `S3_GAP_REMAINING.md`, the core S3 API is feature-complete (86/86 E2E tests). All medium-priority gaps have been resolved:
 
-### Medium Priority
-| Gap | Impact | Effort |
-|-----|--------|--------|
-| response-* query params on GetObject | Presigned URL overrides | Low |
-| x-amz-copy-source-if-* for CopyObject | Conditional copy | Medium |
-| x-amz-copy-source-if-* for UploadPartCopy | Conditional part copy | Medium |
-| EncodingType URL encoding in list ops | Key encoding option | Low |
+### Completed (2026-02-28)
+| Gap | Status |
+|-----|--------|
+| response-* query params on GetObject | ✅ IMPLEMENTED |
+| x-amz-copy-source-if-* for CopyObject | ✅ IMPLEMENTED |
+| x-amz-copy-source-if-* for UploadPartCopy | ✅ IMPLEMENTED |
+| EncodingType URL encoding in list ops | ✅ IMPLEMENTED |
+| Multipart reaping on startup | ✅ IMPLEMENTED |
 
-### Low Priority
+### Low Priority (Future)
 | Gap | Impact | Effort |
 |-----|--------|--------|
 | x-amz-storage-class enforcement | Storage tier | Medium |

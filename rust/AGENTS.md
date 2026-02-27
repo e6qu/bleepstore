@@ -68,6 +68,32 @@ This implementation is independent. Do not modify files outside `rust/`,
 `tests/`, or `specs/`. The E2E tests in `tests/e2e/` are shared — if you
 find a test bug, note it in `STATUS.md` but don't fix it here.
 
+### 7. Git Workflow
+
+When working with git, always follow these rules:
+
+- **Creating a branch:** Always branch from `origin/main`, not local main:
+  ```bash
+  git fetch origin
+  git checkout -b feat/my-feature origin/main
+  ```
+
+- **Creating a PR:** Before creating a PR, always rebase your branch on `origin/main`:
+  ```bash
+  git fetch origin
+  git rebase origin/main
+  git push --force-with-lease origin feat/my-feature
+  gh pr create ...
+  ```
+
+- **Switching back to main:** Always sync local main with `origin/main`:
+  ```bash
+  git checkout main
+  git pull origin main
+  ```
+
+- **Never use `git pull` on feature branches** — use `git rebase origin/main` instead.
+
 ---
 
 ## Build & Run

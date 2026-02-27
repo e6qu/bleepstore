@@ -495,7 +495,10 @@ pub fn renderListMultipartUploadsResult(
     prefix: []const u8,
     delimiter: []const u8,
     common_prefixes: []const []const u8,
+    encoding_type: []const u8,
 ) ![]u8 {
+    const encode = std.mem.eql(u8, encoding_type, "url");
+
     var x = XmlWriter.init(allocator);
     defer x.deinit();
 
@@ -504,7 +507,13 @@ pub fn renderListMultipartUploadsResult(
 
     try x.element("Bucket", bucket_name);
     if (key_marker.len > 0) {
-        try x.element("KeyMarker", key_marker);
+        if (encode) {
+            const encoded = try urlEncodeForS3(allocator, key_marker);
+            defer allocator.free(encoded);
+            try x.element("KeyMarker", encoded);
+        } else {
+            try x.element("KeyMarker", key_marker);
+        }
     } else {
         try x.emptyElement("KeyMarker");
     }
@@ -514,25 +523,49 @@ pub fn renderListMultipartUploadsResult(
         try x.emptyElement("UploadIdMarker");
     }
     if (next_key_marker.len > 0) {
-        try x.element("NextKeyMarker", next_key_marker);
+        if (encode) {
+            const encoded = try urlEncodeForS3(allocator, next_key_marker);
+            defer allocator.free(encoded);
+            try x.element("NextKeyMarker", encoded);
+        } else {
+            try x.element("NextKeyMarker", next_key_marker);
+        }
     }
     if (next_upload_id_marker.len > 0) {
         try x.element("NextUploadIdMarker", next_upload_id_marker);
     }
     if (prefix.len > 0) {
-        try x.element("Prefix", prefix);
+        if (encode) {
+            const encoded = try urlEncodeForS3(allocator, prefix);
+            defer allocator.free(encoded);
+            try x.element("Prefix", encoded);
+        } else {
+            try x.element("Prefix", prefix);
+        }
     } else {
         try x.emptyElement("Prefix");
     }
     if (delimiter.len > 0) {
-        try x.element("Delimiter", delimiter);
+        if (encode) {
+            const encoded = try urlEncodeForS3(allocator, delimiter);
+            defer allocator.free(encoded);
+            try x.element("Delimiter", encoded);
+        } else {
+            try x.element("Delimiter", delimiter);
+        }
     }
     try x.element("MaxUploads", try std.fmt.allocPrint(allocator, "{d}", .{max_uploads}));
     try x.element("IsTruncated", if (is_truncated) "true" else "false");
 
     for (uploads) |upload| {
         try x.openTag("Upload");
-        try x.element("Key", upload.key);
+        if (encode) {
+            const encoded_key = try urlEncodeForS3(allocator, upload.key);
+            defer allocator.free(encoded_key);
+            try x.element("Key", encoded_key);
+        } else {
+            try x.element("Key", upload.key);
+        }
         try x.element("UploadId", upload.upload_id);
         if (upload.owner_id.len > 0) {
             try x.openTag("Initiator");
@@ -551,7 +584,13 @@ pub fn renderListMultipartUploadsResult(
 
     for (common_prefixes) |cp| {
         try x.openTag("CommonPrefixes");
-        try x.element("Prefix", cp);
+        if (encode) {
+            const encoded_cp = try urlEncodeForS3(allocator, cp);
+            defer allocator.free(encoded_cp);
+            try x.element("Prefix", encoded_cp);
+        } else {
+            try x.element("Prefix", cp);
+        }
         try x.closeTag("CommonPrefixes");
     }
 
@@ -1100,6 +1139,7 @@ test "renderListMultipartUploadsResult: basic" {
         "",
         "",
         &.{},
+        "",
     );
 
     try std.testing.expect(std.mem.indexOf(u8, result, "<?xml version") != null);
@@ -1132,6 +1172,7 @@ test "renderListMultipartUploadsResult: empty" {
         "",
         "",
         &.{},
+        "",
     );
 
     try std.testing.expect(std.mem.indexOf(u8, result, "<Bucket>empty-bucket</Bucket>") != null);

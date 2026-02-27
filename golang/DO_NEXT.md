@@ -1,39 +1,30 @@
 # BleepStore Go -- Do Next
 
-## Current State: Stage 15 COMPLETE + Pluggable Storage Backends COMPLETE -- 86/86 E2E Tests Passing
+## Current State: Stage 16 COMPLETE (S3 API Completeness) -- 86/86 E2E Tests Passing
 
-- `go test -count=1 -race ./...` -- all unit tests pass (274 total)
+- `go test -count=1 -race ./...` -- all unit tests pass (274+ total)
 - `./run_e2e.sh` -- **86/86 pass**
-- SigV4 signing key and credential caching implemented
-- Batch DeleteObjects SQL implemented
-- Structured logging via log/slog implemented
-- Production config (shutdown timeout, max object size) implemented
-- **Pluggable storage backends done**: memory, sqlite, cloud config enhancements (AWS/GCP/Azure)
-- Test new backends: `./run_e2e.sh --backend memory` or `./run_e2e.sh --backend sqlite`
 
-## Next: Stage 12a -- Raft State Machine & Storage
+## Completed in Stage 16
 
-### Goal
-Implement the core Raft state machine (FSM), log entry types, command serialization, and persistent storage using `hashicorp/raft`.
+- [x] CopyObject respects `x-amz-copy-source-if-*` headers
+- [x] UploadPartCopy respects `x-amz-copy-source-if-*` headers
+- [x] Expired multipart uploads cleaned on startup (7-day TTL)
+- [x] `encoding-type=url` works for ListObjectsV2 and ListObjects V1
+- [x] `RequestTimeout` and `InvalidLocationConstraint` error codes available
 
-### Implementation Scope (per PLAN.md)
-1. **Raft FSM** -- implement the finite state machine for handling state transitions
-2. **Log entry types** -- define command types for metadata operations
-3. **Command serialization** -- serialize/deserialize Raft commands
-4. **Persistent storage** -- use `hashicorp/raft-boltdb/v2` for log and stable storage
+## Remaining Minor Items
 
-### Dependencies
-```
-github.com/hashicorp/raft
-github.com/hashicorp/raft-boltdb/v2
-```
+### encoding-type=url in ListMultipartUploads (LOW priority)
 
-### Run Tests
-```bash
-cd /Users/zardoz/projects/bleepstore/golang
-go test -count=1 -race ./...
-./run_e2e.sh
-```
+**Goal:** Support `encoding-type=url` query parameter for ListMultipartUploads.
 
-## Known Issues
-- None -- all 86 E2E tests pass
+**Files to modify:**
+- `internal/handlers/multipart.go` -- Parse `encoding-type` param in `ListMultipartUploads`
+
+---
+
+## Next: Stage 17 (Event Queues) or Stage 12 (Raft Clustering)
+
+- Stage 17a-c: Event Infrastructure (Redis, RabbitMQ, Kafka)
+- Stage 12a-b, 13a-b, 14: Raft Consensus / Cluster Mode

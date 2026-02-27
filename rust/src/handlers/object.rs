@@ -666,6 +666,7 @@ pub async fn get_object(
     bucket: &str,
     key: &str,
     headers: &HeaderMap,
+    query: &HashMap<String, String>,
 ) -> Result<Response, S3Error> {
     // Check bucket exists.
     if !state.metadata.bucket_exists(bucket).await? {
@@ -781,6 +782,38 @@ pub async fn get_object(
         }
     }
 
+    // Apply response-* query parameter overrides (for presigned URLs).
+    if let Some(content_type) = query.get("response-content-type") {
+        if let Ok(val) = HeaderValue::from_str(content_type) {
+            hdrs.insert("content-type", val);
+        }
+    }
+    if let Some(content_language) = query.get("response-content-language") {
+        if let Ok(val) = HeaderValue::from_str(content_language) {
+            hdrs.insert("content-language", val);
+        }
+    }
+    if let Some(expires) = query.get("response-expires") {
+        if let Ok(val) = HeaderValue::from_str(expires) {
+            hdrs.insert("expires", val);
+        }
+    }
+    if let Some(cache_control) = query.get("response-cache-control") {
+        if let Ok(val) = HeaderValue::from_str(cache_control) {
+            hdrs.insert("cache-control", val);
+        }
+    }
+    if let Some(content_disposition) = query.get("response-content-disposition") {
+        if let Ok(val) = HeaderValue::from_str(content_disposition) {
+            hdrs.insert("content-disposition", val);
+        }
+    }
+    if let Some(content_encoding) = query.get("response-content-encoding") {
+        if let Ok(val) = HeaderValue::from_str(content_encoding) {
+            hdrs.insert("content-encoding", val);
+        }
+    }
+
     Ok(response)
 }
 
@@ -807,6 +840,7 @@ pub async fn head_object(
     bucket: &str,
     key: &str,
     headers: &HeaderMap,
+    query: &HashMap<String, String>,
 ) -> Result<Response, S3Error> {
     // Check bucket exists.
     if !state.metadata.bucket_exists(bucket).await? {
@@ -881,6 +915,38 @@ pub async fn head_object(
             HeaderValue::from_str(value),
         ) {
             hdrs.insert(hname, hval);
+        }
+    }
+
+    // Apply response-* query parameter overrides (for presigned URLs).
+    if let Some(content_type) = query.get("response-content-type") {
+        if let Ok(val) = HeaderValue::from_str(content_type) {
+            hdrs.insert("content-type", val);
+        }
+    }
+    if let Some(content_language) = query.get("response-content-language") {
+        if let Ok(val) = HeaderValue::from_str(content_language) {
+            hdrs.insert("content-language", val);
+        }
+    }
+    if let Some(expires) = query.get("response-expires") {
+        if let Ok(val) = HeaderValue::from_str(expires) {
+            hdrs.insert("expires", val);
+        }
+    }
+    if let Some(cache_control) = query.get("response-cache-control") {
+        if let Ok(val) = HeaderValue::from_str(cache_control) {
+            hdrs.insert("cache-control", val);
+        }
+    }
+    if let Some(content_disposition) = query.get("response-content-disposition") {
+        if let Ok(val) = HeaderValue::from_str(content_disposition) {
+            hdrs.insert("content-disposition", val);
+        }
+    }
+    if let Some(content_encoding) = query.get("response-content-encoding") {
+        if let Ok(val) = HeaderValue::from_str(content_encoding) {
+            hdrs.insert("content-encoding", val);
         }
     }
 
@@ -1765,5 +1831,107 @@ mod tests {
     fn test_parse_iso8601_to_system_time_invalid() {
         assert!(parse_iso8601_to_system_time("short").is_none());
         assert!(parse_iso8601_to_system_time("").is_none());
+    }
+
+    // -- Response override parameter tests ------------------------------------
+
+    #[test]
+    fn test_response_content_type_override() {
+        let mut query = HashMap::new();
+        query.insert("response-content-type".to_string(), "text/html".to_string());
+        assert_eq!(
+            query.get("response-content-type").map(|s| s.as_str()),
+            Some("text/html")
+        );
+    }
+
+    #[test]
+    fn test_response_content_disposition_override() {
+        let mut query = HashMap::new();
+        query.insert(
+            "response-content-disposition".to_string(),
+            "attachment; filename=\"test.txt\"".to_string(),
+        );
+        assert_eq!(
+            query
+                .get("response-content-disposition")
+                .map(|s| s.as_str()),
+            Some("attachment; filename=\"test.txt\"")
+        );
+    }
+
+    #[test]
+    fn test_response_cache_control_override() {
+        let mut query = HashMap::new();
+        query.insert("response-cache-control".to_string(), "no-cache".to_string());
+        assert_eq!(
+            query.get("response-cache-control").map(|s| s.as_str()),
+            Some("no-cache")
+        );
+    }
+
+    #[test]
+    fn test_response_expires_override() {
+        let mut query = HashMap::new();
+        query.insert(
+            "response-expires".to_string(),
+            "Wed, 21 Oct 2026 07:28:00 GMT".to_string(),
+        );
+        assert_eq!(
+            query.get("response-expires").map(|s| s.as_str()),
+            Some("Wed, 21 Oct 2026 07:28:00 GMT")
+        );
+    }
+
+    #[test]
+    fn test_response_content_language_override() {
+        let mut query = HashMap::new();
+        query.insert("response-content-language".to_string(), "en-US".to_string());
+        assert_eq!(
+            query.get("response-content-language").map(|s| s.as_str()),
+            Some("en-US")
+        );
+    }
+
+    #[test]
+    fn test_response_content_encoding_override() {
+        let mut query = HashMap::new();
+        query.insert("response-content-encoding".to_string(), "gzip".to_string());
+        assert_eq!(
+            query.get("response-content-encoding").map(|s| s.as_str()),
+            Some("gzip")
+        );
+    }
+
+    #[test]
+    fn test_multiple_response_overrides() {
+        let mut query = HashMap::new();
+        query.insert(
+            "response-content-type".to_string(),
+            "application/pdf".to_string(),
+        );
+        query.insert(
+            "response-content-disposition".to_string(),
+            "inline".to_string(),
+        );
+        query.insert(
+            "response-cache-control".to_string(),
+            "max-age=3600".to_string(),
+        );
+
+        assert_eq!(
+            query.get("response-content-type").map(|s| s.as_str()),
+            Some("application/pdf")
+        );
+        assert_eq!(
+            query
+                .get("response-content-disposition")
+                .map(|s| s.as_str()),
+            Some("inline")
+        );
+        assert_eq!(
+            query.get("response-cache-control").map(|s| s.as_str()),
+            Some("max-age=3600")
+        );
     }
 }
