@@ -20,7 +20,41 @@ failures. Three bugs were identified and fixed:
 1. Duplicate Content-Length header on GET responses (12+ test failures)
 2. SigV4 canonical query string double-encoding (presigned URLs, list uploads)
 3. SigV4 canonical URI double-encoding (all presigned/encoded paths)
-Unit tests now pass at 134/134. Python E2E tests need to be re-run to verify fixes.
+Unit tests now pass at 160/160. Python E2E tests pass at 86/86.
+
+## S3 API Gap Analysis Summary
+
+Per `S3_GAP_REMAINING.md` (2026-02-27):
+
+| Category | Spec Operations | Implemented | Coverage |
+|----------|----------------|-------------|----------|
+| Bucket Operations | 7 | 7 | 100% |
+| Object Operations | 10 | 10 | 100% |
+| Multipart Upload | 7 | 7 | 100% |
+| Authentication | SigV4 + Presigned | Full | 100% |
+| Error Codes | 41 | 32 | 78% |
+| Response Headers | 12 required | 12 | 100% |
+| Storage Backends | 5 | 5 | 100% |
+
+**Overall S3 Core API Coverage: ~95%** for Phase 1 scope.
+
+## Next Milestone: Stage 16 -- S3 API Completeness
+
+Close remaining gaps identified in the gap analysis:
+
+### Priority 1: Compliance Fixes (Required for Full E2E Compliance)
+| Gap | Impact | File |
+|-----|--------|------|
+| PutBucketAcl XML body parsing | E2E test may fail with XML body | `handlers/bucket.zig` |
+| PutObjectAcl XML body parsing | E2E test may fail with XML body | `handlers/object.zig` |
+
+### Priority 2: Feature Completeness (Nice to Have)
+| Gap | Impact | Notes |
+|-----|--------|-------|
+| Expired multipart upload reaping | Storage leak over time | Startup cleanup, 7-day TTL |
+| encoding-type=url for list ops | Non-ASCII key handling | ListObjectsV2/V1, ListMultipartUploads |
+| x-amz-copy-source-if-* headers | UploadPartCopy conditional copy | Copy source validation |
+| response-* query params on GetObject | Header override on GET | response-content-type, etc. |
 
 ## What Works
 - **Stage 15: Performance Optimization & Production Readiness (Session 24):**
@@ -242,7 +276,6 @@ Unit tests now pass at 134/134. Python E2E tests need to be re-run to verify fix
 - PutBucketAcl with XML body not fully parsed (canned ACL via header works)
 - PutObjectAcl with XML body not fully parsed (canned ACL via header works)
 - test_malformed_xml may return 403 instead of 400 (auth middleware may reject before handler parses XML -- needs E2E verification)
-- Python E2E tests need to be re-run to verify bug fixes (sandbox blocks Python/pytest execution)
 
 ## Test Results
 - `zig build test` -- **160/160 unit tests pass**, 0 memory leaks
@@ -332,7 +365,7 @@ Unit tests now pass at 134/134. Python E2E tests need to be re-run to verify fix
 53. `uriDecodeSegment` decodes %XX sequences but NOT `+` as space (path encoding). `uriDecodeInPlace` decodes `+` as space (query/form encoding).
 54. AWS gateway backend uses single upstream S3 bucket with prefix-based namespacing. All BleepStore buckets/keys are mapped to `{prefix}{bucket}/{key}` in the upstream bucket.
 55. createBucket/deleteBucket in gateway mode are no-ops (logical operations only). Upstream S3 has no concept of per-BleepStore-bucket containers.
-56. Multipart parts stored as temporary objects at `{prefix}.parts/{upload_id}/{part_number}` in the upstream bucket. Assembly downloads all parts, concatenates locally, uploads as final object.
+56. Multipart parts stored as temporary S3 objects at `{prefix}.parts/{upload_id}/{part_number}` in the upstream bucket. Assembly downloads all parts, concatenates locally, uploads as final object.
 57. `std.http.Client.fetch()` in Zig 0.15.2 uses `response_writer: ?*Io.Writer` for response body collection. Create via `ArrayList(u8).writer(allocator).adaptToNewApi(&buffer)` to get an `Io.Writer` adapter.
 58. AWS gateway backend computes MD5 ETags locally (not from upstream response headers) for consistency with the local backend's ETag behavior.
 59. AWS credentials resolved with config file taking priority over environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION).

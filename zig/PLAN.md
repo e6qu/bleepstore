@@ -1158,7 +1158,169 @@ ps aux | grep bleepstore  # check RSS column
 
 ---
 
-## Stage 16a: Queue Interface & Redis Backend
+## Stage 16: S3 API Completeness
+
+> **Status:** Not started. Based on gap analysis in `S3_GAP_REMAINING.md`.
+>
+> **Goal:** Close remaining S3 API gaps to achieve ~98% Phase 1 compliance.
+
+### Overview
+
+Stage 16 addresses the remaining gaps identified in the S3 API gap analysis. These are primarily compliance fixes for features that are partially implemented (ACL XML parsing) and feature completeness for operations that are missing edge cases (conditional headers, encoding-type, response overrides, multipart cleanup).
+
+### Files to Modify
+
+| File | Work |
+|------|------|
+| `src/handlers/bucket.zig` | PutBucketAcl: parse AccessControlPolicy XML body |
+| `src/handlers/object.zig` | PutObjectAcl: parse AccessControlPolicy XML body; GetObject: support response-* query params |
+| `src/handlers/multipart.zig` | UploadPartCopy: support x-amz-copy-source-if-* conditional headers |
+| `src/metadata/sqlite.zig` | Add reapExpiredMultipartUploads method |
+| `src/main.zig` | Call reapExpiredMultipartUploads on startup |
+| `src/xml.zig` | Add parseAccessControlPolicy helper function |
+
+### Detailed Tasks
+
+#### 16.1: ACL XML Body Parsing (Priority 1)
+
+**PutBucketAcl / PutObjectAcl XML body parsing**
+
+The S3 spec allows ACLs to be set via:
+1. `x-amz-acl` header (canned ACL) -- **already implemented**
+2. `x-amz-grant-*` headers (explicit grants) -- **already implemented**
+3. XML body with `<AccessControlPolicy>` -- **PARTIAL: accepts but doesn't parse**
+
+XML format to parse:
+```xml
+<AccessControlPolicy>
+  <Owner>
+    <ID>owner-id</ID>
+    <DisplayName>owner-display</DisplayName>
+  </Owner>
+  <AccessControlList>
+    <Grant>
+      <Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CanonicalUser">
+        <ID>grantee-id</ID>
+        <DisplayName>grantee-display</DisplayName>
+      </Grantee>
+      <Permission>FULL_CONTROL|READ|WRITE|READ_ACP|WRITE_ACP</Permission>
+    </Grant>
+    <Grant>
+      <Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="Group">
+        <URI>http://acs.amazonaws.com/groups/global/AllUsers</URI>
+      </Grantee>
+      <Permission>READ</Permission>
+    </Grant>
+  </AccessControlList>
+</AccessControlPolicy>
+```
+
+Implementation approach:
+- Create `parseAccessControlPolicy(allocator, xml_body) !AclPolicy` in `xml.zig`
+- Use existing tag-extraction pattern (`extractXmlElements`)
+- Parse grants into `AclGrant` structs
+- Convert to JSON ACL format for storage
+- Return `MalformedACLError` on parse failure
+
+#### 16.2: Expired Multipart Upload Reaping (Priority 2)
+
+On startup, clean up multipart uploads older than 7 days:
+
+1. Add `reapExpiredMultipartUploads(self, max_age_seconds)` to `SqliteMetadataStore`
+2. Query uploads where `created_at < datetime('now', '-' || max_age_days || ' days')`
+3. For each expired upload:
+   - Delete part files from storage backend
+   - Delete parts metadata
+   - Delete upload record
+4. Call from `main.zig` after storage/metadata initialization
+
+Default: 7 days (604800 seconds). Configurable via `multipart.upload_expiry_seconds`.
+
+#### 16.3: encoding-type=url Support (Priority 2)
+
+Support `encoding-type=url` query parameter on list operations:
+
+- `GET /<bucket>?list-type=2&encoding-type=url`
+- `GET /<bucket>?encoding-type=url` (v1)
+- `GET /<bucket>?uploads&encoding-type=url`
+
+When `encoding-type=url` is present:
+- URL-encode `<Key>` elements
+- URL-encode `<Prefix>` elements
+- URL-encode `<CommonPrefixes><Prefix>` elements
+- Include `<EncodingType>url</EncodingType>` in response
+
+Implementation:
+- Add `encoding_type` parameter to `listObjectsV2`, `listObjectsV1`, `listMultipartUploads` handlers
+- Use `s3UriEncode` (already in auth.zig) for encoding
+- Add `EncodingType` element to XML renderers when present
+
+#### 16.4: x-amz-copy-source-if-* Conditional Headers (Priority 2)
+
+Support conditional copy headers on UploadPartCopy:
+
+| Header | Behavior |
+|--------|----------|
+| `x-amz-copy-source-if-match` | Copy only if source ETag matches |
+| `x-amz-copy-source-if-none-match` | Copy only if source ETag doesn't match |
+| `x-amz-copy-source-if-modified-since` | Copy only if source modified since date |
+| `x-amz-copy-source-if-unmodified-since` | Copy only if source not modified since date |
+
+Implementation in `uploadPartCopy`:
+- Extract conditional headers from request
+- Get source object metadata
+- Evaluate conditions (same logic as GetObject conditional requests)
+- Return 412 PreconditionFailed if condition fails
+- Proceed with copy if conditions pass
+
+#### 16.5: response-* Query Parameter Overrides (Priority 2)
+
+Support query parameter overrides on GetObject:
+
+| Query Param | Overrides Header |
+|-------------|------------------|
+| `response-content-type` | `Content-Type` |
+| `response-content-language` | `Content-Language` |
+| `response-expires` | `Expires` |
+| `response-cache-control` | `Cache-Control` |
+| `response-content-disposition` | `Content-Disposition` |
+| `response-content-encoding` | `Content-Encoding` |
+
+Implementation in `getObject`:
+- Check for `response-*` query parameters
+- If present, override the corresponding response header
+- URL-decode parameter values before use
+
+### Unit Test Approach
+
+- **ACL XML parsing**: Test with valid XML, malformed XML, missing elements, different grantee types
+- **Multipart reaping**: Test with mock timestamps, verify parts and metadata deleted
+- **encoding-type**: Test URL encoding of keys with special characters
+- **Conditional headers**: Test each condition type, combinations, failure cases
+- **response-* params**: Test each override, URL-decoded values
+
+### Test Targets
+
+- **Unit tests:** 170+ (add ~10 new tests)
+- **Zig E2E:** 34/34 pass
+- **Python E2E:** 86/86 pass
+
+### Definition of Done
+
+- [ ] PutBucketAcl parses AccessControlPolicy XML body
+- [ ] PutObjectAcl parses AccessControlPolicy XML body
+- [ ] Malformed ACL XML returns MalformedACLError (400)
+- [ ] Expired multipart uploads reaped on startup (7-day default)
+- [ ] encoding-type=url URL-encodes keys in list responses
+- [ ] x-amz-copy-source-if-* headers work on UploadPartCopy
+- [ ] response-* query params override GetObject headers
+- [ ] All unit tests pass (170+)
+- [ ] All E2E tests pass (86/86)
+- [ ] Gap analysis updated: coverage improves from ~95% to ~98%
+
+---
+
+## Stage 17a: Queue Interface & Redis Backend
 
 > **Global plan ref:** Milestone 10, Stage 16a. Define QueueBackend interface, event types/envelope, and implement Redis Streams backend with write-through mode.
 
@@ -1277,9 +1439,9 @@ test "Event JSON round-trip" {
 
 ---
 
-## Stage 16b: RabbitMQ Backend
+## Stage 17b: RabbitMQ Backend
 
-> **Global plan ref:** Milestone 10, Stage 16b. Implement the RabbitMQ/AMQP backend using the QueueBackend interface established in 16a.
+> **Global plan ref:** Milestone 10, Stage 16b. Implement the RabbitMQ/AMQP backend using the QueueBackend interface established in 17a.
 
 ### Files to Create/Modify
 
