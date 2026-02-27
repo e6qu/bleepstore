@@ -344,6 +344,11 @@ pub fn getObject(
 
     // --- Range request handling ---
     const range_header = req.header("range");
+
+    // Parse response-* query parameter overrides.
+    const query = req.url.query;
+    const resp_overrides = parseResponseOverrides(req_alloc, query);
+
     if (range_header) |range_str| {
         // Parse the range header.
         const total_size = meta.size;
@@ -375,9 +380,13 @@ pub fn getObject(
             server.setCommonHeaders(res, request_id);
             res.status = 206;
 
-            // Content-Type from metadata.
-            const ct = try req_alloc.dupe(u8, meta.content_type);
-            res.header("Content-Type", ct);
+            // Content-Type from metadata or override.
+            if (resp_overrides.content_type) |ct_override| {
+                res.header("Content-Type", ct_override);
+            } else {
+                const ct = try req_alloc.dupe(u8, meta.content_type);
+                res.header("Content-Type", ct);
+            }
 
             // ETag from metadata.
             const etag = try req_alloc.dupe(u8, meta.etag);
@@ -397,6 +406,23 @@ pub fn getObject(
 
             // Accept-Ranges.
             res.header("Accept-Ranges", "bytes");
+
+            // Apply additional response-* overrides.
+            if (resp_overrides.content_language) |cl| {
+                res.header("Content-Language", cl);
+            }
+            if (resp_overrides.expires) |exp| {
+                res.header("Expires", exp);
+            }
+            if (resp_overrides.cache_control) |cc| {
+                res.header("Cache-Control", cc);
+            }
+            if (resp_overrides.content_disposition) |cd| {
+                res.header("Content-Disposition", cd);
+            }
+            if (resp_overrides.content_encoding) |ce| {
+                res.header("Content-Encoding", ce);
+            }
 
             // User metadata headers.
             if (meta.user_metadata) |um| {
@@ -427,9 +453,13 @@ pub fn getObject(
     server.setCommonHeaders(res, request_id);
     res.status = 200;
 
-    // Content-Type from metadata.
-    const ct = try req_alloc.dupe(u8, meta.content_type);
-    res.header("Content-Type", ct);
+    // Content-Type from metadata or override.
+    if (resp_overrides.content_type) |ct_override| {
+        res.header("Content-Type", ct_override);
+    } else {
+        const ct = try req_alloc.dupe(u8, meta.content_type);
+        res.header("Content-Type", ct);
+    }
 
     // ETag from metadata.
     const etag = try req_alloc.dupe(u8, meta.etag);
@@ -445,6 +475,23 @@ pub fn getObject(
 
     // Accept-Ranges: bytes (advertise range support).
     res.header("Accept-Ranges", "bytes");
+
+    // Apply additional response-* overrides.
+    if (resp_overrides.content_language) |cl| {
+        res.header("Content-Language", cl);
+    }
+    if (resp_overrides.expires) |exp| {
+        res.header("Expires", exp);
+    }
+    if (resp_overrides.cache_control) |cc| {
+        res.header("Cache-Control", cc);
+    }
+    if (resp_overrides.content_disposition) |cd| {
+        res.header("Content-Disposition", cd);
+    }
+    if (resp_overrides.content_encoding) |ce| {
+        res.header("Content-Encoding", ce);
+    }
 
     // User metadata headers.
     if (meta.user_metadata) |um| {
@@ -810,6 +857,7 @@ pub fn listObjectsV2(
     const start_after_raw = server.getQueryParamDecoded(req_alloc, query, "start-after") orelse "";
     const continuation_token = server.getQueryParamDecoded(req_alloc, query, "continuation-token") orelse "";
     const max_keys_str = server.getQueryParamValue(query, "max-keys") orelse "1000";
+    const encoding_type = server.getQueryParamValue(query, "encoding-type") orelse "";
 
     // Parse max-keys.
     const max_keys: u32 = std.fmt.parseInt(u32, max_keys_str, 10) catch 1000;
@@ -849,6 +897,7 @@ pub fn listObjectsV2(
         continuation_token,
         if (result.next_continuation_token) |t| t else "",
         start_after_raw,
+        encoding_type,
     );
 
     server.setCommonHeaders(res, request_id);
@@ -879,6 +928,7 @@ pub fn listObjectsV1(
     const delimiter = server.getQueryParamDecoded(req_alloc, query, "delimiter") orelse "";
     const marker = server.getQueryParamDecoded(req_alloc, query, "marker") orelse "";
     const max_keys_str = server.getQueryParamValue(query, "max-keys") orelse "1000";
+    const encoding_type = server.getQueryParamValue(query, "encoding-type") orelse "";
 
     // Parse max-keys.
     const max_keys: u32 = std.fmt.parseInt(u32, max_keys_str, 10) catch 1000;
@@ -911,6 +961,7 @@ pub fn listObjectsV1(
         result.common_prefixes,
         marker,
         if (result.next_marker) |m| m else "",
+        encoding_type,
     );
 
     server.setCommonHeaders(res, request_id);
@@ -1010,7 +1061,7 @@ pub fn putObjectAcl(
         // Unknown canned ACL -- fall through to default.
     }
 
-    // 1C: Check for x-amz-grant-* headers.
+    // Check for x-amz-grant-* headers.
     if (has_grants) {
         if (try parseGrantHeaders(req_alloc, req, owner_id, owner_display)) |grant_acl| {
             try ms.updateObjectAcl(bucket_name, object_key, grant_acl);
@@ -1021,7 +1072,22 @@ pub fn putObjectAcl(
         }
     }
 
-    // No canned ACL or grant headers -- set default private ACL.
+    // Check for XML body (AccessControlPolicy).
+    const body = req.body();
+    if (body) |b| {
+        if (b.len > 0) {
+            const acl_json = xml_mod.parseAccessControlPolicyXml(req_alloc, b, owner_id, owner_display) catch {
+                return sendS3Error(res, req_alloc, .MalformedACLError, object_key, request_id);
+            };
+            try ms.updateObjectAcl(bucket_name, object_key, acl_json);
+            server.setCommonHeaders(res, request_id);
+            res.status = 200;
+            res.body = "";
+            return;
+        }
+    }
+
+    // No canned ACL, grant headers, or XML body -- set default private ACL.
     const acl_json = try buildDefaultAclJson(req_alloc, owner_id, owner_display);
     try ms.updateObjectAcl(bucket_name, object_key, acl_json);
 
@@ -1225,6 +1291,42 @@ fn hasAnyGrantHeader(req: *tk.Request) bool {
     return false;
 }
 
+/// Extract response-* query parameter overrides from the query string.
+/// Returns a struct with optional override values.
+const ResponseOverrides = struct {
+    content_type: ?[]const u8 = null,
+    content_language: ?[]const u8 = null,
+    expires: ?[]const u8 = null,
+    cache_control: ?[]const u8 = null,
+    content_disposition: ?[]const u8 = null,
+    content_encoding: ?[]const u8 = null,
+};
+
+fn parseResponseOverrides(alloc: std.mem.Allocator, query: []const u8) ResponseOverrides {
+    var overrides: ResponseOverrides = .{};
+
+    if (server.getQueryParamDecoded(alloc, query, "response-content-type")) |val| {
+        overrides.content_type = val;
+    }
+    if (server.getQueryParamDecoded(alloc, query, "response-content-language")) |val| {
+        overrides.content_language = val;
+    }
+    if (server.getQueryParamDecoded(alloc, query, "response-expires")) |val| {
+        overrides.expires = val;
+    }
+    if (server.getQueryParamDecoded(alloc, query, "response-cache-control")) |val| {
+        overrides.cache_control = val;
+    }
+    if (server.getQueryParamDecoded(alloc, query, "response-content-disposition")) |val| {
+        overrides.content_disposition = val;
+    }
+    if (server.getQueryParamDecoded(alloc, query, "response-content-encoding")) |val| {
+        overrides.content_encoding = val;
+    }
+
+    return overrides;
+}
+
 /// Parse x-amz-grant-* headers and build an ACL JSON string.
 /// Returns null if no grant headers are present.
 /// Value format: `id="canonical-user-id"` or `uri="http://acs.amazonaws.com/groups/..."`, comma-separated.
@@ -1407,6 +1509,30 @@ fn hexCharToNibble(ch: u8) ?u8 {
         'A'...'F' => ch - 'A' + 10,
         else => null,
     };
+}
+
+/// URL-encode a string for S3 encoding-type=url responses.
+/// Encodes all characters except A-Za-z0-9, '-', '_', '.', '~', '/'.
+fn urlEncode(alloc: std.mem.Allocator, input: []const u8) ![]u8 {
+    var result: std.ArrayList(u8) = .empty;
+    errdefer result.deinit(alloc);
+
+    const hex_chars = "0123456789ABCDEF";
+
+    for (input) |ch| {
+        switch (ch) {
+            'A'...'Z', 'a'...'z', '0'...'9', '-', '_', '.', '~', '/' => {
+                try result.append(alloc, ch);
+            },
+            else => {
+                try result.append(alloc, '%');
+                try result.append(alloc, hex_chars[ch >> 4]);
+                try result.append(alloc, hex_chars[ch & 0x0F]);
+            },
+        }
+    }
+
+    return result.toOwnedSlice(alloc);
 }
 
 // ---------------------------------------------------------------------------

@@ -314,6 +314,121 @@ fn stripQuotes(s: []const u8) []const u8 {
     return s;
 }
 
+/// Check if an object's ETag matches a conditional ETag header value.
+/// Handles comma-separated list of ETags and wildcard "*".
+fn etagMatchConditional(object_etag: []const u8, condition: []const u8) bool {
+    if (std.mem.eql(u8, condition, "*")) return true;
+
+    const obj_stripped = stripQuotes(object_etag);
+
+    var iter = std.mem.splitScalar(u8, condition, ',');
+    while (iter.next()) |etag_part| {
+        const trimmed = std.mem.trim(u8, etag_part, " ");
+        const cond_stripped = stripQuotes(trimmed);
+        if (std.mem.eql(u8, obj_stripped, cond_stripped)) return true;
+    }
+    return false;
+}
+
+/// Check if the object has been modified since a given HTTP date string.
+fn isModifiedSince(last_modified_iso: []const u8, condition_date: []const u8) bool {
+    const obj_epoch = parseIso8601ToEpoch(last_modified_iso) orelse return false;
+    const cond_epoch = parseHttpDateToEpoch(condition_date) orelse return false;
+    return obj_epoch > cond_epoch;
+}
+
+/// Parse an ISO 8601 date "2026-02-23T12:00:00.000Z" to epoch seconds.
+fn parseIso8601ToEpoch(iso: []const u8) ?i64 {
+    if (iso.len < 19) return null;
+    const year = std.fmt.parseInt(u16, iso[0..4], 10) catch return null;
+    const month = std.fmt.parseInt(u8, iso[5..7], 10) catch return null;
+    const day = std.fmt.parseInt(u8, iso[8..10], 10) catch return null;
+    const hours = std.fmt.parseInt(u8, iso[11..13], 10) catch return null;
+    const minutes = std.fmt.parseInt(u8, iso[14..16], 10) catch return null;
+    const seconds = std.fmt.parseInt(u8, iso[17..19], 10) catch return null;
+
+    return dateToEpoch(year, month, day, hours, minutes, seconds);
+}
+
+/// Parse an HTTP date (RFC 7231 / RFC 2822) to epoch seconds.
+fn parseHttpDateToEpoch(date_str: []const u8) ?i64 {
+    const trimmed = std.mem.trim(u8, date_str, " ");
+
+    const comma_idx = std.mem.indexOfScalar(u8, trimmed, ',') orelse return null;
+    if (comma_idx + 2 >= trimmed.len) return null;
+    const rest = std.mem.trimLeft(u8, trimmed[comma_idx + 1 ..], " ");
+
+    var parts_iter = std.mem.splitScalar(u8, rest, ' ');
+    const day_str = parts_iter.next() orelse return null;
+    const month_str = parts_iter.next() orelse return null;
+    const year_str = parts_iter.next() orelse return null;
+    const time_str = parts_iter.next() orelse return null;
+
+    const day = std.fmt.parseInt(u8, day_str, 10) catch return null;
+    const month = monthNameToNumber(month_str) orelse return null;
+    const year = std.fmt.parseInt(u16, year_str, 10) catch return null;
+
+    if (time_str.len < 8) return null;
+    const hours = std.fmt.parseInt(u8, time_str[0..2], 10) catch return null;
+    const minutes = std.fmt.parseInt(u8, time_str[3..5], 10) catch return null;
+    const seconds = std.fmt.parseInt(u8, time_str[6..8], 10) catch return null;
+
+    return dateToEpoch(year, month, day, hours, minutes, seconds);
+}
+
+/// Convert a month name abbreviation to its 1-based number.
+fn monthNameToNumber(name: []const u8) ?u8 {
+    const months = [12][]const u8{ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+    for (months, 0..) |m, i| {
+        if (std.ascii.eqlIgnoreCase(name, m)) return @intCast(i + 1);
+    }
+    return null;
+}
+
+/// Convert date components to Unix epoch seconds.
+fn dateToEpoch(year: u16, month: u8, day: u8, hours: u8, minutes: u8, seconds: u8) ?i64 {
+    if (year < 1970 or month < 1 or month > 12 or day < 1 or day > 31) return null;
+
+    const month_days_table = [12]u16{ 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    const year_type: std.time.epoch.Year = @intCast(year);
+    const is_leap = std.time.epoch.isLeapYear(year_type);
+
+    var total_days: i64 = 0;
+    var y: u16 = 1970;
+    while (y < year) : (y += 1) {
+        total_days += if (std.time.epoch.isLeapYear(@intCast(y))) @as(i64, 366) else 365;
+    }
+    var m: u8 = 1;
+    while (m < month) : (m += 1) {
+        var md: i64 = month_days_table[m - 1];
+        if (m == 2 and is_leap) md += 1;
+        total_days += md;
+    }
+    total_days += @as(i64, day) - 1;
+
+    return total_days * 86400 + @as(i64, hours) * 3600 + @as(i64, minutes) * 60 + @as(i64, seconds);
+}
+
+/// Free an ObjectMeta struct's GPA-allocated fields.
+fn freeObjectMeta(meta: anytype) void {
+    if (server.global_allocator) |gpa| {
+        gpa.free(meta.bucket);
+        gpa.free(meta.key);
+        gpa.free(meta.etag);
+        gpa.free(meta.content_type);
+        gpa.free(meta.last_modified);
+        gpa.free(meta.storage_class);
+        gpa.free(meta.acl);
+        if (meta.user_metadata) |v| gpa.free(v);
+        if (meta.version_id) |v| gpa.free(v);
+        if (meta.content_encoding) |v| gpa.free(v);
+        if (meta.content_language) |v| gpa.free(v);
+        if (meta.content_disposition) |v| gpa.free(v);
+        if (meta.cache_control) |v| gpa.free(v);
+        if (meta.expires) |v| gpa.free(v);
+    }
+}
+
 /// POST /<bucket>/<key>?uploadId=X -- Complete a multipart upload.
 pub fn completeMultipartUpload(
     res: *tk.Response,
@@ -736,24 +851,66 @@ pub fn uploadPartCopy(
     if (src_meta_opt == null) {
         return sendS3Error(res, req_alloc, .NoSuchKey, src_key, request_id);
     }
-    // Free source object metadata (GPA-allocated strings).
     const src_meta = src_meta_opt.?;
-    if (server.global_allocator) |gpa| {
-        gpa.free(src_meta.bucket);
-        gpa.free(src_meta.key);
-        gpa.free(src_meta.etag);
-        gpa.free(src_meta.content_type);
-        gpa.free(src_meta.last_modified);
-        gpa.free(src_meta.storage_class);
-        gpa.free(src_meta.acl);
-        if (src_meta.user_metadata) |v| gpa.free(v);
-        if (src_meta.version_id) |v| gpa.free(v);
-        if (src_meta.content_encoding) |v| gpa.free(v);
-        if (src_meta.content_language) |v| gpa.free(v);
-        if (src_meta.content_disposition) |v| gpa.free(v);
-        if (src_meta.cache_control) |v| gpa.free(v);
-        if (src_meta.expires) |v| gpa.free(v);
+
+    // --- x-amz-copy-source-if-* conditional header evaluation ---
+    // These headers are analogous to GetObject conditional headers but apply to the copy source.
+
+    // x-amz-copy-source-if-match: must match the ETag, otherwise 412.
+    const copy_if_match = req.header("x-amz-copy-source-if-match");
+    if (copy_if_match) |etag_cond| {
+        if (!etagMatchConditional(src_meta.etag, etag_cond)) {
+            // Free source metadata before returning.
+            freeObjectMeta(src_meta);
+            server.setCommonHeaders(res, request_id);
+            res.status = 412;
+            res.body = "";
+            return;
+        }
     }
+
+    // x-amz-copy-source-if-none-match: if ETag matches, return 412.
+    const copy_if_none_match = req.header("x-amz-copy-source-if-none-match");
+    if (copy_if_none_match) |etag_cond| {
+        if (etagMatchConditional(src_meta.etag, etag_cond)) {
+            freeObjectMeta(src_meta);
+            server.setCommonHeaders(res, request_id);
+            res.status = 412;
+            res.body = "";
+            return;
+        }
+    }
+
+    // x-amz-copy-source-if-unmodified-since: only if copy-if-match was NOT present.
+    if (copy_if_match == null) {
+        const copy_if_unmodified = req.header("x-amz-copy-source-if-unmodified-since");
+        if (copy_if_unmodified) |date_str| {
+            if (isModifiedSince(src_meta.last_modified, date_str)) {
+                freeObjectMeta(src_meta);
+                server.setCommonHeaders(res, request_id);
+                res.status = 412;
+                res.body = "";
+                return;
+            }
+        }
+    }
+
+    // x-amz-copy-source-if-modified-since: only if copy-if-none-match was NOT present.
+    if (copy_if_none_match == null) {
+        const copy_if_modified = req.header("x-amz-copy-source-if-modified-since");
+        if (copy_if_modified) |date_str| {
+            if (!isModifiedSince(src_meta.last_modified, date_str)) {
+                freeObjectMeta(src_meta);
+                server.setCommonHeaders(res, request_id);
+                res.status = 412;
+                res.body = "";
+                return;
+            }
+        }
+    }
+
+    // Free source object metadata (GPA-allocated strings).
+    freeObjectMeta(src_meta);
 
     // Read the source object data from storage.
     const obj_data = sb.getObject(src_bucket, src_key) catch |err| {

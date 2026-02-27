@@ -500,16 +500,13 @@ pub fn putBucketAcl(
     }
 
     // Check for XML body (AccessControlPolicy).
-    // For now, we accept the body but use a simple approach:
-    // if there's a body, store it as-is (we'd need full XML->JSON conversion).
-    // For Phase 1, canned ACLs via header are the primary mechanism.
-    // If no canned ACL and no body, set default private ACL.
     const body = req.body();
     if (body) |b| {
         if (b.len > 0) {
-            // Simple: keep existing ACL if we can't parse the body.
-            // A full implementation would parse AccessControlPolicy XML.
-            // For now, just acknowledge the request.
+            const acl_json = xml.parseAccessControlPolicyXml(req_alloc, b, owner_id, owner_display) catch {
+                return sendS3Error(res, req_alloc, .MalformedACLError, bucket_name, request_id);
+            };
+            try ms.updateBucketAcl(bucket_name, acl_json);
             server.setCommonHeaders(res, request_id);
             res.status = 200;
             res.body = "";
