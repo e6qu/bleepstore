@@ -1,7 +1,7 @@
 # BleepStore Python — S3 API Gap Analysis
 
 > Generated: 2026-02-28
-> Last Updated: 2026-02-28 (verified against source code)
+> Last Updated: 2026-02-28 (verified against source code after PR merge)
 > Based on source code inspection and spec comparison
 
 ## Executive Summary
@@ -12,10 +12,12 @@
 | Object Operations | 10 | 10 | 0 |
 | Multipart Upload | 7 | 7 | 0 |
 | Authentication | Full SigV4 | Full SigV4 | 0 |
-| Error Codes | 41 | 32 | 9 |
+| Error Codes | 41 | 34 | 7 |
 | Common Headers | 6 | 6 | 0 |
 
 **Overall: 86/86 E2E tests passing. Core S3 API is feature-complete for single-node operations.**
+
+**All medium-priority gaps from previous analysis have been implemented.**
 
 ---
 
@@ -98,7 +100,10 @@
 | Gap | Priority | Notes |
 |-----|----------|-------|
 | If-None-Match: * on PutObject (conditional create) | MEDIUM | IMPLEMENTED at `object.py:376-380` |
-| response-* query params on GetObject | LOW | response-content-type, response-cache-control, etc. |
+| response-* query params on GetObject | LOW | IMPLEMENTED at `object.py:495-524, 613-614` |
+| x-amz-copy-source-if-* for CopyObject | MEDIUM | IMPLEMENTED at `object.py:526-582` |
+| x-amz-copy-source-if-* for UploadPartCopy | MEDIUM | IMPLEMENTED at `multipart.py:142-198` |
+| encoding-type=url in list operations | LOW | IMPLEMENTED at `xml_utils.py:173-175` |
 | x-amz-storage-class header | LOW | Parsed but not enforced |
 | x-amz-tagging header | LOW | Parsed but not implemented |
 | x-amz-server-side-encryption | N/A | No SSE implementation planned |
@@ -174,7 +179,7 @@
 
 ## 5. Error Responses (specs/s3-error-responses.md)
 
-### Status: 32/41 CODES IMPLEMENTED (78% Coverage)
+### Status: 34/41 CODES IMPLEMENTED (83% Coverage)
 
 ### Implemented Error Codes
 
@@ -213,8 +218,9 @@
 | InternalError | 500 | `errors.py:113-117` |
 | AuthorizationQueryParametersError | 400 | `errors.py:253-260` |
 | InvalidRequest | 400 | `errors.py:211-215` |
+| ExpiredPresignedUrl | 403 | `errors.py:273-277` |
 
-### Missing Error Codes (9)
+### Missing Error Codes (7)
 
 | Error Code | HTTP | Reason |
 |------------|------|--------|
@@ -228,7 +234,7 @@
 | PermanentRedirect | 301 | No redirect support |
 | TemporaryRedirect | 307 | No redirect support |
 
-**Note:** Most missing codes are for features not in scope (versioning, Glacier, redirects, rate limiting). Additionally, `AuthorizationQueryParametersError` (from s3-authentication.md) is implemented but not counted in the 41-code total above.
+**Note:** Most missing codes are for features not in scope (versioning, Glacier, redirects, rate limiting, STS).
 
 ---
 
@@ -316,16 +322,19 @@ These S3 features are intentionally excluded from the current implementation sco
 |---|-----|--------|--------|
 | 1 | None identified | - | - |
 
-All core S3 operations are implemented and tested.
+All core S3 operations and medium-priority gaps are implemented and tested.
 
 ### MEDIUM PRIORITY (Nice to Have)
 
 | # | Gap | Impact | Effort |
 |---|-----|--------|--------|
-| 1 | response-* query params on GetObject | Presigned URL overrides | Low |
-| 2 | x-amz-copy-source-if-* conditionals for CopyObject | Conditional copy | Medium |
-| 3 | x-amz-copy-source-if-* conditionals for UploadPartCopy | Conditional part copy | Medium |
-| 4 | EncodingType URL encoding in list operations | Key encoding option | Low |
+| - | (all completed) | - | - |
+
+Previous medium-priority items have been implemented:
+- ✅ response-* query params on GetObject
+- ✅ x-amz-copy-source-if-* conditionals for CopyObject
+- ✅ x-amz-copy-source-if-* conditionals for UploadPartCopy
+- ✅ EncodingType URL encoding in list operations
 
 ### LOW PRIORITY (Future Consideration)
 
@@ -384,13 +393,19 @@ The BleepStore Python implementation is **feature-complete** for the core S3 API
 - All 10 object operations implemented
 - All 7 multipart upload operations implemented
 - Full SigV4 authentication (header + presigned URL)
-- 78% of spec-defined error codes (missing codes are for features not in scope)
+- 83% of spec-defined error codes (missing codes are for features not in scope)
 - All required common headers
 
 **The implementation achieves 100% E2E test coverage (86/86 tests passing) against the shared test suite.**
+
+**All medium-priority gaps have been resolved:**
+- ✅ response-* query params for presigned URL overrides
+- ✅ x-amz-copy-source-if-* conditional headers for CopyObject
+- ✅ x-amz-copy-source-if-* conditional headers for UploadPartCopy
+- ✅ encoding-type=url support in list operations
 
 Remaining work is focused on:
 1. **Stage 12-14**: Raft consensus / clustering
 2. **Stage 16**: Event queues (Redis, RabbitMQ, Kafka)
 3. **Performance**: Ongoing optimization
-4. **Edge cases**: Minor feature gaps documented above
+4. **Low-priority polish**: storage-class, tagging, rate limiting

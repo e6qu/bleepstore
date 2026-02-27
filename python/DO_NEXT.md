@@ -1,54 +1,46 @@
 # BleepStore Python -- Do Next
 
-## Current State: Stage 15 COMPLETE + Gap Analysis — 86/86 E2E Tests Passing
+## Current State: S3 API COMPLETE — 86/86 E2E Tests Passing
 
 - `uv run pytest tests/ -v` — 619/619 pass
 - `./run_e2e.sh` — **86/86 pass**
-- Gap analysis complete: see `S3_GAP_REMAINING.md`
+- Gap analysis: `S3_GAP_REMAINING.md` — all medium-priority gaps resolved
 
-## Next: Stage 16 — S3 API Completeness
+## S3 API Completeness — DONE
 
-Close minor S3 API gaps identified in the gap analysis. These are polish items—the core API is feature-complete.
+All medium-priority gaps from the gap analysis have been implemented:
 
-### Priority 1: GetObject Response Overrides (Medium)
-Presigned URLs often use `response-*` query params to override Content-Type, Content-Disposition, etc.
+| Feature | Status | Location |
+|---------|--------|----------|
+| response-* query params | ✅ | `object.py:495-524` |
+| x-amz-copy-source-if-* (CopyObject) | ✅ | `object.py:526-582` |
+| x-amz-copy-source-if-* (UploadPartCopy) | ✅ | `multipart.py:142-198` |
+| encoding-type=url in list ops | ✅ | `xml_utils.py:173-175` |
+| Multipart reaping on startup | ✅ | `server.py:133-150` |
 
-**Files to modify:**
-- `src/bleepstore/handlers/object.py` — Parse and apply response-* params in `get_object()`
-- `src/bleepstore/xml_utils.py` — Update presigned URL handling if needed
+## Next: Stage 12-14 — Raft Consensus / Clustering
 
-**Query params to support:**
-- `response-content-type`
-- `response-content-language`
-- `response-expires`
-- `response-cache-control`
-- `response-content-disposition`
-- `response-content-encoding`
+Implement distributed consensus for multi-node deployments.
 
-### Priority 2: Conditional CopyObject (Medium)
-Add `x-amz-copy-source-if-*` conditional headers for CopyObject.
+**Key files to create/modify:**
+- `src/bleepstore/cluster/raft.py` — Raft consensus implementation
+- `src/bleepstore/cluster/state.py` — Cluster state machine
+- `src/bleepstore/server.py` — Cluster mode integration
 
-**Files to modify:**
-- `src/bleepstore/handlers/object.py` — Add conditional evaluation in `copy_object()`
+**Reference:**
+- `../specs/clustering.md` — Clustering specification
 
-**Headers to support:**
-- `x-amz-copy-source-if-match`
-- `x-amz-copy-source-if-none-match`
-- `x-amz-copy-source-if-modified-since`
-- `x-amz-copy-source-if-unmodified-since`
+## Alternative: Stage 16 — Event Queues
 
-### Priority 3: Conditional UploadPartCopy (Medium)
-Same conditional headers for UploadPartCopy.
+Implement persistent event notifications.
 
-**Files to modify:**
-- `src/bleepstore/handlers/multipart.py` — Add conditional evaluation in `upload_part_copy()`
+**Backends to support:**
+- Redis
+- RabbitMQ
+- Kafka
 
-### Priority 4: EncodingType in List Operations (Low)
-Support `encoding-type=url` parameter in list operations.
-
-**Files to modify:**
-- `src/bleepstore/handlers/object.py` — Handle `encoding-type` in `list_objects_v1/v2()`
-- `src/bleepstore/xml_utils.py` — URL-encode keys when requested
+**Reference:**
+- `../specs/event-queues.md` — Event queue specification
 
 ## Run Tests
 
