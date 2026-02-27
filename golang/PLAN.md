@@ -1169,9 +1169,63 @@ sleep 2 && ps -o rss= -p $!   # should be < 50MB (in KB)
 
 ---
 
-## Milestone 10: Event Infrastructure (Stages 16a-16c)
+## Milestone 10: S3 API Completeness (Stage 16)
 
-### Stage 16a: Queue Interface & Redis Backend
+### Stage 16: S3 API Completeness
+
+**Goal:** Close remaining S3 API gaps identified in `S3_GAP_REMAINING.md` to improve SDK compatibility and operational hygiene.
+
+**Prerequisites:** Stage 15 COMPLETE (86/86 E2E tests passing)
+
+**Reference:** `golang/S3_GAP_REMAINING.md`, `golang/tasks/stage-16-s3-completeness.md`
+
+**Implementation Scope:**
+
+| Task | Priority | Effort | Description |
+|------|----------|--------|-------------|
+| CopyObject conditional headers | MEDIUM | LOW | `x-amz-copy-source-if-*` headers |
+| Expired multipart upload reaping | MEDIUM | MEDIUM | TTL-based cleanup on startup |
+| encoding-type=url in list responses | LOW | LOW | URL-encoding of keys |
+| Missing error codes (in-scope) | LOW | LOW | `RequestTimeout` error code |
+
+**Files to modify:**
+- `golang/internal/handlers/object.go` -- Conditional headers, encoding-type
+- `golang/internal/handlers/multipart.go` -- Conditional headers, encoding-type
+- `golang/internal/handlers/helpers.go` -- `CheckCopySourceConditionals()` helper
+- `golang/internal/metadata/store.go` -- `DeleteExpiredUploads()` interface method
+- `golang/internal/metadata/sqlite.go` -- Implement expired upload cleanup
+- `golang/internal/storage/backend.go` -- `DeletePartsForUploads()` interface method
+- `golang/internal/storage/local.go` -- Bulk part cleanup
+- `golang/internal/config/config.go` -- `MultipartUploadTTLDays` config
+- `golang/internal/xmlutil/xmlutil.go` -- `EncodingType` field in structs
+- `golang/internal/errors/errors.go` -- `InvalidEncodingType`, `RequestTimeout`
+- `golang/cmd/bleepstore/main.go` -- Call reaper on startup
+
+**Out of Scope:**
+- Object versioning, lifecycle, SSE, replication, clustering
+- Glacier/archive, rate limiting, STS tokens, redirects
+
+**Build/run commands:**
+```bash
+go test -v -race ./internal/handlers/ ./internal/metadata/ ./internal/storage/
+./run_e2e.sh  # 86/86 must still pass
+```
+
+**Definition of done:**
+- [ ] CopyObject respects all 4 `x-amz-copy-source-if-*` headers
+- [ ] UploadPartCopy respects all 4 `x-amz-copy-source-if-*` headers
+- [ ] Expired multipart uploads (>7 days) cleaned on startup
+- [ ] `encoding-type=url` supported in ListObjectsV2, ListObjects, ListMultipartUploads
+- [ ] All 86 E2E tests still pass
+- [ ] Unit tests cover new functionality
+
+**Dependencies to add:** None.
+
+---
+
+## Milestone 11: Event Infrastructure (Stages 17a-17c)
+
+### Stage 17a: Queue Interface & Redis Backend
 
 **Goal:** Define the QueueBackend interface, event types/envelope, and implement the Redis Streams backend with write-through mode.
 
@@ -1194,7 +1248,7 @@ sleep 2 && ps -o rss= -p $!   # should be < 50MB (in KB)
   rdb.XAdd(ctx, &redis.XAddArgs{Stream: "bleepstore:events", Values: map[string]interface{}{"type": "object.created", "data": eventJSON}})
   ```
 
-- **Write-through mode** (default when queue enabled): normal direct write path (storage + metadata), then publish event to queue after commit (fire-and-forget). Queue failure does not block the write.
+- **Write-through mode** (default when queue enabled): normal direct write path (storage + metadata), then publish event to queue after commit (fire-and-forget). Queue failure does not block the write. (Already implemented in 17a.)
 - **Crash-only:** startup reconnects to queue, reprocesses pending tasks. No special recovery flag -- every startup is recovery.
 
 **Library-specific notes:**
@@ -1228,7 +1282,7 @@ go test -v -race -tags=integration ./internal/queue/
 ```
 
 **Test targets:**
-- All 75 E2E tests pass with Redis queue enabled (write-through mode)
+- All 86 E2E tests pass with Redis queue enabled (write-through mode)
 - Events published for each write operation
 - Queue unavailable at startup: BleepStore starts in degraded mode
 
@@ -1237,7 +1291,7 @@ go test -v -race -tags=integration ./internal/queue/
 - [ ] Redis backend implemented (publish, subscribe, acknowledge, dead letter)
 - [ ] Event types and envelope defined
 - [ ] Write-through mode works: events published after successful writes
-- [ ] All 75 E2E tests pass with Redis queue enabled
+- [ ] All 86 E2E tests pass with Redis queue enabled
 - [ ] Configuration section for queue settings
 - [ ] Health check reports queue status
 
@@ -1249,7 +1303,7 @@ go test -v -race -tags=integration ./internal/queue/
 
 ---
 
-### Stage 16b: RabbitMQ Backend
+### Stage 17b: RabbitMQ Backend
 
 **Goal:** Implement the RabbitMQ/AMQP backend using the QueueBackend interface established in 16a.
 
@@ -1296,12 +1350,12 @@ go test -v -race -tags=integration ./internal/queue/
 ```
 
 **Test targets:**
-- All 75 E2E tests pass with RabbitMQ queue enabled (write-through mode)
+- All 86 E2E tests pass with RabbitMQ queue enabled (write-through mode)
 - Events routed correctly by type
 
 **Definition of done:**
 - [ ] RabbitMQ backend implements full QueueBackend interface
-- [ ] All 75 E2E tests pass with RabbitMQ queue enabled (write-through mode)
+- [ ] All 86 E2E tests pass with RabbitMQ queue enabled (write-through mode)
 - [ ] Dead letter exchange handles failed messages
 - [ ] Compatible with AMQP 0-9-1 (ActiveMQ compatible)
 
@@ -1313,7 +1367,7 @@ go test -v -race -tags=integration ./internal/queue/
 
 ---
 
-### Stage 16c: Kafka Backend & Consistency Modes
+### Stage 17c: Kafka Backend & Consistency Modes
 
 **Goal:** Implement the Kafka backend and the sync/async consistency modes. All three queue backends support all three consistency modes.
 
@@ -1366,7 +1420,7 @@ go test -v -race -tags=integration ./internal/queue/
 ```
 
 **Test targets:**
-- All 75 E2E tests pass with Kafka queue enabled (write-through mode)
+- All 86 E2E tests pass with Kafka queue enabled (write-through mode)
 - Sync mode: write completes only after consumer processes task
 - Async mode: write returns 202, object eventually available
 - Crash recovery: pending tasks survive restarts
@@ -1375,7 +1429,7 @@ go test -v -race -tags=integration ./internal/queue/
 - [ ] Kafka backend implements full QueueBackend interface
 - [ ] Sync mode: writes blocked until queue consumer completes (all backends)
 - [ ] Async mode: writes return 202, processed asynchronously (all backends)
-- [ ] All 75 E2E tests pass with Kafka queue enabled (write-through mode)
+- [ ] All 86 E2E tests pass with Kafka queue enabled (write-through mode)
 - [ ] Crash-only: pending tasks survive restarts, orphan temp files cleaned
 - [ ] All three backends support all three consistency modes
 
@@ -1402,7 +1456,7 @@ go test -v -race -tags=integration ./internal/queue/
 | `internal/metadata` | `store.go`, `sqlite.go`, `raft_store.go` | Metadata interface, SQLite impl, Raft wrapper |
 | `internal/storage` | `backend.go`, `local.go`, `aws.go`, `gcp.go`, `azure.go`, `factory.go` | Storage interface, all backend implementations |
 | `internal/cluster` | `raft.go`, `fsm.go`, `transport.go`, `commands.go` | Raft consensus, FSM, commands |
-| `internal/queue` | `backend.go`, `redis.go`, `rabbitmq.go`, `kafka.go`, `events.go` | Queue interface, Redis/RabbitMQ/Kafka backends, event types |
+| `internal/queue` | `backend.go`, `redis.go`, `rabbitmq.go`, `kafka.go`, `events.go` | Queue interface, Redis/RabbitMQ/Kafka backends, event types (Stage 17a-c) |
 
 ## Summary: Dependencies by Stage
 
@@ -1419,6 +1473,7 @@ go test -v -race -tags=integration ./internal/queue/
 | 11b | `github.com/Azure/azure-sdk-for-go/sdk/storage/azblob`, `github.com/Azure/azure-sdk-for-go/sdk/azidentity` |
 | 12a | `github.com/hashicorp/raft`, `github.com/hashicorp/raft-boltdb/v2` |
 | 12b-15 | *(none)* |
-| 16a | `github.com/redis/go-redis/v9` |
-| 16b | `github.com/rabbitmq/amqp091-go` |
-| 16c | `github.com/segmentio/kafka-go` |
+| 16 | *(none -- S3 API Completeness)* |
+| 17a | `github.com/redis/go-redis/v9` |
+| 17b | `github.com/rabbitmq/amqp091-go` |
+| 17c | `github.com/segmentio/kafka-go` |

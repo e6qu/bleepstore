@@ -1,11 +1,33 @@
 # BleepStore Go -- Status
 
-## Current Stage: Stage 15 COMPLETE (Performance Optimization & Production Readiness) -- 86/86 E2E Tests Passing
+## Current Stage: Stage 16 COMPLETE (S3 API Completeness) -- 86/86 E2E Tests Passing
 
-All E2E tests pass (the former `test_missing_content_length` failure has been resolved in the E2E suite).
+All E2E tests pass.
 
-- `go test -count=1 -race ./...` -- all unit tests pass (274 total)
+- `go test -count=1 -race ./...` -- all unit tests pass (274+ total)
 - `./run_e2e.sh` -- **86/86 pass**
+
+## What Was Added in Stage 16 (S3 API Completeness)
+
+### CopyObject/UploadPartCopy Conditional Headers
+- `checkCopySourceConditionals()` helper in `handlers/helpers.go:434-508`
+- All 4 `x-amz-copy-source-if-*` headers supported: if-match, if-none-match, if-modified-since, if-unmodified-since
+- Returns `PreconditionFailed` (412) when condition fails
+- Applied to both CopyObject and UploadPartCopy
+
+### Multipart Upload Reaping
+- `ReapExpiredUploads(604800)` called on startup in `cmd/bleepstore/main.go:189-203`
+- 7-day TTL (604800 seconds) for stale uploads
+- Cleans up storage files for reaped uploads (local backend)
+
+### encoding-type=url Support
+- ListObjectsV2 and ListObjects V1 support `encoding-type=url` query parameter
+- URL-encodes keys in response XML when specified
+
+### New Error Codes
+- `ErrInvalidLocationConstraint` (400) at `errors.go:260`
+- `ErrRequestTimeout` (400) at `errors.go:267`
+- Total error codes: 34 (up from 32)
 
 ## What Was Added in Stage 15
 
@@ -64,7 +86,24 @@ All E2E tests pass (the former `test_missing_content_length` failure has been re
 ## Known Issues
 - None -- all 86 E2E tests pass
 
-## Next Steps
-- Stage 12: Raft Consensus / Cluster Mode
+---
+
+## Next Milestone: Stage 17 -- Event Queues OR Stage 12 -- Raft Clustering
+
+Based on `S3_GAP_REMAINING.md` gap analysis, S3 API completeness is now achieved.
+
+### Remaining Minor Gaps
+
+| # | Gap | Category | Effort |
+|---|-----|----------|--------|
+| 1 | encoding-type=url in ListMultipartUploads | Multipart | Low |
+| 2 | response-* query param overrides | Object | Low |
+
+### Out of Scope (Explicitly Excluded)
+- Object versioning, lifecycle, SSE, replication, clustering
+- Glacier/archive storage, redirects, rate limiting
+- STS session tokens, aws-chunked transfer encoding
+
+---
 
 ## Unit + Integration Test Count: 274 tests passing
