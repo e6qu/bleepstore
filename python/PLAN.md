@@ -1100,7 +1100,58 @@ ps -o rss= -p $(pgrep -f bleepstore) | awk '{print $1/1024 " MB"}'
 
 ---
 
-## Stage 16a: Queue Interface & Redis Backend
+## Stage 16: S3 API Completeness ✅ (Skipped — Gap Analysis Complete)
+
+**Goal:** Close remaining S3 API gaps identified in `S3_GAP_REMAINING.md`.
+
+**Status:** Gap analysis completed 2026-02-27. Core S3 API is feature-complete (86/86 E2E tests). Remaining gaps are polish items:
+
+### Medium Priority (Optional Enhancements)
+
+| Gap | Impact | Effort |
+|-----|--------|--------|
+| response-* query params on GetObject | Presigned URL overrides | Low |
+| x-amz-copy-source-if-* for CopyObject | Conditional copy | Medium |
+| x-amz-copy-source-if-* for UploadPartCopy | Conditional part copy | Medium |
+| EncodingType URL encoding in list ops | Key encoding option | Low |
+
+### Low Priority (Future Consideration)
+
+| Gap | Impact | Effort |
+|-----|--------|--------|
+| x-amz-storage-class enforcement | Storage tier | Medium |
+| x-amz-tagging support | Object tags | Medium |
+| ListBuckets pagination | Large bucket lists | Low |
+| RequestTimeout enforcement | Slow client protection | Medium |
+
+### Missing Error Codes (Out of Scope)
+
+The 14 missing error codes are for features not in scope:
+- `ExpiredToken`, `IllegalLocationConstraintException`, `InvalidLocationConstraint` — No STS/region validation
+- `InvalidObjectState` — No Glacier/archive support
+- `NoSuchVersion` — No versioning
+- `RequestTimeout`, `SlowDown` — No timeout/rate limiting
+- `PermanentRedirect`, `TemporaryRedirect` — No redirect support
+
+### Files to modify (if implementing)
+
+| File | Work |
+|---|---|
+| `src/bleepstore/handlers/object.py` | response-* params, conditional copy, encoding-type |
+| `src/bleepstore/handlers/multipart.py` | conditional upload-part-copy |
+| `src/bleepstore/xml_utils.py` | URL encoding in list responses |
+
+### Definition of done
+
+- [ ] Gap analysis documented (DONE)
+- [ ] Optional: response-* query params on GetObject
+- [ ] Optional: x-amz-copy-source-if-* conditional headers
+- [ ] Optional: EncodingType parameter support
+- [ ] All 86 E2E tests still pass
+
+---
+
+## Stage 17a: Queue Interface & Redis Backend
 
 **Goal:** Define the QueueBackend interface, event types/envelope, and implement the Redis Streams backend with write-through mode.
 
@@ -1157,7 +1208,7 @@ ps -o rss= -p $(pgrep -f bleepstore) | awk '{print $1/1024 " MB"}'
 
 ---
 
-## Stage 16b: RabbitMQ Backend
+## Stage 17b: RabbitMQ Backend
 
 **Goal:** Implement the RabbitMQ/AMQP backend using the QueueBackend interface established in 16a.
 
@@ -1206,7 +1257,7 @@ ps -o rss= -p $(pgrep -f bleepstore) | awk '{print $1/1024 " MB"}'
 
 ---
 
-## Stage 16c: Kafka Backend & Consistency Modes
+## Stage 17c: Kafka Backend & Consistency Modes
 
 **Goal:** Implement the Kafka backend and the sync/async consistency modes. All three queue backends support all three consistency modes.
 
@@ -1266,8 +1317,8 @@ All source files in `python/src/bleepstore/` and which stages they are primarily
 | File | Stages |
 |---|---|
 | `cli.py` | 1, 15 |
-| `config.py` | 1, 10, 14, 16a |
-| `server.py` | 1, 3, 4, 6, 7, 13a, 14, 15, 16a |
+| `config.py` | 1, 10, 14, 17a |
+| `server.py` | 1, 3, 4, 6, 7, 13a, 14, 15, 17a |
 | `metrics.py` | 1b (new) |
 | `errors.py` | 1 (mostly complete) |
 | `xml_utils.py` | 1, 3, 5a, 7, 8 |
@@ -1292,9 +1343,9 @@ All source files in `python/src/bleepstore/` and which stages they are primarily
 | `cluster/state.py` | 12a (new) |
 | `cluster/state_machine.py` | 13a (new) |
 | `cluster/admin.py` | 14 (new) |
-| `queue/__init__.py` | 16a (new) |
-| `queue/backend.py` | 16a (new) |
-| `queue/events.py` | 16a (new) |
-| `queue/redis_backend.py` | 16a (new) |
-| `queue/rabbitmq_backend.py` | 16b (new) |
-| `queue/kafka_backend.py` | 16c (new) |
+| `queue/__init__.py` | 17a (new) |
+| `queue/backend.py` | 17a (new) |
+| `queue/events.py` | 17a (new) |
+| `queue/redis_backend.py` | 17a (new) |
+| `queue/rabbitmq_backend.py` | 17b (new) |
+| `queue/kafka_backend.py` | 17c (new) |

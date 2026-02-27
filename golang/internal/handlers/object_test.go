@@ -1726,3 +1726,247 @@ func TestGetObjectAclNoSuchBucket(t *testing.T) {
 		t.Errorf("GetObjectAcl body should contain NoSuchBucket: %s", rec.Body.String())
 	}
 }
+
+// --- CopyObject Conditional Headers Tests ---
+
+func TestCopyObjectIfMatch(t *testing.T) {
+	h := newTestObjectHandler(t)
+
+	body := "copy source"
+	req := httptest.NewRequest("PUT", "/test-bucket/src-match.txt", strings.NewReader(body))
+	req.ContentLength = int64(len(body))
+	rec := httptest.NewRecorder()
+	h.PutObject(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PutObject status = %d", rec.Code)
+	}
+	etag := rec.Header().Get("ETag")
+
+	req = httptest.NewRequest("PUT", "/test-bucket/dst-match.txt", nil)
+	req.Header.Set("X-Amz-Copy-Source", "/test-bucket/src-match.txt")
+	req.Header.Set("x-amz-copy-source-if-match", etag)
+	rec = httptest.NewRecorder()
+	h.CopyObject(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("CopyObject If-Match (match) status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	req = httptest.NewRequest("PUT", "/test-bucket/dst-match2.txt", nil)
+	req.Header.Set("X-Amz-Copy-Source", "/test-bucket/src-match.txt")
+	req.Header.Set("x-amz-copy-source-if-match", `"wrong-etag"`)
+	rec = httptest.NewRecorder()
+	h.CopyObject(rec, req)
+
+	if rec.Code != http.StatusPreconditionFailed {
+		t.Errorf("CopyObject If-Match (mismatch) status = %d, want %d", rec.Code, http.StatusPreconditionFailed)
+	}
+}
+
+func TestCopyObjectIfNoneMatch(t *testing.T) {
+	h := newTestObjectHandler(t)
+
+	body := "copy source none match"
+	req := httptest.NewRequest("PUT", "/test-bucket/src-none.txt", strings.NewReader(body))
+	req.ContentLength = int64(len(body))
+	rec := httptest.NewRecorder()
+	h.PutObject(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PutObject status = %d", rec.Code)
+	}
+	etag := rec.Header().Get("ETag")
+
+	req = httptest.NewRequest("PUT", "/test-bucket/dst-none.txt", nil)
+	req.Header.Set("X-Amz-Copy-Source", "/test-bucket/src-none.txt")
+	req.Header.Set("x-amz-copy-source-if-none-match", etag)
+	rec = httptest.NewRecorder()
+	h.CopyObject(rec, req)
+
+	if rec.Code != http.StatusPreconditionFailed {
+		t.Errorf("CopyObject If-None-Match (match) status = %d, want %d", rec.Code, http.StatusPreconditionFailed)
+	}
+
+	req = httptest.NewRequest("PUT", "/test-bucket/dst-none2.txt", nil)
+	req.Header.Set("X-Amz-Copy-Source", "/test-bucket/src-none.txt")
+	req.Header.Set("x-amz-copy-source-if-none-match", `"different-etag"`)
+	rec = httptest.NewRecorder()
+	h.CopyObject(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("CopyObject If-None-Match (no match) status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
+func TestCopyObjectIfModifiedSince(t *testing.T) {
+	h := newTestObjectHandler(t)
+
+	body := "copy source mod since"
+	req := httptest.NewRequest("PUT", "/test-bucket/src-mod.txt", strings.NewReader(body))
+	req.ContentLength = int64(len(body))
+	rec := httptest.NewRecorder()
+	h.PutObject(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PutObject status = %d", rec.Code)
+	}
+
+	futureDate := time.Now().Add(24 * time.Hour).UTC().Format(http.TimeFormat)
+	req = httptest.NewRequest("PUT", "/test-bucket/dst-mod.txt", nil)
+	req.Header.Set("X-Amz-Copy-Source", "/test-bucket/src-mod.txt")
+	req.Header.Set("x-amz-copy-source-if-modified-since", futureDate)
+	rec = httptest.NewRecorder()
+	h.CopyObject(rec, req)
+
+	if rec.Code != http.StatusPreconditionFailed {
+		t.Errorf("CopyObject If-Modified-Since (future) status = %d, want %d", rec.Code, http.StatusPreconditionFailed)
+	}
+
+	pastDate := time.Now().Add(-24 * time.Hour).UTC().Format(http.TimeFormat)
+	req = httptest.NewRequest("PUT", "/test-bucket/dst-mod2.txt", nil)
+	req.Header.Set("X-Amz-Copy-Source", "/test-bucket/src-mod.txt")
+	req.Header.Set("x-amz-copy-source-if-modified-since", pastDate)
+	rec = httptest.NewRecorder()
+	h.CopyObject(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("CopyObject If-Modified-Since (past) status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
+func TestCopyObjectIfUnmodifiedSince(t *testing.T) {
+	h := newTestObjectHandler(t)
+
+	body := "copy source unmod since"
+	req := httptest.NewRequest("PUT", "/test-bucket/src-unmod.txt", strings.NewReader(body))
+	req.ContentLength = int64(len(body))
+	rec := httptest.NewRecorder()
+	h.PutObject(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PutObject status = %d", rec.Code)
+	}
+
+	futureDate := time.Now().Add(24 * time.Hour).UTC().Format(http.TimeFormat)
+	req = httptest.NewRequest("PUT", "/test-bucket/dst-unmod.txt", nil)
+	req.Header.Set("X-Amz-Copy-Source", "/test-bucket/src-unmod.txt")
+	req.Header.Set("x-amz-copy-source-if-unmodified-since", futureDate)
+	rec = httptest.NewRecorder()
+	h.CopyObject(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("CopyObject If-Unmodified-Since (future) status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	pastDate := time.Now().Add(-24 * time.Hour).UTC().Format(http.TimeFormat)
+	req = httptest.NewRequest("PUT", "/test-bucket/dst-unmod2.txt", nil)
+	req.Header.Set("X-Amz-Copy-Source", "/test-bucket/src-unmod.txt")
+	req.Header.Set("x-amz-copy-source-if-unmodified-since", pastDate)
+	rec = httptest.NewRecorder()
+	h.CopyObject(rec, req)
+
+	if rec.Code != http.StatusPreconditionFailed {
+		t.Errorf("CopyObject If-Unmodified-Since (past) status = %d, want %d", rec.Code, http.StatusPreconditionFailed)
+	}
+}
+
+// --- Encoding-Type URL Tests ---
+
+func TestListObjectsV2EncodingTypeURL(t *testing.T) {
+	h := newTestObjectHandler(t)
+
+	keys := []string{"file-with-spaces.txt", "path/to/file.txt", "special-key.txt"}
+	putTestObjects(t, h, keys)
+
+	req := httptest.NewRequest("GET", "/test-bucket?list-type=2&encoding-type=url", nil)
+	rec := httptest.NewRecorder()
+	h.ListObjectsV2(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ListObjectsV2 (encoding-type=url) status = %d; body: %s", rec.Code, rec.Body.String())
+	}
+
+	respBody := rec.Body.String()
+	if !strings.Contains(respBody, "<EncodingType>url</EncodingType>") {
+		t.Errorf("ListObjectsV2 response missing EncodingType: %s", respBody)
+	}
+	if !strings.Contains(respBody, "<Key>path%2Fto%2Ffile.txt</Key>") {
+		t.Errorf("ListObjectsV2 response missing URL-encoded path key: %s", respBody)
+	}
+}
+
+func TestListObjectsV1EncodingTypeURL(t *testing.T) {
+	h := newTestObjectHandler(t)
+
+	keys := []string{"file-with-spaces.txt", "path/to/file.txt"}
+	putTestObjects(t, h, keys)
+
+	req := httptest.NewRequest("GET", "/test-bucket?encoding-type=url", nil)
+	rec := httptest.NewRecorder()
+	h.ListObjects(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ListObjects V1 (encoding-type=url) status = %d; body: %s", rec.Code, rec.Body.String())
+	}
+
+	respBody := rec.Body.String()
+	if !strings.Contains(respBody, "<EncodingType>url</EncodingType>") {
+		t.Errorf("ListObjects V1 response missing EncodingType: %s", respBody)
+	}
+	if !strings.Contains(respBody, "<Key>path%2Fto%2Ffile.txt</Key>") {
+		t.Errorf("ListObjects V1 response missing URL-encoded path key: %s", respBody)
+	}
+}
+
+func TestListObjectsV2InvalidEncodingType(t *testing.T) {
+	h := newTestObjectHandler(t)
+
+	putTestObjects(t, h, []string{"test.txt"})
+
+	req := httptest.NewRequest("GET", "/test-bucket?list-type=2&encoding-type=invalid", nil)
+	rec := httptest.NewRecorder()
+	h.ListObjectsV2(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("ListObjectsV2 (invalid encoding-type) status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	if !strings.Contains(rec.Body.String(), "InvalidEncodingType") {
+		t.Errorf("ListObjectsV2 response should contain InvalidEncodingType: %s", rec.Body.String())
+	}
+}
+
+func TestListObjectsV1InvalidEncodingType(t *testing.T) {
+	h := newTestObjectHandler(t)
+
+	putTestObjects(t, h, []string{"test.txt"})
+
+	req := httptest.NewRequest("GET", "/test-bucket?encoding-type=invalid", nil)
+	rec := httptest.NewRecorder()
+	h.ListObjects(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("ListObjects V1 (invalid encoding-type) status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	if !strings.Contains(rec.Body.String(), "InvalidEncodingType") {
+		t.Errorf("ListObjects V1 response should contain InvalidEncodingType: %s", rec.Body.String())
+	}
+}
+
+func TestListObjectsV2CommonPrefixEncodingTypeURL(t *testing.T) {
+	h := newTestObjectHandler(t)
+
+	keys := []string{"photos/2024/jan/photo1.jpg", "photos/2024/feb/photo2.jpg"}
+	putTestObjects(t, h, keys)
+
+	req := httptest.NewRequest("GET", "/test-bucket?list-type=2&delimiter=/&encoding-type=url", nil)
+	rec := httptest.NewRecorder()
+	h.ListObjectsV2(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ListObjectsV2 (delimiter + encoding-type=url) status = %d; body: %s", rec.Code, rec.Body.String())
+	}
+
+	respBody := rec.Body.String()
+	if !strings.Contains(respBody, "<Prefix>photos%2F</Prefix>") {
+		t.Errorf("ListObjectsV2 response missing URL-encoded common prefix: %s", respBody)
+	}
+}

@@ -492,6 +492,95 @@ class ObjectHandler:
             headers={"ETag": etag},
         )
 
+    def _apply_response_overrides(self, request: Request, obj_meta: dict) -> dict:
+        """Apply response-* query parameter overrides to object metadata.
+
+        S3 presigned URLs can include response-* query parameters to override
+        the Content-Type, Content-Disposition, Cache-Control, etc. headers
+        in the GetObject response.
+
+        Args:
+            request: The incoming HTTP request.
+            obj_meta: The object metadata dict.
+
+        Returns:
+            A modified copy of obj_meta with overrides applied.
+        """
+        overrides = {
+            "response-content-type": "content_type",
+            "response-content-language": "content_language",
+            "response-expires": "expires",
+            "response-cache-control": "cache_control",
+            "response-content-disposition": "content_disposition",
+            "response-content-encoding": "content_encoding",
+        }
+
+        result = dict(obj_meta)
+        for param, meta_key in overrides.items():
+            value = request.query_params.get(param)
+            if value is not None:
+                result[meta_key] = value
+
+        return result
+
+    def _evaluate_copy_source_conditionals(
+        self, request: Request, etag: str, last_modified_str: str
+    ) -> int | None:
+        """Evaluate x-amz-copy-source-if-* conditional headers.
+
+        These headers are the copy-source equivalents of the standard
+        conditional headers:
+            - x-amz-copy-source-if-match -> 412 on mismatch
+            - x-amz-copy-source-if-none-match -> 412 on match
+            - x-amz-copy-source-if-modified-since -> 412 if not modified
+            - x-amz-copy-source-if-unmodified-since -> 412 if modified
+
+        Args:
+            request: The incoming HTTP request.
+            etag: The source object's ETag (quoted).
+            last_modified_str: The source object's last_modified ISO 8601 timestamp.
+
+        Returns:
+            412 if a condition fails, or None if all conditions pass.
+        """
+        obj_etag = _strip_etag_quotes(etag)
+        obj_mtime = _parse_last_modified(last_modified_str)
+
+        # 1. x-amz-copy-source-if-match
+        if_match = request.headers.get("x-amz-copy-source-if-match")
+        if if_match is not None:
+            if if_match.strip() != "*":
+                match_tags = [_strip_etag_quotes(t) for t in if_match.split(",")]
+                if obj_etag not in match_tags:
+                    return 412
+
+        # 2. x-amz-copy-source-if-unmodified-since
+        if_unmodified = request.headers.get("x-amz-copy-source-if-unmodified-since")
+        if if_unmodified is not None and if_match is None:
+            ius_date = _parse_http_date(if_unmodified)
+            if ius_date is not None and obj_mtime is not None:
+                if obj_mtime > ius_date:
+                    return 412
+
+        # 3. x-amz-copy-source-if-none-match
+        if_none_match = request.headers.get("x-amz-copy-source-if-none-match")
+        if if_none_match is not None:
+            if if_none_match.strip() == "*":
+                return 412
+            none_match_tags = [_strip_etag_quotes(t) for t in if_none_match.split(",")]
+            if obj_etag in none_match_tags:
+                return 412
+
+        # 4. x-amz-copy-source-if-modified-since
+        if_modified = request.headers.get("x-amz-copy-source-if-modified-since")
+        if if_modified is not None and if_none_match is None:
+            ims_date = _parse_http_date(if_modified)
+            if ims_date is not None and obj_mtime is not None:
+                if obj_mtime <= ims_date:
+                    return 412
+
+        return None
+
     async def get_object(self, request: Request, bucket: str, key: str) -> Response:
         """Retrieve an object from a bucket.
 
@@ -499,6 +588,8 @@ class ObjectHandler:
 
         Supports range requests (206 Partial Content) and conditional
         requests (304 Not Modified, 412 Precondition Failed).
+
+        Supports response-* query parameter overrides for presigned URLs.
 
         Uses StreamingResponse to stream the object body in 64 KB chunks
         for efficient handling of large objects.
@@ -518,6 +609,9 @@ class ObjectHandler:
         obj_meta = await self.metadata.get_object(bucket, key)
         if obj_meta is None:
             raise NoSuchKey(key)
+
+        # Apply response-* query parameter overrides
+        obj_meta = self._apply_response_overrides(request, obj_meta)
 
         # Build response headers
         headers = self._build_object_headers(obj_meta)
@@ -750,6 +844,13 @@ class ObjectHandler:
         src_meta = await self.metadata.get_object(src_bucket, src_key)
         if src_meta is None:
             raise NoSuchKey(src_key)
+
+        # Evaluate x-amz-copy-source-if-* conditional headers
+        src_etag = src_meta.get("etag", "")
+        src_last_modified = src_meta.get("last_modified", "")
+        cond_status = self._evaluate_copy_source_conditionals(request, src_etag, src_last_modified)
+        if cond_status == 412:
+            raise PreconditionFailed()
 
         # Validate destination bucket exists
         await self._ensure_bucket_exists(bucket)
@@ -1000,9 +1101,9 @@ class ObjectHandler:
 
         Implements: GET /{bucket}
 
-        Supports prefix, delimiter, max-keys, and marker query parameters.
-        Returns ListBucketResult XML with Contents, CommonPrefixes, and
-        marker-based pagination.
+        Supports prefix, delimiter, max-keys, marker, and encoding-type
+        query parameters. Returns ListBucketResult XML with Contents,
+        CommonPrefixes, and marker-based pagination.
 
         Args:
             request: The incoming HTTP request.
@@ -1014,6 +1115,7 @@ class ObjectHandler:
         prefix = request.query_params.get("prefix", "")
         delimiter = request.query_params.get("delimiter", "")
         marker = request.query_params.get("marker", "")
+        encoding_type = request.query_params.get("encoding-type")
 
         max_keys_str = request.query_params.get("max-keys", "1000")
         max_keys = validate_max_keys(max_keys_str)
@@ -1037,6 +1139,7 @@ class ObjectHandler:
             common_prefixes=result["common_prefixes"],
             marker=marker,
             next_marker=result.get("next_marker"),
+            encoding_type=encoding_type,
         )
         return xml_response(body, status=200)
 

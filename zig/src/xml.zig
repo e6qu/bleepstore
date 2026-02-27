@@ -166,6 +166,29 @@ pub const ListObjectEntry = struct {
     owner_display: []const u8 = "",
 };
 
+/// URL-encode a string for S3 encoding-type=url responses.
+pub fn urlEncodeForS3(alloc: std.mem.Allocator, input: []const u8) ![]u8 {
+    var result: std.ArrayList(u8) = .empty;
+    errdefer result.deinit(alloc);
+
+    const hex_chars = "0123456789ABCDEF";
+
+    for (input) |ch| {
+        switch (ch) {
+            'A'...'Z', 'a'...'z', '0'...'9', '-', '_', '.', '~', '/' => {
+                try result.append(alloc, ch);
+            },
+            else => {
+                try result.append(alloc, '%');
+                try result.append(alloc, hex_chars[ch >> 4]);
+                try result.append(alloc, hex_chars[ch & 0x0F]);
+            },
+        }
+    }
+
+    return result.toOwnedSlice(alloc);
+}
+
 /// Render ListBucketResult (ListObjectsV2) with full S3 fields.
 pub fn renderListObjectsV2Result(
     allocator: std.mem.Allocator,
@@ -180,6 +203,7 @@ pub fn renderListObjectsV2Result(
     continuation_token: []const u8,
     next_continuation_token: []const u8,
     start_after: []const u8,
+    encoding_type: []const u8,
 ) ![]u8 {
     var x = XmlWriter.init(allocator);
     defer x.deinit();
@@ -188,13 +212,35 @@ pub fn renderListObjectsV2Result(
     try x.openTagWithNs("ListBucketResult", S3_NS);
 
     try x.element("Name", bucket_name);
-    try x.element("Prefix", prefix);
+
+    // URL-encode prefix if encoding-type=url
+    if (std.mem.eql(u8, encoding_type, "url") and prefix.len > 0) {
+        const encoded_prefix = try urlEncodeForS3(allocator, prefix);
+        defer allocator.free(encoded_prefix);
+        try x.element("Prefix", encoded_prefix);
+    } else {
+        try x.element("Prefix", prefix);
+    }
+
     try x.element("KeyCount", try std.fmt.allocPrint(allocator, "{d}", .{key_count}));
     try x.element("MaxKeys", try std.fmt.allocPrint(allocator, "{d}", .{max_keys}));
+
+    // URL-encode delimiter if encoding-type=url
     if (delimiter.len > 0) {
-        try x.element("Delimiter", delimiter);
+        if (std.mem.eql(u8, encoding_type, "url")) {
+            const encoded_delim = try urlEncodeForS3(allocator, delimiter);
+            defer allocator.free(encoded_delim);
+            try x.element("Delimiter", encoded_delim);
+        } else {
+            try x.element("Delimiter", delimiter);
+        }
     }
     try x.element("IsTruncated", if (is_truncated) "true" else "false");
+
+    // Add EncodingType element if specified
+    if (encoding_type.len > 0) {
+        try x.element("EncodingType", encoding_type);
+    }
 
     if (continuation_token.len > 0) {
         try x.element("ContinuationToken", continuation_token);
@@ -203,12 +249,25 @@ pub fn renderListObjectsV2Result(
         try x.element("NextContinuationToken", next_continuation_token);
     }
     if (start_after.len > 0) {
-        try x.element("StartAfter", start_after);
+        if (std.mem.eql(u8, encoding_type, "url")) {
+            const encoded_start_after = try urlEncodeForS3(allocator, start_after);
+            defer allocator.free(encoded_start_after);
+            try x.element("StartAfter", encoded_start_after);
+        } else {
+            try x.element("StartAfter", start_after);
+        }
     }
 
     for (entries) |entry| {
         try x.openTag("Contents");
-        try x.element("Key", entry.key);
+        // URL-encode key if encoding-type=url
+        if (std.mem.eql(u8, encoding_type, "url")) {
+            const encoded_key = try urlEncodeForS3(allocator, entry.key);
+            defer allocator.free(encoded_key);
+            try x.element("Key", encoded_key);
+        } else {
+            try x.element("Key", entry.key);
+        }
         try x.element("LastModified", entry.last_modified);
         try x.element("ETag", entry.etag);
         try x.element("Size", try std.fmt.allocPrint(allocator, "{d}", .{entry.size}));
@@ -224,7 +283,14 @@ pub fn renderListObjectsV2Result(
 
     for (common_prefixes) |cp| {
         try x.openTag("CommonPrefixes");
-        try x.element("Prefix", cp);
+        // URL-encode prefix if encoding-type=url
+        if (std.mem.eql(u8, encoding_type, "url")) {
+            const encoded_cp = try urlEncodeForS3(allocator, cp);
+            defer allocator.free(encoded_cp);
+            try x.element("Prefix", encoded_cp);
+        } else {
+            try x.element("Prefix", cp);
+        }
         try x.closeTag("CommonPrefixes");
     }
 
@@ -245,6 +311,7 @@ pub fn renderListObjectsV1Result(
     common_prefixes: []const []const u8,
     marker: []const u8,
     next_marker: []const u8,
+    encoding_type: []const u8,
 ) ![]u8 {
     var x = XmlWriter.init(allocator);
     defer x.deinit();
@@ -253,24 +320,66 @@ pub fn renderListObjectsV1Result(
     try x.openTagWithNs("ListBucketResult", S3_NS);
 
     try x.element("Name", bucket_name);
-    try x.element("Prefix", prefix);
+
+    // URL-encode prefix if encoding-type=url
+    if (std.mem.eql(u8, encoding_type, "url") and prefix.len > 0) {
+        const encoded_prefix = try urlEncodeForS3(allocator, prefix);
+        defer allocator.free(encoded_prefix);
+        try x.element("Prefix", encoded_prefix);
+    } else {
+        try x.element("Prefix", prefix);
+    }
+
     if (marker.len > 0) {
-        try x.element("Marker", marker);
+        if (std.mem.eql(u8, encoding_type, "url")) {
+            const encoded_marker = try urlEncodeForS3(allocator, marker);
+            defer allocator.free(encoded_marker);
+            try x.element("Marker", encoded_marker);
+        } else {
+            try x.element("Marker", marker);
+        }
     } else {
         try x.emptyElement("Marker");
     }
     try x.element("MaxKeys", try std.fmt.allocPrint(allocator, "{d}", .{max_keys}));
+
+    // URL-encode delimiter if encoding-type=url
     if (delimiter.len > 0) {
-        try x.element("Delimiter", delimiter);
+        if (std.mem.eql(u8, encoding_type, "url")) {
+            const encoded_delim = try urlEncodeForS3(allocator, delimiter);
+            defer allocator.free(encoded_delim);
+            try x.element("Delimiter", encoded_delim);
+        } else {
+            try x.element("Delimiter", delimiter);
+        }
     }
     try x.element("IsTruncated", if (is_truncated) "true" else "false");
+
+    // Add EncodingType element if specified
+    if (encoding_type.len > 0) {
+        try x.element("EncodingType", encoding_type);
+    }
+
     if (next_marker.len > 0) {
-        try x.element("NextMarker", next_marker);
+        if (std.mem.eql(u8, encoding_type, "url")) {
+            const encoded_next_marker = try urlEncodeForS3(allocator, next_marker);
+            defer allocator.free(encoded_next_marker);
+            try x.element("NextMarker", encoded_next_marker);
+        } else {
+            try x.element("NextMarker", next_marker);
+        }
     }
 
     for (entries) |entry| {
         try x.openTag("Contents");
-        try x.element("Key", entry.key);
+        // URL-encode key if encoding-type=url
+        if (std.mem.eql(u8, encoding_type, "url")) {
+            const encoded_key = try urlEncodeForS3(allocator, entry.key);
+            defer allocator.free(encoded_key);
+            try x.element("Key", encoded_key);
+        } else {
+            try x.element("Key", entry.key);
+        }
         try x.element("LastModified", entry.last_modified);
         try x.element("ETag", entry.etag);
         try x.element("Size", try std.fmt.allocPrint(allocator, "{d}", .{entry.size}));
@@ -286,7 +395,14 @@ pub fn renderListObjectsV1Result(
 
     for (common_prefixes) |cp| {
         try x.openTag("CommonPrefixes");
-        try x.element("Prefix", cp);
+        // URL-encode prefix if encoding-type=url
+        if (std.mem.eql(u8, encoding_type, "url")) {
+            const encoded_cp = try urlEncodeForS3(allocator, cp);
+            defer allocator.free(encoded_cp);
+            try x.element("Prefix", encoded_cp);
+        } else {
+            try x.element("Prefix", cp);
+        }
         try x.closeTag("CommonPrefixes");
     }
 
@@ -672,6 +788,134 @@ const AclGrant = struct {
     permission: []const u8,
 };
 
+/// Parse AccessControlPolicy XML body and build an ACL JSON string.
+/// Returns MalformedACLError if the XML is invalid.
+pub fn parseAccessControlPolicyXml(alloc: std.mem.Allocator, xml_body: []const u8, default_owner_id: []const u8, default_owner_display: []const u8) ![]u8 {
+    if (xml_body.len == 0) return error.MalformedACLError;
+
+    var owner_id: []const u8 = default_owner_id;
+    var owner_display: []const u8 = default_owner_display;
+
+    var grants_buf: std.ArrayList(u8) = .empty;
+    defer grants_buf.deinit(alloc);
+
+    const owner_id_start = std.mem.indexOf(u8, xml_body, "<ID>");
+    if (owner_id_start) |start| {
+        const content_start = start + 4;
+        const end = std.mem.indexOf(u8, xml_body[content_start..], "</ID>");
+        if (end) |e| {
+            owner_id = xml_body[content_start .. content_start + e];
+        }
+    }
+
+    const owner_display_start = std.mem.indexOf(u8, xml_body, "<DisplayName>");
+    if (owner_display_start) |start| {
+        const content_start = start + 13;
+        const end = std.mem.indexOf(u8, xml_body[content_start..], "</DisplayName>");
+        if (end) |e| {
+            owner_display = xml_body[content_start .. content_start + e];
+        }
+    }
+
+    var search_pos: usize = 0;
+    var first_grant = true;
+    while (search_pos < xml_body.len) {
+        const grant_start = std.mem.indexOf(u8, xml_body[search_pos..], "<Grant>");
+        if (grant_start == null) break;
+        const grant_abs_start = search_pos + grant_start.?;
+        const grant_end = std.mem.indexOf(u8, xml_body[grant_abs_start..], "</Grant>");
+        if (grant_end == null) break;
+        const grant_abs_end = grant_abs_start + grant_end.? + 8;
+        const grant_xml = xml_body[grant_abs_start..grant_abs_end];
+
+        var grantee_type: []const u8 = "CanonicalUser";
+        var grantee_id_val: []const u8 = "";
+        var grantee_display_val: []const u8 = "";
+        var uri_val: []const u8 = "";
+        var permission_val: []const u8 = "";
+
+        const xsi_group = std.mem.indexOf(u8, grant_xml, "xsi:type=\"Group\"");
+
+        if (xsi_group != null) {
+            grantee_type = "Group";
+            const uri_start = std.mem.indexOf(u8, grant_xml, "<URI>");
+            if (uri_start) |us| {
+                const uri_content_start = us + 5;
+                const uri_end = std.mem.indexOf(u8, grant_xml[uri_content_start..], "</URI>");
+                if (uri_end) |ue| {
+                    uri_val = grant_xml[uri_content_start .. uri_content_start + ue];
+                }
+            }
+        } else {
+            const gid_start = std.mem.indexOf(u8, grant_xml, "<ID>");
+            if (gid_start) |gs| {
+                const gid_content_start = gs + 4;
+                const gid_end = std.mem.indexOf(u8, grant_xml[gid_content_start..], "</ID>");
+                if (gid_end) |ge| {
+                    grantee_id_val = grant_xml[gid_content_start .. gid_content_start + ge];
+                }
+            }
+            const gdisp_start = std.mem.indexOf(u8, grant_xml, "<DisplayName>");
+            if (gdisp_start) |ds| {
+                const gdisp_content_start = ds + 13;
+                const gdisp_end = std.mem.indexOf(u8, grant_xml[gdisp_content_start..], "</DisplayName>");
+                if (gdisp_end) |de| {
+                    grantee_display_val = grant_xml[gdisp_content_start .. gdisp_content_start + de];
+                }
+            }
+        }
+
+        const perm_start = std.mem.indexOf(u8, grant_xml, "<Permission>");
+        if (perm_start) |ps| {
+            const perm_content_start = ps + 12;
+            const perm_end = std.mem.indexOf(u8, grant_xml[perm_content_start..], "</Permission>");
+            if (perm_end) |pe| {
+                permission_val = grant_xml[perm_content_start .. perm_content_start + pe];
+            }
+        }
+
+        if (permission_val.len == 0) {
+            search_pos = grant_abs_end;
+            continue;
+        }
+
+        if (!first_grant) {
+            try grants_buf.append(alloc, ',');
+        }
+        first_grant = false;
+
+        if (std.mem.eql(u8, grantee_type, "Group")) {
+            const grant_json = try std.fmt.allocPrint(alloc,
+                \\{{"grantee":{{"type":"Group","uri":"{s}"}},"permission":"{s}"}}
+            , .{ uri_val, permission_val });
+            defer alloc.free(grant_json);
+            try grants_buf.appendSlice(alloc, grant_json);
+        } else {
+            const disp = if (grantee_display_val.len > 0) grantee_display_val else grantee_id_val;
+            const grant_json = try std.fmt.allocPrint(alloc,
+                \\{{"grantee":{{"type":"CanonicalUser","id":"{s}","display_name":"{s}"}},"permission":"{s}"}}
+            , .{ grantee_id_val, disp, permission_val });
+            defer alloc.free(grant_json);
+            try grants_buf.appendSlice(alloc, grant_json);
+        }
+
+        search_pos = grant_abs_end;
+    }
+
+    const grants_str = try grants_buf.toOwnedSlice(alloc);
+    defer alloc.free(grants_str);
+
+    if (grants_str.len == 0) {
+        return try std.fmt.allocPrint(alloc,
+            \\{{"owner":{{"id":"{s}","display_name":"{s}"}},"grants":[{{"grantee":{{"type":"CanonicalUser","id":"{s}","display_name":"{s}"}},"permission":"FULL_CONTROL"}}]}}
+        , .{ owner_id, owner_display, owner_id, owner_display });
+    }
+
+    return try std.fmt.allocPrint(alloc,
+        \\{{"owner":{{"id":"{s}","display_name":"{s}"}},"grants":[{s}]}}
+    , .{ owner_id, owner_display, grants_str });
+}
+
 /// Parse ACL grants from JSON string. Returns null if parsing fails.
 /// Uses simple JSON string scanning since Zig's std.json requires type definitions.
 fn parseAclGrants(allocator: std.mem.Allocator, acl_json: []const u8) !?[]AclGrant {
@@ -930,4 +1174,69 @@ test "renderListPartsResult: basic" {
     try std.testing.expect(std.mem.indexOf(u8, result, "<Size>5242880</Size>") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "<MaxParts>1000</MaxParts>") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "<IsTruncated>false</IsTruncated>") != null);
+}
+
+test "parseAccessControlPolicyXml: basic CanonicalUser grant" {
+    const alloc = std.testing.allocator;
+    const xml =
+        \\<AccessControlPolicy>
+        \\  <Owner>
+        \\    <ID>owner123</ID>
+        \\    <DisplayName>testuser</DisplayName>
+        \\  </Owner>
+        \\  <AccessControlList>
+        \\    <Grant>
+        \\      <Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CanonicalUser">
+        \\        <ID>user456</ID>
+        \\        <DisplayName>another</DisplayName>
+        \\      </Grantee>
+        \\      <Permission>READ</Permission>
+        \\    </Grant>
+        \\  </AccessControlList>
+        \\</AccessControlPolicy>
+    ;
+    const result = try parseAccessControlPolicyXml(alloc, xml, "default", "default");
+    defer alloc.free(result);
+
+    try std.testing.expect(std.mem.indexOf(u8, result, "user456") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "READ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "CanonicalUser") != null);
+}
+
+test "parseAccessControlPolicyXml: Group grant" {
+    const alloc = std.testing.allocator;
+    const xml =
+        \\<AccessControlPolicy>
+        \\  <AccessControlList>
+        \\    <Grant>
+        \\      <Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="Group">
+        \\        <URI>http://acs.amazonaws.com/groups/global/AllUsers</URI>
+        \\      </Grantee>
+        \\      <Permission>READ</Permission>
+        \\    </Grant>
+        \\  </AccessControlList>
+        \\</AccessControlPolicy>
+    ;
+    const result = try parseAccessControlPolicyXml(alloc, xml, "owner1", "user1");
+    defer alloc.free(result);
+
+    try std.testing.expect(std.mem.indexOf(u8, result, "AllUsers") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "\"READ\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "\"type\":\"Group\"") != null);
+}
+
+test "parseAccessControlPolicyXml: empty grants returns default" {
+    const alloc = std.testing.allocator;
+    const xml =
+        \\<AccessControlPolicy>
+        \\  <Owner>
+        \\    <ID>owner123</ID>
+        \\  </Owner>
+        \\  <AccessControlList></AccessControlList>
+        \\</AccessControlPolicy>
+    ;
+    const result = try parseAccessControlPolicyXml(alloc, xml, "owner123", "testuser");
+    defer alloc.free(result);
+
+    try std.testing.expect(std.mem.indexOf(u8, result, "FULL_CONTROL") != null);
 }

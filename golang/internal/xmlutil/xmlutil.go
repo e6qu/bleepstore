@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	s3err "github.com/bleepstore/bleepstore/internal/errors"
@@ -70,6 +71,7 @@ type ListBucketResult struct {
 	NextMarker     string         `xml:"NextMarker,omitempty"`
 	MaxKeys        int            `xml:"MaxKeys"`
 	Delimiter      string         `xml:"Delimiter,omitempty"`
+	EncodingType   string         `xml:"EncodingType,omitempty"`
 	IsTruncated    bool           `xml:"IsTruncated"`
 	Contents       []Object       `xml:"Contents"`
 	CommonPrefixes []CommonPrefix `xml:"CommonPrefixes"`
@@ -374,6 +376,15 @@ func FormatTimeS3(t time.Time) string {
 // (e.g., "Mon, 02 Jan 2006 15:04:05 GMT").
 func FormatTimeHTTP(t time.Time) string {
 	return t.UTC().Format("Mon, 02 Jan 2006 15:04:05 GMT")
+}
+
+// EncodeKeyURL returns the URL-encoded version of the key if encodingType is "url",
+// otherwise returns the key unchanged.
+func EncodeKeyURL(key string, encodingType string) string {
+	if encodingType != "url" {
+		return key
+	}
+	return url.QueryEscape(key)
 }
 
 // writeXML marshals v as XML and writes it to w with the given HTTP status code.

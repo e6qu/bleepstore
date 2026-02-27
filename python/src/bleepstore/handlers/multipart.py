@@ -17,11 +17,13 @@ Crash-only design:
 """
 
 import binascii
+import email.utils
 import hashlib
 import json
 import logging
 import uuid
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request, Response
 
@@ -107,6 +109,85 @@ class MultipartHandler:
                 meta_key = lower_name[len("x-amz-meta-") :]
                 meta[meta_key] = value
         return meta
+
+    def _strip_etag_quotes(self, etag: str) -> str:
+        """Strip surrounding double quotes and optional W/ prefix from an ETag."""
+        etag = etag.strip()
+        if etag.startswith("W/"):
+            etag = etag[2:]
+        if etag.startswith('"') and etag.endswith('"'):
+            etag = etag[1:-1]
+        return etag
+
+    def _parse_http_date(self, date_str: str) -> datetime | None:
+        """Parse an HTTP date string into a timezone-aware datetime."""
+        try:
+            return email.utils.parsedate_to_datetime(date_str)
+        except (ValueError, TypeError):
+            return None
+
+    def _parse_last_modified(self, last_modified_str: str) -> datetime | None:
+        """Parse a last-modified ISO 8601 timestamp into a timezone-aware datetime."""
+        try:
+            dt = datetime.strptime(last_modified_str, "%Y-%m-%dT%H:%M:%S.%fZ")
+            return dt.replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            try:
+                dt = datetime.strptime(last_modified_str, "%Y-%m-%dT%H:%M:%SZ")
+                return dt.replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                return None
+
+    def _evaluate_copy_source_conditionals(self, request: Request, src_meta: dict) -> int | None:
+        """Evaluate x-amz-copy-source-if-* conditional headers for UploadPartCopy.
+
+        Args:
+            request: The incoming HTTP request.
+            src_meta: The source object metadata dict.
+
+        Returns:
+            412 if a condition fails, or None if all conditions pass.
+        """
+        etag = src_meta.get("etag", "")
+        last_modified_str = src_meta.get("last_modified", "")
+
+        obj_etag = self._strip_etag_quotes(etag)
+        obj_mtime = self._parse_last_modified(last_modified_str)
+
+        # 1. x-amz-copy-source-if-match
+        if_match = request.headers.get("x-amz-copy-source-if-match")
+        if if_match is not None:
+            if if_match.strip() != "*":
+                match_tags = [self._strip_etag_quotes(t) for t in if_match.split(",")]
+                if obj_etag not in match_tags:
+                    return 412
+
+        # 2. x-amz-copy-source-if-unmodified-since
+        if_unmodified = request.headers.get("x-amz-copy-source-if-unmodified-since")
+        if if_unmodified is not None and if_match is None:
+            ius_date = self._parse_http_date(if_unmodified)
+            if ius_date is not None and obj_mtime is not None:
+                if obj_mtime > ius_date:
+                    return 412
+
+        # 3. x-amz-copy-source-if-none-match
+        if_none_match = request.headers.get("x-amz-copy-source-if-none-match")
+        if if_none_match is not None:
+            if if_none_match.strip() == "*":
+                return 412
+            none_match_tags = [self._strip_etag_quotes(t) for t in if_none_match.split(",")]
+            if obj_etag in none_match_tags:
+                return 412
+
+        # 4. x-amz-copy-source-if-modified-since
+        if_modified = request.headers.get("x-amz-copy-source-if-modified-since")
+        if if_modified is not None and if_none_match is None:
+            ims_date = self._parse_http_date(if_modified)
+            if ims_date is not None and obj_mtime is not None:
+                if obj_mtime <= ims_date:
+                    return 412
+
+        return None
 
     async def create_multipart_upload(self, request: Request, bucket: str, key: str) -> Response:
         """Initiate a new multipart upload.
@@ -320,6 +401,13 @@ class MultipartHandler:
         src_meta = await self.metadata.get_object(src_bucket, src_key)
         if src_meta is None:
             raise NoSuchKey(src_key)
+
+        # Evaluate x-amz-copy-source-if-* conditional headers
+        cond_status = self._evaluate_copy_source_conditionals(request, src_meta)
+        if cond_status == 412:
+            from bleepstore.errors import PreconditionFailed
+
+            raise PreconditionFailed()
 
         # Read source data
         data = await self.storage.get(src_bucket, src_key)

@@ -302,6 +302,12 @@ func (h *MultipartHandler) uploadPartCopy(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Check x-amz-copy-source-if-* conditional headers.
+	if proceed, condErr := checkCopySourceConditionals(r, srcObj.ETag, srcObj.LastModified); !proceed {
+		xmlutil.WriteErrorResponse(w, r, condErr)
+		return
+	}
+
 	// Open source object data from storage.
 	reader, _, _, err := h.store.GetObject(ctx, srcBucket, srcKey)
 	if err != nil {
