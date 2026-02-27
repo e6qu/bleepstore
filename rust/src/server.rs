@@ -685,7 +685,7 @@ async fn handle_get_object(
     } else if query.contains_key("uploadId") {
         crate::handlers::multipart::list_parts(state, &bucket, &key, &query).await
     } else {
-        crate::handlers::object::get_object(state, &bucket, &key, &headers).await
+        crate::handlers::object::get_object(state, &bucket, &key, &headers, &query).await
     }
 }
 
@@ -741,9 +741,11 @@ async fn handle_delete_object(
 async fn handle_head_object(
     State(state): State<Arc<AppState>>,
     Path((bucket, key)): Path<(String, String)>,
+    RawQuery(raw_query): RawQuery,
     headers: HeaderMap,
 ) -> Result<Response, S3Error> {
-    crate::handlers::object::head_object(state, &bucket, &key, &headers).await
+    let query = parse_query(raw_query);
+    crate::handlers::object::head_object(state, &bucket, &key, &headers, &query).await
 }
 
 /// `POST /:bucket/*key` -- dispatches based on query params:
