@@ -256,4 +256,18 @@ var (
 		Message:    "You have attempted to create more buckets than allowed",
 		HTTPStatus: 400,
 	}
+
+	// ErrInvalidLocationConstraint is returned when an invalid location constraint is specified.
+	ErrInvalidLocationConstraint = &S3Error{
+		Code:       "InvalidLocationConstraint",
+		Message:    "The specified location constraint is not valid",
+		HTTPStatus: 400,
+	}
+
+	// ErrRequestTimeout is returned when a request times out.
+	ErrRequestTimeout = &S3Error{
+		Code:       "RequestTimeout",
+		Message:    "Your socket connection to the server was not read from or written to within the timeout period",
+		HTTPStatus: 400,
+	}
 )

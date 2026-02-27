@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	s3err "github.com/bleepstore/bleepstore/internal/errors"
 	"github.com/bleepstore/bleepstore/internal/metadata"
 	"github.com/bleepstore/bleepstore/internal/xmlutil"
 )
@@ -428,6 +429,82 @@ func parseRange(rangeHeader string, objectSize int64) (start, end int64, err err
 	}
 
 	return start, end, nil
+}
+
+// checkCopySourceConditionals evaluates x-amz-copy-source-if-* headers against
+// the source object's ETag and LastModified time. Used by CopyObject and UploadPartCopy.
+// Returns true if the copy should proceed, false if a precondition failed.
+// On failure, returns the appropriate S3Error.
+func checkCopySourceConditionals(r *http.Request, etag string, lastModified time.Time) (proceed bool, err *s3err.S3Error) {
+	normalizeETag := func(e string) string {
+		return strings.Trim(e, `"`)
+	}
+
+	objectETag := normalizeETag(etag)
+
+	ifMatch := r.Header.Get("x-amz-copy-source-if-match")
+	if ifMatch != "" {
+		matched := false
+		if ifMatch == "*" {
+			matched = true
+		} else {
+			tags := strings.Split(ifMatch, ",")
+			for _, tag := range tags {
+				if normalizeETag(strings.TrimSpace(tag)) == objectETag {
+					matched = true
+					break
+				}
+			}
+		}
+		if !matched {
+			return false, s3err.ErrPreconditionFailed
+		}
+	}
+
+	if ifMatch == "" {
+		ifUnmodSince := r.Header.Get("x-amz-copy-source-if-unmodified-since")
+		if ifUnmodSince != "" {
+			t, parseErr := http.ParseTime(ifUnmodSince)
+			if parseErr == nil {
+				if lastModified.Truncate(time.Second).After(t.Truncate(time.Second)) {
+					return false, s3err.ErrPreconditionFailed
+				}
+			}
+		}
+	}
+
+	ifNoneMatch := r.Header.Get("x-amz-copy-source-if-none-match")
+	if ifNoneMatch != "" {
+		matched := false
+		if ifNoneMatch == "*" {
+			matched = true
+		} else {
+			tags := strings.Split(ifNoneMatch, ",")
+			for _, tag := range tags {
+				if normalizeETag(strings.TrimSpace(tag)) == objectETag {
+					matched = true
+					break
+				}
+			}
+		}
+		if matched {
+			return false, s3err.ErrPreconditionFailed
+		}
+	}
+
+	if ifNoneMatch == "" {
+		ifModSince := r.Header.Get("x-amz-copy-source-if-modified-since")
+		if ifModSince != "" {
+			t, parseErr := http.ParseTime(ifModSince)
+			if parseErr == nil {
+				if !lastModified.Truncate(time.Second).After(t.Truncate(time.Second)) {
+					return false, s3err.ErrPreconditionFailed
+				}
+			}
+		}
+	}
+
+	return true, nil
 }
 
 // checkConditionalHeaders evaluates the conditional request headers against

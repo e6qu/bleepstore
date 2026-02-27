@@ -564,6 +564,12 @@ func (h *ObjectHandler) CopyObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check x-amz-copy-source-if-* conditional headers.
+	if proceed, condErr := checkCopySourceConditionals(r, srcObj.ETag, srcObj.LastModified); !proceed {
+		xmlutil.WriteErrorResponse(w, r, condErr)
+		return
+	}
+
 	// Copy file data via storage backend (atomic).
 	newETag, err := h.store.CopyObject(ctx, srcBucket, srcKey, dstBucket, dstKey)
 	if err != nil {
@@ -703,6 +709,15 @@ func (h *ObjectHandler) ListObjectsV2(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if encodingType != "" && encodingType != "url" {
+		xmlutil.WriteErrorResponse(w, r, &s3err.S3Error{
+			Code:       "InvalidEncodingType",
+			Message:    "Invalid EncodingType specified",
+			HTTPStatus: 400,
+		})
+		return
+	}
+
 	// Build XML response.
 	result := &xmlutil.ListBucketV2Result{
 		Name:         bucketName,
@@ -732,7 +747,7 @@ func (h *ObjectHandler) ListObjectsV2(w http.ResponseWriter, r *http.Request) {
 	// Convert objects to XML Objects.
 	for _, obj := range listResult.Objects {
 		result.Contents = append(result.Contents, xmlutil.Object{
-			Key:          obj.Key,
+			Key:          xmlutil.EncodeKeyURL(obj.Key, encodingType),
 			LastModified: xmlutil.FormatTimeS3(obj.LastModified),
 			ETag:         obj.ETag,
 			Size:         obj.Size,
@@ -743,7 +758,7 @@ func (h *ObjectHandler) ListObjectsV2(w http.ResponseWriter, r *http.Request) {
 	// Convert common prefixes.
 	for _, cp := range listResult.CommonPrefixes {
 		result.CommonPrefixes = append(result.CommonPrefixes, xmlutil.CommonPrefix{
-			Prefix: cp,
+			Prefix: xmlutil.EncodeKeyURL(cp, encodingType),
 		})
 	}
 
@@ -778,6 +793,7 @@ func (h *ObjectHandler) ListObjects(w http.ResponseWriter, r *http.Request) {
 	prefix := q.Get("prefix")
 	delimiter := q.Get("delimiter")
 	marker := q.Get("marker")
+	encodingType := q.Get("encoding-type")
 
 	maxKeys := 1000 // Default
 	if mk := q.Get("max-keys"); mk != "" {
@@ -800,13 +816,23 @@ func (h *ObjectHandler) ListObjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if encodingType != "" && encodingType != "url" {
+		xmlutil.WriteErrorResponse(w, r, &s3err.S3Error{
+			Code:       "InvalidEncodingType",
+			Message:    "Invalid EncodingType specified",
+			HTTPStatus: 400,
+		})
+		return
+	}
+
 	// Build XML response.
 	result := &xmlutil.ListBucketResult{
-		Name:        bucketName,
-		Prefix:      prefix,
-		Marker:      marker,
-		MaxKeys:     maxKeys,
-		IsTruncated: listResult.IsTruncated,
+		Name:         bucketName,
+		Prefix:       prefix,
+		Marker:       marker,
+		MaxKeys:      maxKeys,
+		IsTruncated:  listResult.IsTruncated,
+		EncodingType: encodingType,
 	}
 
 	if delimiter != "" {
@@ -820,7 +846,7 @@ func (h *ObjectHandler) ListObjects(w http.ResponseWriter, r *http.Request) {
 	// Convert objects to XML Objects.
 	for _, obj := range listResult.Objects {
 		result.Contents = append(result.Contents, xmlutil.Object{
-			Key:          obj.Key,
+			Key:          xmlutil.EncodeKeyURL(obj.Key, encodingType),
 			LastModified: xmlutil.FormatTimeS3(obj.LastModified),
 			ETag:         obj.ETag,
 			Size:         obj.Size,
@@ -831,7 +857,7 @@ func (h *ObjectHandler) ListObjects(w http.ResponseWriter, r *http.Request) {
 	// Convert common prefixes.
 	for _, cp := range listResult.CommonPrefixes {
 		result.CommonPrefixes = append(result.CommonPrefixes, xmlutil.CommonPrefix{
-			Prefix: cp,
+			Prefix: xmlutil.EncodeKeyURL(cp, encodingType),
 		})
 	}
 
