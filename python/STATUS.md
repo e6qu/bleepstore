@@ -57,5 +57,34 @@ Cloud backends now support enhanced configuration:
 - **GCP**: `credentials_file`
 - **Azure**: `connection_string`, `use_managed_identity`
 
-## Next Steps
-- Stage 12: Raft Consensus / Clustering
+## Next Milestone: S3 API Completeness (Stage 16)
+
+Based on gap analysis in `S3_GAP_REMAINING.md`, the core S3 API is feature-complete (86/86 E2E tests). Remaining gaps are polish items:
+
+### Medium Priority
+| Gap | Impact | Effort |
+|-----|--------|--------|
+| response-* query params on GetObject | Presigned URL overrides | Low |
+| x-amz-copy-source-if-* for CopyObject | Conditional copy | Medium |
+| x-amz-copy-source-if-* for UploadPartCopy | Conditional part copy | Medium |
+| EncodingType URL encoding in list ops | Key encoding option | Low |
+
+### Low Priority
+| Gap | Impact | Effort |
+|-----|--------|--------|
+| x-amz-storage-class enforcement | Storage tier | Medium |
+| x-amz-tagging support | Object tags | Medium |
+| ListBuckets pagination | Large bucket lists | Low |
+| RequestTimeout enforcement | Slow client protection | Medium |
+
+### Out of Scope for This Milestone
+- Versioning (Stage 18+)
+- Lifecycle configuration
+- Server-side encryption
+- Replication
+- Clustering (Stage 12-14)
+- Event queues (Stage 17)
+
+## Subsequent Milestones
+- Stage 12-14: Raft Consensus / Clustering
+- Stage 17: Event Queues (Redis, RabbitMQ, Kafka)

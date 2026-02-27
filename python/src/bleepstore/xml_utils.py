@@ -1,5 +1,6 @@
 """S3 XML response rendering helpers for BleepStore."""
 
+import urllib.parse
 from typing import Any
 from xml.sax.saxutils import escape as _sax_escape
 
@@ -167,6 +168,12 @@ def render_list_objects_v2(
     Returns:
         An XML string for ListBucketResult.
     """
+
+    def encode_key(key: str) -> str:
+        if encoding_type == "url":
+            return urllib.parse.quote(key, safe="")
+        return key
+
     parts = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">',
@@ -198,7 +205,7 @@ def render_list_objects_v2(
 
     for obj in contents:
         parts.append("<Contents>")
-        parts.append(f"<Key>{_escape_xml(obj.get('key', ''))}</Key>")
+        parts.append(f"<Key>{_escape_xml(encode_key(obj.get('key', '')))}</Key>")
         parts.append(f"<LastModified>{_escape_xml(obj.get('last_modified', ''))}</LastModified>")
         parts.append(f"<ETag>{_escape_xml(obj.get('etag', ''))}</ETag>")
         parts.append(f"<Size>{obj.get('size', 0)}</Size>")
@@ -209,7 +216,7 @@ def render_list_objects_v2(
 
     for cp in common_prefixes:
         parts.append("<CommonPrefixes>")
-        parts.append(f"<Prefix>{_escape_xml(cp)}</Prefix>")
+        parts.append(f"<Prefix>{_escape_xml(encode_key(cp))}</Prefix>")
         parts.append("</CommonPrefixes>")
 
     parts.append("</ListBucketResult>")
@@ -226,6 +233,7 @@ def render_list_objects_v1(
     common_prefixes: list[str],
     marker: str = "",
     next_marker: str | None = None,
+    encoding_type: str | None = None,
 ) -> str:
     """Render an S3 ListObjects (v1) XML response.
 
@@ -239,10 +247,17 @@ def render_list_objects_v1(
         common_prefixes: Collapsed prefix groups.
         marker: The marker used for this request.
         next_marker: Marker for the next page.
+        encoding_type: Encoding type for keys, if any.
 
     Returns:
         An XML string for ListBucketResult.
     """
+
+    def encode_key(key: str) -> str:
+        if encoding_type == "url":
+            return urllib.parse.quote(key, safe="")
+        return key
+
     parts = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">',
@@ -254,15 +269,18 @@ def render_list_objects_v1(
     if delimiter:
         parts.append(f"<Delimiter>{_escape_xml(delimiter)}</Delimiter>")
 
+    if encoding_type:
+        parts.append(f"<EncodingType>{_escape_xml(encoding_type)}</EncodingType>")
+
     parts.append(f"<MaxKeys>{max_keys}</MaxKeys>")
     parts.append(f"<IsTruncated>{str(is_truncated).lower()}</IsTruncated>")
 
     if is_truncated and next_marker:
-        parts.append(f"<NextMarker>{_escape_xml(next_marker)}</NextMarker>")
+        parts.append(f"<NextMarker>{_escape_xml(encode_key(next_marker))}</NextMarker>")
 
     for obj in contents:
         parts.append("<Contents>")
-        parts.append(f"<Key>{_escape_xml(obj.get('key', ''))}</Key>")
+        parts.append(f"<Key>{_escape_xml(encode_key(obj.get('key', '')))}</Key>")
         parts.append(f"<LastModified>{_escape_xml(obj.get('last_modified', ''))}</LastModified>")
         parts.append(f"<ETag>{_escape_xml(obj.get('etag', ''))}</ETag>")
         parts.append(f"<Size>{obj.get('size', 0)}</Size>")
@@ -273,7 +291,7 @@ def render_list_objects_v1(
 
     for cp in common_prefixes:
         parts.append("<CommonPrefixes>")
-        parts.append(f"<Prefix>{_escape_xml(cp)}</Prefix>")
+        parts.append(f"<Prefix>{_escape_xml(encode_key(cp))}</Prefix>")
         parts.append("</CommonPrefixes>")
 
     parts.append("</ListBucketResult>")
