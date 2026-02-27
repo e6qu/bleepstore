@@ -157,6 +157,7 @@ type ListMultipartUploadsResult struct {
 	NextKeyMarker      string         `xml:"NextKeyMarker"`
 	NextUploadIDMarker string         `xml:"NextUploadIdMarker"`
 	MaxUploads         int            `xml:"MaxUploads"`
+	EncodingType       string         `xml:"EncodingType,omitempty"`
 	IsTruncated        bool           `xml:"IsTruncated"`
 	Uploads            []Upload       `xml:"Upload"`
 	CommonPrefixes     []CommonPrefix `xml:"CommonPrefixes"`

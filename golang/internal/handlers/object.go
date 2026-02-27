@@ -295,6 +295,7 @@ func (h *ObjectHandler) GetObject(w http.ResponseWriter, r *http.Request) {
 
 		// Set response headers for partial content.
 		setObjectResponseHeaders(w, objMeta)
+		applyResponseOverrides(w, r)
 		w.Header().Set("Content-Length", strconv.FormatInt(rangeLen, 10))
 		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, objMeta.Size))
 		w.WriteHeader(http.StatusPartialContent)
@@ -306,6 +307,7 @@ func (h *ObjectHandler) GetObject(w http.ResponseWriter, r *http.Request) {
 
 	// Full object response.
 	setObjectResponseHeaders(w, objMeta)
+	applyResponseOverrides(w, r)
 	w.WriteHeader(http.StatusOK)
 
 	// Stream object data to the client.
@@ -360,6 +362,7 @@ func (h *ObjectHandler) HeadObject(w http.ResponseWriter, r *http.Request) {
 
 	// Set response headers from metadata (includes Content-Length, ETag, etc.).
 	setObjectResponseHeaders(w, objMeta)
+	applyResponseOverrides(w, r)
 
 	w.WriteHeader(http.StatusOK)
 }

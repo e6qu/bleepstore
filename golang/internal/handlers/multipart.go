@@ -616,12 +616,22 @@ func (h *MultipartHandler) ListMultipartUploads(w http.ResponseWriter, r *http.R
 	delimiter := q.Get("delimiter")
 	keyMarker := q.Get("key-marker")
 	uploadIDMarker := q.Get("upload-id-marker")
+	encodingType := q.Get("encoding-type")
 
 	maxUploads := 1000 // Default
 	if mu := q.Get("max-uploads"); mu != "" {
 		if parsed, parseErr := strconv.Atoi(mu); parseErr == nil && parsed >= 0 {
 			maxUploads = parsed
 		}
+	}
+
+	if encodingType != "" && encodingType != "url" {
+		xmlutil.WriteErrorResponse(w, r, &s3err.S3Error{
+			Code:       "InvalidEncodingType",
+			Message:    "Invalid EncodingType specified",
+			HTTPStatus: 400,
+		})
+		return
 	}
 
 	opts := metadata.ListUploadsOptions{
@@ -642,18 +652,19 @@ func (h *MultipartHandler) ListMultipartUploads(w http.ResponseWriter, r *http.R
 	// Build XML response.
 	result := &xmlutil.ListMultipartUploadsResult{
 		Bucket:             bucketName,
-		KeyMarker:          keyMarker,
+		KeyMarker:          xmlutil.EncodeKeyURL(keyMarker, encodingType),
 		UploadIDMarker:     uploadIDMarker,
 		MaxUploads:         maxUploads,
+		EncodingType:       encodingType,
 		IsTruncated:        listResult.IsTruncated,
-		NextKeyMarker:      listResult.NextKeyMarker,
+		NextKeyMarker:      xmlutil.EncodeKeyURL(listResult.NextKeyMarker, encodingType),
 		NextUploadIDMarker: listResult.NextUploadIDMarker,
 	}
 
 	// Convert uploads to XML uploads.
 	for _, u := range listResult.Uploads {
 		result.Uploads = append(result.Uploads, xmlutil.Upload{
-			Key:      u.Key,
+			Key:      xmlutil.EncodeKeyURL(u.Key, encodingType),
 			UploadID: u.UploadID,
 			Initiator: xmlutil.Owner{
 				ID:          u.OwnerID,
@@ -670,7 +681,7 @@ func (h *MultipartHandler) ListMultipartUploads(w http.ResponseWriter, r *http.R
 	// Convert common prefixes.
 	for _, cp := range listResult.CommonPrefixes {
 		result.CommonPrefixes = append(result.CommonPrefixes, xmlutil.CommonPrefix{
-			Prefix: cp,
+			Prefix: xmlutil.EncodeKeyURL(cp, encodingType),
 		})
 	}
 

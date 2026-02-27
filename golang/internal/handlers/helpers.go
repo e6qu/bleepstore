@@ -637,6 +637,30 @@ func setObjectResponseHeaders(w http.ResponseWriter, obj *metadata.ObjectRecord)
 	w.Header().Set("Content-Length", strconv.FormatInt(obj.Size, 10))
 }
 
+// applyResponseOverrides applies response-* query parameter overrides to the
+// response headers. These are used for presigned URLs to override content headers.
+func applyResponseOverrides(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	if v := q.Get("response-content-type"); v != "" {
+		w.Header().Set("Content-Type", v)
+	}
+	if v := q.Get("response-content-language"); v != "" {
+		w.Header().Set("Content-Language", v)
+	}
+	if v := q.Get("response-expires"); v != "" {
+		w.Header().Set("Expires", v)
+	}
+	if v := q.Get("response-cache-control"); v != "" {
+		w.Header().Set("Cache-Control", v)
+	}
+	if v := q.Get("response-content-disposition"); v != "" {
+		w.Header().Set("Content-Disposition", v)
+	}
+	if v := q.Get("response-content-encoding"); v != "" {
+		w.Header().Set("Content-Encoding", v)
+	}
+}
+
 // CompletePart represents a single part entry in a CompleteMultipartUpload
 // XML request body.
 type CompletePart struct {
