@@ -1,0 +1,55 @@
+# BleepStore Configuration — SQLite Storage Backend
+#
+# This configuration stores both metadata AND object data in a single SQLite database.
+# Best for: Single-file deployments, embedded use, easy backup/restore
+#
+# Data Location:
+#   - Metadata: SQLite tables in ./data/metadata.db
+#     - buckets: Bucket metadata
+#     - objects: Object metadata (key, size, etag, content-type, etc.)
+#     - multipart_uploads: Active uploads
+#     - multipart_parts: Upload parts
+#     - credentials: Access credentials
+#
+#   - Objects: BLOB column in 'object_data' table
+#     - Stored as binary blobs in SQLite
+#     - Single database file contains everything
+#
+#   - Multipart parts: BLOB column in 'multipart_parts' table
+#
+# Layout:
+#   ./data/
+#   └── metadata.db      # Single file containing ALL data
+#       ├── metadata.db-wal
+#       └── metadata.db-shm
+#
+# Advantages:
+#   - Single file to backup/restore
+#   - ACID transactions for metadata + data
+#   - Easy to copy/move between machines
+#
+# Limitations:
+#   - Not ideal for very large objects (>100MB)
+#   - Database file size = metadata + all object data
+
+server:
+  host: "0.0.0.0"
+  port: 9000
+  region: "us-east-1"
+
+auth:
+  access_key: "bleepstore"
+  secret_key: "bleepstore-secret"
+
+metadata:
+  engine: "sqlite"
+  sqlite:
+    path: "./data/metadata.db"
+
+storage:
+  backend: "sqlite"
+  # No additional config needed - uses the same database as metadata
+
+observability:
+  metrics: true
+  health_check: true

@@ -1,0 +1,72 @@
+# BleepStore Configuration — AWS S3 Gateway Backend
+#
+# This configuration uses AWS S3 as the backing object store.
+# BleepStore acts as a gateway/proxy, translating S3 API calls.
+# Best for: Hybrid cloud, migration, leveraging AWS infrastructure
+#
+# Data Location:
+#   - Metadata: Local SQLite at ./data/metadata.db
+#     - buckets: Bucket metadata (BleepStore's view)
+#     - objects: Object metadata (maps to S3 objects)
+#     - multipart_uploads: Upload state
+#     - multipart_parts: Part tracking
+#
+#   - Objects: AWS S3 bucket (my-backing-bucket)
+#     - Key path: {prefix}{bucket}/{key}
+#     - Example: bleepstore/mybucket/photos/2024/image.jpg
+#
+#   - Multipart parts: S3 objects with special naming
+#     - Stored as separate objects until complete
+#
+# Architecture:
+#   ┌─────────────┐     ┌─────────────────┐     ┌─────────────┐
+#   │   Client    │────▶│   BleepStore    │────▶│   AWS S3    │
+#   └─────────────┘     │ (SQLite meta)   │     │   Bucket    │
+#                       └─────────────────┘     └─────────────┘
+#
+# Authentication:
+#   - access_key_id/secret_access_key in config (below), OR
+#   - AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env vars, OR
+#   - IAM role (when running on EC2/Lambda/EKS)
+
+server:
+  host: "0.0.0.0"
+  port: 9000
+  region: "us-east-1"
+
+auth:
+  access_key: "bleepstore"
+  secret_key: "bleepstore-secret"
+
+metadata:
+  engine: "sqlite"
+  sqlite:
+    path: "./data/metadata.db"
+
+storage:
+  backend: "aws"
+  aws:
+    # S3 bucket to store objects
+    bucket: "my-backing-bucket"
+    
+    # AWS region for the bucket
+    region: "us-east-1"
+    
+    # Prefix for all objects (allows multiple BleepStore instances in one bucket)
+    prefix: "bleepstore/"
+    
+    # Custom S3-compatible endpoint (leave empty for AWS)
+    # Use for MinIO, Ceph, DigitalOcean Spaces, etc.
+    endpoint_url: ""
+    
+    # Use path-style addressing (bucket in path, not subdomain)
+    # Required for MinIO and some S3-compatible services
+    use_path_style: false
+    
+    # Credentials (optional - falls back to AWS env vars / IAM)
+    # access_key_id: "AKIAIOSFODNN7EXAMPLE"
+    # secret_access_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+
+observability:
+  metrics: true
+  health_check: true

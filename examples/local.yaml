@@ -1,0 +1,46 @@
+# BleepStore Configuration — Local Filesystem Backend
+#
+# This configuration stores both metadata and object data on the local filesystem.
+# Best for: Development, testing, single-node deployments
+#
+# Data Location:
+#   - Metadata: SQLite database at ./data/metadata.db
+#   - Objects:  Files in ./data/objects/{bucket}/{key}
+#   - Temp:     ./data/.tmp/ (for atomic writes)
+#   - Multipart parts: ./data/multipart/{uploadId}/part{N}
+#
+# Layout:
+#   ./data/
+#   ├── metadata.db      # SQLite database (buckets, objects, ACLs, uploads)
+#   ├── metadata.db-wal  # Write-ahead log (crash recovery)
+#   ├── metadata.db-shm  # Shared memory index
+#   ├── objects/         # Object data files
+#   │   └── {bucket}/
+#   │       └── {key}    # Object content (key may contain /)
+#   ├── multipart/       # Multipart upload parts
+#   │   └── {uploadId}/
+#   │       └── part{N}  # Individual parts
+#   └── .tmp/            # Temporary files for atomic writes
+
+server:
+  host: "0.0.0.0"
+  port: 9000
+  region: "us-east-1"
+
+auth:
+  access_key: "bleepstore"
+  secret_key: "bleepstore-secret"
+
+metadata:
+  engine: "sqlite"
+  sqlite:
+    path: "./data/metadata.db"
+
+storage:
+  backend: "local"
+  local:
+    root_dir: "./data/objects"
+
+observability:
+  metrics: true
+  health_check: true
