@@ -148,13 +148,29 @@ impl Default for AuthConfig {
 /// Metadata store configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct MetadataConfig {
-    /// Backend type: `sqlite` or `raft`.
+    /// Backend type: `sqlite`, `memory`, `local`, `dynamodb`, `firestore`, `cosmos`.
     #[serde(default = "default_metadata_engine")]
     pub engine: String,
 
     /// SQLite-specific configuration.
     #[serde(default)]
     pub sqlite: SqliteConfig,
+
+    /// Local JSONL file configuration.
+    #[serde(default)]
+    pub local: LocalMetaConfig,
+
+    /// DynamoDB configuration.
+    #[serde(default)]
+    pub dynamodb: DynamoDbMetaConfig,
+
+    /// Firestore configuration.
+    #[serde(default)]
+    pub firestore: FirestoreMetaConfig,
+
+    /// Cosmos DB configuration.
+    #[serde(default)]
+    pub cosmos: CosmosMetaConfig,
 }
 
 impl Default for MetadataConfig {
@@ -162,6 +178,10 @@ impl Default for MetadataConfig {
         Self {
             engine: default_metadata_engine(),
             sqlite: SqliteConfig::default(),
+            local: LocalMetaConfig::default(),
+            dynamodb: DynamoDbMetaConfig::default(),
+            firestore: FirestoreMetaConfig::default(),
+            cosmos: CosmosMetaConfig::default(),
         }
     }
 }
@@ -180,6 +200,79 @@ impl Default for SqliteConfig {
             path: default_metadata_path(),
         }
     }
+}
+
+/// Local JSONL metadata configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LocalMetaConfig {
+    /// Root directory for JSONL files.
+    #[serde(default = "default_local_meta_root")]
+    pub root_dir: String,
+
+    /// Compact files on startup (remove tombstones).
+    #[serde(default = "default_true")]
+    pub compact_on_startup: bool,
+}
+
+impl Default for LocalMetaConfig {
+    fn default() -> Self {
+        Self {
+            root_dir: default_local_meta_root(),
+            compact_on_startup: true,
+        }
+    }
+}
+
+/// DynamoDB metadata configuration.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct DynamoDbMetaConfig {
+    /// Table name prefix.
+    #[serde(default)]
+    pub table_prefix: Option<String>,
+
+    /// AWS region.
+    #[serde(default)]
+    pub region: Option<String>,
+
+    /// Custom endpoint URL (for local testing).
+    #[serde(default)]
+    pub endpoint_url: Option<String>,
+}
+
+/// Firestore metadata configuration.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct FirestoreMetaConfig {
+    /// Collection prefix.
+    #[serde(default)]
+    pub collection_prefix: Option<String>,
+
+    /// GCP project ID.
+    #[serde(default)]
+    pub project_id: Option<String>,
+
+    /// Path to service account credentials.
+    #[serde(default)]
+    pub credentials_file: Option<String>,
+}
+
+/// Cosmos DB metadata configuration.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct CosmosMetaConfig {
+    /// Database name.
+    #[serde(default)]
+    pub database: Option<String>,
+
+    /// Container prefix.
+    #[serde(default)]
+    pub container_prefix: Option<String>,
+
+    /// Azure Cosmos DB endpoint.
+    #[serde(default)]
+    pub endpoint: Option<String>,
+
+    /// Connection string (alternative to endpoint + key).
+    #[serde(default)]
+    pub connection_string: Option<String>,
 }
 
 /// Object storage backend configuration.
@@ -362,6 +455,10 @@ fn default_metadata_engine() -> String {
 
 fn default_metadata_path() -> String {
     "./data/metadata.db".to_string()
+}
+
+fn default_local_meta_root() -> String {
+    "./data/meta".to_string()
 }
 
 fn default_storage_backend() -> String {

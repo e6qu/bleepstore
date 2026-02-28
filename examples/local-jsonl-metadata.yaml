@@ -1,0 +1,53 @@
+# BleepStore Configuration — Local JSONL Metadata Backend
+#
+# This configuration stores metadata as JSONL (JSON Lines) files.
+# Each entity type has its own file with append-only writes.
+# Best for: Development, debugging, simple setups, easy backup
+#
+# Data Location:
+#   - Metadata: JSONL files in ./data/metadata/
+#   - buckets.jsonl      - Bucket records (one JSON object per line)
+#   - objects.jsonl      - Object records
+#   - uploads.jsonl      - Multipart upload records
+#   - parts.jsonl        - Part records
+#   - credentials.jsonl  - Credential records
+#
+# Format (JSONL):
+#   Each line is a JSON object with a "type" field:
+#   {"type":"bucket","name":"mybucket","region":"us-east-1",...}
+#   {"type":"object","bucket":"mybucket","key":"file.txt","size":100,...}
+#   {"type":"object","bucket":"mybucket","key":"file.txt","_deleted":true}
+#
+# Tombstones:
+#   - Deletions write a record with "_deleted": true
+#   - Reads skip tombstoned records
+#   - Compaction removes tombstones (optional on startup)
+#
+# Crash Recovery:
+#   - Append-only writes are crash-safe
+#   - On restart: read all records, skip tombstones
+#   - Partial writes at end of file are handled gracefully
+
+server:
+  host: "0.0.0.0"
+  port: 9000
+  region: "us-east-1"
+
+auth:
+  access_key: "bleepstore"
+  secret_key: "bleepstore-secret"
+
+metadata:
+  engine: "local"
+  local:
+    root_dir: "./data/metadata"
+    compact_on_startup: true  # Rewrite files to remove tombstones
+
+storage:
+  backend: "local"
+  local:
+    root_dir: "./data/objects"
+
+observability:
+  metrics: true
+  health_check: true

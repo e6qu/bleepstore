@@ -22,7 +22,7 @@ class TestLoadConfig:
         assert config.auth.access_key == "bleepstore"
         assert config.auth.secret_key == "bleepstore-secret"
         assert config.metadata.engine == "sqlite"
-        assert config.metadata.sqlite_path == "./data/metadata.db"
+        assert config.metadata.sqlite.path == "./data/metadata.db"
         assert config.storage.backend == "local"
         assert config.storage.local_root == "./data/objects"
 
@@ -58,7 +58,7 @@ class TestLoadConfig:
             yaml.dump(data, f)
             f.flush()
             config = load_config(Path(f.name))
-        assert config.metadata.sqlite_path == "/custom/path.db"
+        assert config.metadata.sqlite.path == "/custom/path.db"
 
     def test_nested_storage_local_root(self):
         """storage.local.root_dir is correctly parsed from nested YAML."""

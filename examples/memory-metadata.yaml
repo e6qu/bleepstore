@@ -1,0 +1,39 @@
+# BleepStore Configuration — Memory Metadata Backend
+#
+# This configuration stores all metadata (buckets, objects, uploads, credentials)
+# in memory only. Data is lost on restart. Best for: Testing, CI, ephemeral data
+#
+# Data Location:
+#   - Metadata: In-memory hash maps (RAM)
+#   - Buckets:  HashMap<bucket_name, BucketRecord>
+#   - Objects:   HashMap<(bucket, key), ObjectRecord>
+#   - Uploads:   HashMap<upload_id, MultipartUploadRecord>
+#   - Parts:     HashMap<(upload_id, part_number), PartRecord>
+#   - Credentials: HashMap<access_key, CredentialRecord>
+#
+# Limitations:
+#   - All metadata lost on restart
+#   - Not suitable for production workloads
+#   - Memory usage grows with number of objects
+
+server:
+  host: "0.0.0.0"
+  port: 9000
+  region: "us-east-1"
+
+auth:
+  access_key: "bleepstore"
+  secret_key: "bleepstore-secret"
+
+metadata:
+  engine: "memory"
+  # No additional config needed for memory backend
+
+storage:
+  backend: "local"
+  local:
+    root_dir: "./data/objects"
+
+observability:
+  metrics: true
+  health_check: true

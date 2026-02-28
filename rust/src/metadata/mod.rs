@@ -4,5 +4,7 @@
 //! uploads.  The [`store::MetadataStore`] trait defines the interface;
 //! [`sqlite::SqliteMetadataStore`] is the default implementation.
 
+pub mod local;
+pub mod memory;
 pub mod sqlite;
 pub mod store;

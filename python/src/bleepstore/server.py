@@ -20,7 +20,7 @@ from bleepstore.errors import NotImplementedS3Error, S3Error
 from bleepstore.handlers.bucket import BucketHandler
 from bleepstore.handlers.multipart import MultipartHandler
 from bleepstore.handlers.object import ObjectHandler
-from bleepstore.metadata.sqlite import SQLiteMetadataStore
+from bleepstore.metadata import create_metadata_store
 from bleepstore.storage.backend import StorageBackend
 from bleepstore.storage.local import LocalStorageBackend
 from bleepstore.xml_utils import render_error, xml_response
@@ -101,11 +101,10 @@ def create_app(config: BleepStoreConfig) -> FastAPI:
         """Lifespan hook: initialize metadata store, storage backend,
         and seed credentials.
 
-        Crash-only design: every startup is a recovery. Open SQLite (WAL
-        auto-recovers), initialize storage (clean temp files), seed credentials.
+        Crash-only design: every startup is a recovery. Open metadata store,
+        initialize storage (clean temp files), seed credentials.
         """
-        # Initialize metadata store
-        metadata = SQLiteMetadataStore(config.metadata.sqlite_path)
+        metadata = create_metadata_store(config.metadata)
         await metadata.init_db()
         app.state.metadata = metadata
 
@@ -226,7 +225,7 @@ def _create_storage_backend(config: BleepStoreConfig) -> StorageBackend:
     elif backend == "sqlite":
         from bleepstore.storage.sqlite import SQLiteStorageBackend
 
-        return SQLiteStorageBackend(db_path=config.metadata.sqlite_path)
+        return SQLiteStorageBackend(db_path=config.metadata.sqlite.path)
     elif backend == "aws":
         if not config.storage.aws_bucket:
             raise ValueError("storage.aws.bucket is required when backend is 'aws'")
