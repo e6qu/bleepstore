@@ -1,46 +1,88 @@
 # BleepStore Python -- Do Next
 
-## Current State: S3 API COMPLETE — 86/86 E2E Tests Passing
+## Current State: S3 API + Pluggable Metadata COMPLETE
 
-- `uv run pytest tests/ -v` — 619/619 pass
-- `./run_e2e.sh` — **86/86 pass**
-- Gap analysis: `S3_GAP_REMAINING.md` — all medium-priority gaps resolved
+- **Unit tests:** 642/642 pass
+- **E2E tests:** 86/86 pass
+- **Metadata backends:** sqlite, memory, local (complete); dynamodb, firestore, cosmos (stubs)
 
-## S3 API Completeness — DONE
+---
 
-All medium-priority gaps from the gap analysis have been implemented:
+## Next: Stage 18 — Cloud Metadata Backends
 
-| Feature | Status | Location |
-|---------|--------|----------|
-| response-* query params | ✅ | `object.py:495-524` |
-| x-amz-copy-source-if-* (CopyObject) | ✅ | `object.py:526-582` |
-| x-amz-copy-source-if-* (UploadPartCopy) | ✅ | `multipart.py:142-198` |
-| encoding-type=url in list ops | ✅ | `xml_utils.py:173-175` |
-| Multipart reaping on startup | ✅ | `server.py:133-150` |
+Implement real cloud-native metadata stores for AWS, GCP, Azure.
 
-## Next: Stage 12-14 — Raft Consensus / Clustering
+### Stage 18a: AWS DynamoDB
 
-Implement distributed consensus for multi-node deployments.
+**Goal:** Full DynamoDB implementation for AWS-native deployments.
 
-**Key files to create/modify:**
-- `src/bleepstore/cluster/raft.py` — Raft consensus implementation
-- `src/bleepstore/cluster/state.py` — Cluster state machine
-- `src/bleepstore/server.py` — Cluster mode integration
+**Files to modify:**
+- `metadata/dynamodb.py` — Full implementation using `aioboto3`
+- `pyproject.toml` — Add `aioboto3` dependency
 
-**Reference:**
-- `../specs/clustering.md` — Clustering specification
+**Table design:**
+```
+PK: BUCKET#name | OBJECT#bucket#key | UPLOAD#id | CRED#access_key
+SK: #METADATA | PART#part_number
+```
 
-## Alternative: Stage 16 — Event Queues
+**Definition of done:**
+- [ ] All MetadataStore methods implemented
+- [ ] Pagination via LastEvaluatedKey
+- [ ] Error mapping
+- [ ] Unit tests with moto
+- [ ] E2E tests pass
 
-Implement persistent event notifications.
+---
 
-**Backends to support:**
-- Redis
-- RabbitMQ
-- Kafka
+### Stage 18b: GCP Firestore
 
-**Reference:**
-- `../specs/event-queues.md` — Event queue specification
+**Goal:** Full Firestore implementation for GCP-native deployments.
+
+**Files to modify:**
+- `metadata/firestore.py` — Full implementation using `google-cloud-firestore`
+- `pyproject.toml` — Add `google-cloud-firestore` dependency
+
+**Collection design:**
+```
+bleepstore/
+  bucket_{name}
+  object_{bucket}_{key}
+  upload_{upload_id}
+    parts/ (subcollection)
+      part_{number}
+  cred_{access_key}
+```
+
+**Definition of done:**
+- [ ] All MetadataStore methods implemented
+- [ ] Pagination via cursors
+- [ ] Transactions for atomic ops
+- [ ] Unit tests with emulator
+- [ ] E2E tests pass
+
+---
+
+### Stage 18c: Azure Cosmos DB
+
+**Goal:** Full Cosmos DB implementation for Azure-native deployments.
+
+**Files to modify:**
+- `metadata/cosmos.py` — Full implementation using `azure-cosmos`
+- `pyproject.toml` — Add `azure-cosmos` dependency
+
+**Container design:**
+```
+Partition Key: /pk (same pattern as DynamoDB)
+```
+
+**Definition of done:**
+- [ ] All MetadataStore methods implemented
+- [ ] Pagination via continuation tokens
+- [ ] Unit tests with emulator
+- [ ] E2E tests pass
+
+---
 
 ## Run Tests
 
@@ -50,5 +92,9 @@ uv run pytest tests/ -v
 ./run_e2e.sh
 ```
 
-## Known Issues
-- None — all 86 E2E tests pass
+---
+
+## Future
+
+- **Stage 19:** Raft Consensus / Clustering
+- **Stage 20:** Event Queues (Redis, RabbitMQ, Kafka)
