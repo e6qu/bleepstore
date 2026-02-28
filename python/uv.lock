@@ -230,6 +230,19 @@ wheels = [
 ]
 
 [[package]]
+name = "azure-cosmos"
+version = "4.15.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "azure-core" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c8/a3/0474e622bf9676e3206d61269461ed16a05958363c254ea3b15af16219b2/azure_cosmos-4.15.0.tar.gz", hash = "sha256:be1cf49837c197d9da880ec47fe020a24d679075b89e0e1e2aca8d376b3a5a24", size = 2100744, upload-time = "2026-02-23T16:01:52.293Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/31/5f/b6e3d3ae16fa121fdc17e62447800d378b7e716cd6103c3650977a6c4618/azure_cosmos-4.15.0-py3-none-any.whl", hash = "sha256:83c1da7386bcd0df9a15c52116cc35012225d8a72d4f1379938b83ea5eb19fff", size = 424870, upload-time = "2026-02-23T16:01:54.514Z" },
+]
+
+[[package]]
 name = "azure-identity"
 version = "1.25.2"
 source = { registry = "https://pypi.org/simple" }
@@ -292,8 +305,12 @@ azure = [
     { name = "azure-identity" },
     { name = "azure-storage-blob" },
 ]
+cosmos = [
+    { name = "azure-cosmos" },
+]
 dev = [
     { name = "aiobotocore" },
+    { name = "azure-cosmos" },
     { name = "azure-identity" },
     { name = "azure-storage-blob" },
     { name = "gcloud-aio-storage" },
@@ -321,6 +338,8 @@ requires-dist = [
     { name = "aiobotocore", marker = "extra == 'dev'", specifier = ">=2.7.0" },
     { name = "aiobotocore", marker = "extra == 'dynamodb'", specifier = ">=2.7.0" },
     { name = "aiosqlite" },
+    { name = "azure-cosmos", marker = "extra == 'cosmos'", specifier = ">=4.5.0" },
+    { name = "azure-cosmos", marker = "extra == 'dev'", specifier = ">=4.5.0" },
     { name = "azure-identity", marker = "extra == 'azure'", specifier = ">=1.15.0" },
     { name = "azure-identity", marker = "extra == 'dev'", specifier = ">=1.15.0" },
     { name = "azure-storage-blob", marker = "extra == 'azure'", specifier = ">=12.19.0" },
@@ -343,7 +362,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "uvicorn", extras = ["standard"] },
 ]
-provides-extras = ["aws", "dynamodb", "gcp", "firestore", "azure", "dev"]
+provides-extras = ["aws", "dynamodb", "gcp", "firestore", "azure", "cosmos", "dev"]
 
 [[package]]
 name = "boto3"

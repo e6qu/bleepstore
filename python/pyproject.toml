@@ -35,6 +35,9 @@ azure = [
     "azure-storage-blob>=12.19.0",
     "azure-identity>=1.15.0",
 ]
+cosmos = [
+    "azure-cosmos>=4.5.0",
+]
 dev = [
     "pytest",
     "pytest-asyncio",
@@ -46,6 +49,7 @@ dev = [
     "google-cloud-firestore>=2.14.0",
     "azure-storage-blob>=12.19.0",
     "azure-identity>=1.15.0",
+    "azure-cosmos>=4.5.0",
     "moto>=5.0.0",
 ]
 
