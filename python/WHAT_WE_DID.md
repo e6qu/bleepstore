@@ -1,5 +1,26 @@
 # BleepStore Python -- What We Did
 
+## 2026-03-01: Stage 18 — Cloud Metadata Backends
+
+Implemented full cloud-native metadata stores for AWS, GCP, and Azure.
+
+**Stage 18a: DynamoDB (PR #17)**
+- Single-table PK/SK design
+- All 22 MetadataStore methods using `aiobotocore`
+- Tests with moto mock (skipped by default)
+
+**Stage 18b: Firestore (PR #18)**
+- Collection/document design with subcollections for parts
+- URL-safe base64 encoding for object keys in document IDs
+- All 22 MetadataStore methods using `google-cloud-firestore`
+- Tests with Firestore emulator (skipped by default)
+
+**Stage 18c: Cosmos DB (PR #19)**
+- Single-container with `/type` partition key
+- SQL queries with `STARTSWITH()` for prefix matching
+- All 22 MetadataStore methods using `azure-cosmos`
+- Tests with Cosmos emulator (skipped by default)
+
 ## 2026-02-28: Stage 17 — Pluggable Metadata Backends
 
 Added support for multiple metadata storage backends:

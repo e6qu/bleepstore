@@ -54,9 +54,9 @@ Derived from the [global plan](../PLAN.md).
 | `sqlite` | SQLite file (default) | `metadata/sqlite.py` |
 | `memory` | In-memory hash maps | `metadata/memory.py` |
 | `local` | JSONL append-only files | `metadata/local.py` |
-| `dynamodb` | AWS DynamoDB (stub) | `metadata/dynamodb.py` |
-| `firestore` | GCP Firestore (stub) | `metadata/firestore.py` |
-| `cosmos` | Azure Cosmos DB (stub) | `metadata/cosmos.py` |
+| `dynamodb` | AWS DynamoDB | `metadata/dynamodb.py` |
+| `firestore` | GCP Firestore | `metadata/firestore.py` |
+| `cosmos` | Azure Cosmos DB | `metadata/cosmos.py` |
 
 ### Configuration
 
@@ -65,185 +65,64 @@ metadata:
   engine: "sqlite"  # sqlite | memory | local | dynamodb | firestore | cosmos
   sqlite:
     path: "./data/metadata.db"
-  local:
-    root_dir: "./data/metadata"
-    compact_on_startup: true
+  dynamodb:
+    table: "bleepstore-metadata"
+    region: "us-east-1"
+  firestore:
+    collection: "bleepstore-metadata"
+    project: "my-project"
+  cosmos:
+    database: "bleepstore"
+    container: "metadata"
 ```
 
 ---
 
-## Stage 18: Cloud Metadata Backends
+## Stage 18: Cloud Metadata Backends ✅
 
 **Goal:** Implement real cloud-native metadata stores.
 
-### Stage 18a: AWS DynamoDB Backend
+All three cloud backends are now fully implemented with all 22 `MetadataStore` methods.
 
-**Goal:** Full DynamoDB implementation for AWS-native deployments.
+| Stage | Backend | Status | PR |
+|-------|---------|--------|-----|
+| 18a | AWS DynamoDB | ✅ Merged | #17 |
+| 18b | GCP Firestore | ✅ Merged | #18 |
+| 18c | Azure Cosmos DB | ✅ Merged | #19 |
 
-#### Table Design
+### Test Requirements
 
-```
-Table: bleepstore-metadata
-PK: pk (STRING) - Entity type + ID
-SK: sk (STRING) - Sub-entity or empty
-Attributes: All entity fields + type discriminator
-```
+Each backend's tests are skipped by default and require environment variables:
 
-**Key Patterns:**
-| Entity | PK | SK |
-|--------|----|----|
-| Bucket | `BUCKET#{name}` | `#METADATA` |
-| Object | `OBJECT#{bucket}#{key}` | `#METADATA` |
-| Upload | `UPLOAD#{upload_id}` | `#METADATA` |
-| Part | `UPLOAD#{upload_id}` | `PART#{part_number}` |
-| Credential | `CRED#{access_key}` | `#METADATA` |
+| Backend | Env Vars Required |
+|---------|-------------------|
+| DynamoDB | `DYNAMODB_TEST_ENDPOINT` |
+| Firestore | `FIRESTORE_EMULATOR_HOST` |
+| Cosmos DB | `COSMOS_TEST_ENDPOINT` + `COSMOS_TEST_KEY` |
 
-#### Files to modify
+### Stage 18a: AWS DynamoDB Backend ✅
 
-| File | Work |
-|------|------|
-| `metadata/dynamodb.py` | Full implementation of all `MetadataStore` protocol methods using `aioboto3` |
-| `pyproject.toml` | Add `aioboto3` dependency |
+**PR:** #17 (merged)
 
-#### Key patterns
+- Single-table PK/SK design
+- All 22 MetadataStore methods implemented
+- Tests with moto mock (skipped by default)
 
-```python
-# Put bucket
-await client.put_item(
-    TableName=self._table_name,
-    Item={
-        "pk": f"BUCKET#{name}",
-        "sk": "#METADATA",
-        "type": "bucket",
-        "name": name,
-        "region": region,
-        "owner_id": owner_id,
-        "created_at": created_at,
-    }
-)
+### Stage 18b: GCP Firestore Backend ✅
 
-# Get object
-resp = await client.get_item(
-    TableName=self._table_name,
-    Key={"pk": f"OBJECT#{bucket}#{key}", "sk": "#METADATA"}
-)
+**PR:** #18 (merged)
 
-# List objects (query with prefix)
-resp = await client.query(
-    TableName=self._table_name,
-    KeyConditionExpression="pk = :pk AND begins_with(sk, :prefix)",
-    ExpressionAttributeValues={":pk": f"OBJECT#{bucket}#", ":prefix": prefix}
-)
-```
+- Collection/document design with subcollections for parts
+- URL-safe base64 encoding for object keys
+- Tests with Firestore emulator (skipped by default)
 
-#### Definition of done
+### Stage 18c: Azure Cosmos DB Backend ✅
 
-- All `MetadataStore` methods implemented
-- Pagination via `LastEvaluatedKey`
-- Error mapping (ConditionalCheckFailed → BucketAlreadyExists)
-- Unit tests with moto mock
-- E2E tests pass
+**PR:** #19 (merged)
 
----
-
-### Stage 18b: GCP Firestore Backend
-
-**Goal:** Full Firestore implementation for GCP-native deployments.
-
-#### Collection Design
-
-```
-Collection: bleepstore (configurable)
-Documents:
-  - bucket_{name}
-  - object_{bucket}_{urlsafe_key}
-  - upload_{upload_id}
-  - cred_{access_key}
-Subcollection: parts (under upload document)
-```
-
-#### Files to modify
-
-| File | Work |
-|------|------|
-| `metadata/firestore.py` | Full implementation using `google-cloud-firestore` async client |
-| `pyproject.toml` | Add `google-cloud-firestore` dependency |
-
-#### Key patterns
-
-```python
-# Put bucket
-doc_ref = client.collection(self._collection).document(f"bucket_{name}")
-await doc_ref.set({
-    "type": "bucket",
-    "name": name,
-    "region": region,
-    "owner_id": owner_id,
-    "created_at": created_at,
-})
-
-# List objects
-query = client.collection(self._collection) \
-    .where("type", "==", "object") \
-    .where("bucket", "==", bucket) \
-    .where("key", ">=", prefix) \
-    .where("key", "<", prefix + "\uf8ff") \
-    .limit(max_keys + 1)
-docs = query.stream()
-```
-
-#### Definition of done
-
-- All `MetadataStore` methods implemented
-- Pagination via cursors
-- Transactions for atomic operations
-- Unit tests with firestore emulator
-- E2E tests pass
-
----
-
-### Stage 18c: Azure Cosmos DB Backend
-
-**Goal:** Full Cosmos DB implementation for Azure-native deployments.
-
-#### Container Design
-
-```
-Container: metadata
-Partition Key: /pk (same pattern as DynamoDB)
-```
-
-#### Files to modify
-
-| File | Work |
-|------|------|
-| `metadata/cosmos.py` | Full implementation using `azure-cosmos` async client |
-| `pyproject.toml` | Add `azure-cosmos` dependency |
-
-#### Key patterns
-
-```python
-# Put bucket
-container.create_item({
-    "id": f"bucket_{name}",
-    "pk": f"BUCKET#{name}",
-    "type": "bucket",
-    "name": name,
-    ...
-})
-
-# List objects
-query = f"SELECT * FROM c WHERE c.pk = @pk AND STARTSWITH(c.key, @prefix)"
-items = container.query_items(query, parameters=[...])
-```
-
-#### Definition of done
-
-- All `MetadataStore` methods implemented
-- Pagination via continuation tokens
-- Stored procedures for transactions
-- Unit tests with Cosmos emulator
-- E2E tests pass
+- Single-container with `/type` partition key
+- SQL queries with `STARTSWITH()` for prefix matching
+- Tests with Cosmos emulator (skipped by default)
 
 ---
 
