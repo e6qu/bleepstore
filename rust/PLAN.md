@@ -1263,9 +1263,80 @@ ps -o rss -p $(pgrep bleepstore) # Should be < 50MB idle
 
 ---
 
-## Milestone 10: Persistent Event Queues (Stages 16a-16c)
+## Milestone 10: Pluggable Metadata Backends (Stages 17-18)
 
-### Stage 16a: Queue Interface & Redis Backend
+### Stage 17: Pluggable Metadata Backends
+
+**Goal:** Support multiple metadata storage backends with a common trait.
+
+**Prerequisites:** Stage 15 COMPLETE (86/86 E2E tests passing)
+
+**Implementation Scope:**
+
+| Backend | Description | File |
+|---------|-------------|------|
+| `sqlite` | SQLite file (default) | `metadata/sqlite.rs` (exists) |
+| `memory` | In-memory hash maps | `metadata/memory.rs` (new) |
+| `local` | JSONL append-only files | `metadata/local.rs` (new) |
+| `dynamodb` | AWS DynamoDB | `metadata/dynamodb.rs` (new) |
+| `firestore` | GCP Firestore | `metadata/firestore.rs` (new) |
+| `cosmos` | Azure Cosmos DB | `metadata/cosmos.rs` (new) |
+
+**Files to create/modify:**
+- `src/metadata/store.rs` -- Ensure `MetadataStore` trait has all 22 methods
+- `src/metadata/memory.rs` -- In-memory implementation with `DashMap` or `RwLock<HashMap>`
+- `src/metadata/local.rs` -- JSONL file-based implementation
+- `src/metadata/dynamodb.rs` -- DynamoDB implementation using AWS SDK
+- `src/metadata/firestore.rs` -- Firestore implementation using gcloud SDK
+- `src/metadata/cosmos.rs` -- Cosmos DB implementation using Azure SDK
+- `src/config.rs` -- Add `metadata.engine` selector
+
+**Configuration:**
+```yaml
+metadata:
+  engine: "sqlite"  # sqlite | memory | local | dynamodb | firestore | cosmos
+  sqlite:
+    path: "./data/metadata.db"
+  dynamodb:
+    table: "bleepstore-metadata"
+    region: "us-east-1"
+  firestore:
+    collection: "bleepstore-metadata"
+    project: "my-project"
+  cosmos:
+    database: "bleepstore"
+    container: "metadata"
+```
+
+**Definition of done:**
+- [ ] `MetadataStore` trait defines all 22 methods
+- [ ] `MemoryMetadataStore` implemented with thread-safe maps
+- [ ] `LocalMetadataStore` implemented (JSONL files with tombstones)
+- [ ] DynamoDB backend fully implemented with single-table PK/SK design
+- [ ] Firestore backend fully implemented with collection/document design
+- [ ] Cosmos DB backend fully implemented with container/partition key design
+- [ ] Backend selection via config
+- [ ] Unit tests for each backend
+- [ ] E2E tests pass with each backend
+
+---
+
+### Stage 18: Cloud Metadata Backends
+
+**Goal:** Complete implementations of DynamoDB, Firestore, and Cosmos DB backends.
+
+This stage is completed as part of Stage 17 for Rust - all cloud backends are implemented together.
+
+**Reference implementations (Python):**
+- PR #17: DynamoDB backend (single-table PK/SK design)
+- PR #18: Firestore backend (collection/document with subcollections for parts)
+- PR #19: Cosmos DB backend (single-container with /type partition key)
+
+---
+
+## Milestone 11: Persistent Event Queues (Stages 19a-19c)
+
+### Stage 19a: Queue Interface & Redis Backend
 
 **Goal:** Define the QueueBackend interface, event types/envelope, and implement the Redis Streams backend with write-through mode.
 
@@ -1353,7 +1424,7 @@ cargo run --features redis-queue -- -c ../bleepstore.yaml &
 
 ---
 
-### Stage 16b: RabbitMQ Backend
+### Stage 19b: RabbitMQ Backend
 
 **Goal:** Implement the RabbitMQ/AMQP backend using the QueueBackend interface established in 16a.
 
@@ -1415,7 +1486,7 @@ cargo run --features rabbitmq -- -c ../bleepstore.yaml &
 
 ---
 
-### Stage 16c: Kafka Backend & Consistency Modes
+### Stage 19c: Kafka Backend & Consistency Modes
 
 **Goal:** Implement the Kafka backend and the sync/async consistency modes. All three queue backends support all three consistency modes.
 

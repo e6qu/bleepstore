@@ -38,9 +38,16 @@ Per `S3_GAP_REMAINING.md` (2026-02-27):
 
 **Overall S3 Core API Coverage: ~95%** for Phase 1 scope.
 
+## Future Milestones
+
+- **Stage 17:** Pluggable Metadata Backends (memory, local, cloud stubs)
+- **Stage 18:** Cloud Metadata Backends (DynamoDB, Firestore, Cosmos DB)
+- **Stage 19:** Raft Consensus / Clustering
+- **Stage 20:** Event Queues (Redis, RabbitMQ, Kafka)
+
 ## Next Milestone: Stage 16 -- S3 API Completeness
 
-Close remaining gaps identified in the gap analysis:
+Close remaining gaps identified in the gap analysis.
 
 ### Priority 1: Compliance Fixes (Required for Full E2E Compliance)
 | Gap | Impact | File |

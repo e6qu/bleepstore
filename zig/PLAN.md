@@ -1320,7 +1320,83 @@ Implementation in `getObject`:
 
 ---
 
-## Stage 17a: Queue Interface & Redis Backend
+## Stage 17: Pluggable Metadata Backends
+
+> **Status:** Not started.
+>
+> **Goal:** Support multiple metadata storage backends with a common vtable interface.
+
+### Backends to Implement
+
+| Backend | Description | File |
+|---------|-------------|------|
+| `sqlite` | SQLite file (default) | `metadata/sqlite.zig` (exists) |
+| `memory` | In-memory hash maps | `metadata/memory.zig` (new) |
+| `local` | JSONL append-only files | `metadata/local.zig` (new) |
+| `dynamodb` | AWS DynamoDB | `metadata/dynamodb.zig` (new) |
+| `firestore` | GCP Firestore | `metadata/firestore.zig` (new) |
+| `cosmos` | Azure Cosmos DB | `metadata/cosmos.zig` (new) |
+
+### Files to Create/Modify
+
+| File | Work |
+|------|------|
+| `src/metadata/store.zig` | Ensure vtable has all 22 methods |
+| `src/metadata/memory.zig` | In-memory implementation with `std.HashMap` + `std.Thread.Mutex` |
+| `src/metadata/local.zig` | JSONL file-based implementation with tombstones |
+| `src/metadata/dynamodb.zig` | DynamoDB implementation using AWS SDK |
+| `src/metadata/firestore.zig` | Firestore implementation using GCP SDK |
+| `src/metadata/cosmos.zig` | Cosmos DB implementation using Azure SDK |
+| `src/config.zig` | Add `metadata.engine` selector |
+
+### Configuration
+
+```yaml
+metadata:
+  engine: "sqlite"  # sqlite | memory | local | dynamodb | firestore | cosmos
+  sqlite:
+    path: "./data/metadata.db"
+  dynamodb:
+    table: "bleepstore-metadata"
+    region: "us-east-1"
+  firestore:
+    collection: "bleepstore-metadata"
+    project: "my-project"
+  cosmos:
+    database: "bleepstore"
+    container: "metadata"
+```
+
+### Definition of Done
+
+- [ ] `MetadataStore` vtable defines all 22 methods
+- [ ] `MemoryMetadataStore` implemented with thread-safe maps
+- [ ] `LocalMetadataStore` implemented (JSONL files with tombstones)
+- [ ] DynamoDB backend fully implemented with single-table PK/SK design
+- [ ] Firestore backend fully implemented with collection/document design
+- [ ] Cosmos DB backend fully implemented with container/partition key design
+- [ ] Backend selection via config
+- [ ] Unit tests for each backend
+- [ ] E2E tests pass with each backend
+
+---
+
+## Stage 18: Cloud Metadata Backends
+
+> **Status:** Not started.
+>
+> **Goal:** Complete implementations of DynamoDB, Firestore, and Cosmos DB backends.
+
+This stage is completed as part of Stage 17 for Zig - all cloud backends are implemented together.
+
+**Reference implementations (Python):**
+- PR #17: DynamoDB backend (single-table PK/SK design)
+- PR #18: Firestore backend (collection/document with subcollections for parts)
+- PR #19: Cosmos DB backend (single-container with /type partition key)
+
+---
+
+## Stage 19a: Queue Interface & Redis Backend
 
 > **Global plan ref:** Milestone 10, Stage 16a. Define QueueBackend interface, event types/envelope, and implement Redis Streams backend with write-through mode.
 
@@ -1439,7 +1515,7 @@ test "Event JSON round-trip" {
 
 ---
 
-## Stage 17b: RabbitMQ Backend
+## Stage 19b: RabbitMQ Backend
 
 > **Global plan ref:** Milestone 10, Stage 16b. Implement the RabbitMQ/AMQP backend using the QueueBackend interface established in 17a.
 
@@ -1493,9 +1569,9 @@ test "Event JSON round-trip" {
 
 ---
 
-## Stage 16c: Kafka Backend & Consistency Modes
+## Stage 19c: Kafka Backend & Consistency Modes
 
-> **Global plan ref:** Milestone 10, Stage 16c. Implement the Kafka backend and the sync/async consistency modes. All three queue backends support all three consistency modes.
+> **Global plan ref:** Milestone 11, Stage 19c. Implement the Kafka backend and the sync/async consistency modes. All three queue backends support all three consistency modes.
 
 ### Files to Create/Modify
 
