@@ -1,0 +1,53 @@
+# BleepStore Configuration — In-Memory Backend
+#
+# This configuration stores everything in RAM. Data is lost on restart
+# unless persistence is enabled. Best for: Testing, caching, ephemeral data
+#
+# Data Location:
+#   - Metadata: In-memory hash maps (buckets, objects, ACLs, uploads)
+#   - Objects:  In-memory byte buffers keyed by bucket/key
+#   - Multipart parts: In-memory buffers keyed by uploadId/partNumber
+#
+# Persistence (optional):
+#   - Snapshot file: ./data/memory.snap (written on shutdown/interval)
+#   - On startup: Loads snapshot if exists
+#
+# Limitations:
+#   - Data lost on restart unless persistence enabled
+#   - Not suitable for production workloads requiring durability
+#   - Memory usage = sum of all object sizes + metadata overhead
+
+server:
+  host: "0.0.0.0"
+  port: 9000
+  region: "us-east-1"
+
+auth:
+  access_key: "bleepstore"
+  secret_key: "bleepstore-secret"
+
+metadata:
+  engine: "sqlite"
+  sqlite:
+    path: "./data/metadata.db"
+
+storage:
+  backend: "memory"
+  memory:
+    # Maximum total bytes to store (0 = unlimited)
+    max_size_bytes: 0
+    
+    # Persistence mode: "none" or "snapshot"
+    # - none: Data lost on restart
+    # - snapshot: Save to disk on shutdown and interval
+    persistence: "snapshot"
+    
+    # Path for snapshot file
+    snapshot_path: "./data/memory.snap"
+    
+    # Snapshot interval in seconds (0 = only on shutdown)
+    snapshot_interval_seconds: 300
+
+observability:
+  metrics: true
+  health_check: true

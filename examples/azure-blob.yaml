@@ -1,0 +1,67 @@
+# BleepStore Configuration — Azure Blob Storage Gateway Backend
+#
+# This configuration uses Azure Blob Storage as the backing object store.
+# BleepStore acts as a gateway/proxy, translating S3 API to Azure Blob API.
+# Best for: Azure-native deployments, leveraging Azure infrastructure
+#
+# Data Location:
+#   - Metadata: Local SQLite at ./data/metadata.db
+#     - buckets: Bucket metadata (BleepStore's view)
+#     - objects: Object metadata (maps to Azure blobs)
+#     - multipart_uploads: Upload state
+#     - multipart_parts: Part tracking
+#
+#   - Objects: Azure Blob Storage container (my-container)
+#     - Key path: {prefix}{bucket}/{key}
+#     - Example: bleepstore/mybucket/photos/2024/image.jpg
+#
+#   - Multipart parts: Block blobs (committed on complete)
+#
+# Architecture:
+#   ┌─────────────┐     ┌─────────────────┐     ┌─────────────┐
+#   │   Client    │────▶│   BleepStore    │────▶│ Azure Blob  │
+#   │  (S3 API)   │     │ (SQLite meta)   │     │  Container  │
+#   └─────────────┘     └─────────────────┘     └─────────────┘
+#
+# Authentication Options:
+#   1. Account name + key (below)
+#   2. Connection string (alternative)
+#   3. Managed Identity (when running on Azure VM/AKS/Functions)
+
+server:
+  host: "0.0.0.0"
+  port: 9000
+  region: "us-east-1"
+
+auth:
+  access_key: "bleepstore"
+  secret_key: "bleepstore-secret"
+
+metadata:
+  engine: "sqlite"
+  sqlite:
+    path: "./data/metadata.db"
+
+storage:
+  backend: "azure"
+  azure:
+    # Azure Blob Storage container
+    container: "my-container"
+    
+    # Storage account name
+    account: "mystorageaccount"
+    
+    # Prefix for all blobs
+    prefix: "bleepstore/"
+    
+    # Authentication method 1: Connection string
+    # Find in Azure Portal: Storage Account > Access keys > Connection string
+    # connection_string: "DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...;EndpointSuffix=core.windows.net"
+    
+    # Authentication method 2: Managed Identity (for Azure resources)
+    # When enabled, account key is retrieved via Azure AD
+    use_managed_identity: false
+
+observability:
+  metrics: true
+  health_check: true

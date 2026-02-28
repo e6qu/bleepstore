@@ -1,0 +1,64 @@
+# BleepStore Configuration — GCP Cloud Storage Gateway Backend
+#
+# This configuration uses Google Cloud Storage as the backing object store.
+# BleepStore acts as a gateway/proxy, translating S3 API to GCS API.
+# Best for: GCP-native deployments, leveraging GCS infrastructure
+#
+# Data Location:
+#   - Metadata: Local SQLite at ./data/metadata.db
+#     - buckets: Bucket metadata (BleepStore's view)
+#     - objects: Object metadata (maps to GCS objects)
+#     - multipart_uploads: Upload state
+#     - multipart_parts: Part tracking
+#
+#   - Objects: GCP Cloud Storage bucket (my-backing-bucket)
+#     - Key path: {prefix}{bucket}/{key}
+#     - Example: bleepstore/mybucket/photos/2024/image.jpg
+#
+#   - Multipart parts: GCS objects (composed on complete)
+#
+# Architecture:
+#   ┌─────────────┐     ┌─────────────────┐     ┌─────────────┐
+#   │   Client    │────▶│   BleepStore    │────▶│  GCP GCS    │
+#   │  (S3 API)   │     │ (SQLite meta)   │     │   Bucket    │
+#   └─────────────┘     └─────────────────┘     └─────────────┘
+#
+# Authentication:
+#   - credentials_file in config (Service Account JSON), OR
+#   - GOOGLE_APPLICATION_CREDENTIALS env var, OR
+#   - Default service account (when running on GCE/GKE/Cloud Run)
+
+server:
+  host: "0.0.0.0"
+  port: 9000
+  region: "us-east-1"
+
+auth:
+  access_key: "bleepstore"
+  secret_key: "bleepstore-secret"
+
+metadata:
+  engine: "sqlite"
+  sqlite:
+    path: "./data/metadata.db"
+
+storage:
+  backend: "gcp"
+  gcp:
+    # GCS bucket to store objects
+    bucket: "my-backing-bucket"
+    
+    # GCP project ID
+    project: "my-project"
+    
+    # Prefix for all objects
+    prefix: "bleepstore/"
+    
+    # Service account credentials file (JSON)
+    # Leave empty to use GOOGLE_APPLICATION_CREDENTIALS env var
+    # or default service account on GCE/GKE
+    credentials_file: ""
+
+observability:
+  metrics: true
+  health_check: true
