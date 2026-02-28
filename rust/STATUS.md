@@ -47,4 +47,7 @@
 - AWS SDK crates pinned to specific versions for rustc 1.88 compatibility (MSRV bumped to 1.91 on 2026-02-11)
 
 ## Next Steps
-- Stage 12: Raft State Machine & Storage
+
+- **Stage 17:** Pluggable Metadata Backends (memory, local, cloud stubs)
+- **Stage 18:** Cloud Metadata Backends (DynamoDB, Firestore, Cosmos DB)
+- **Stage 19:** Raft State Machine & Storage

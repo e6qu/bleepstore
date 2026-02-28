@@ -88,7 +88,23 @@ All E2E tests pass.
 
 ---
 
-## Next Milestone: Stage 17 -- Event Queues OR Stage 12 -- Raft Clustering
+## Next Milestone: Stage 17 — Pluggable Metadata Backends
+
+For parity with Python implementation, Go needs pluggable metadata backends:
+
+### Stage 17: Pluggable Metadata Backends
+- Define `MetadataStore` interface (already exists in `internal/metadata/store.go`)
+- Implement: `SqliteMetadataStore` (current), `MemoryMetadataStore`, `LocalMetadataStore`
+- Add cloud backend stubs: `DynamoDBMetadataStore`, `FirestoreMetadataStore`, `CosmosMetadataStore`
+
+### Stage 18: Cloud Metadata Backends
+- Implement DynamoDB backend using AWS SDK
+- Implement Firestore backend using google-cloud-go
+- Implement Cosmos DB backend using Azure SDK
+
+### Future Milestones
+- **Stage 19:** Raft Consensus / Clustering
+- **Stage 20:** Event Queues (Redis, RabbitMQ, Kafka)
 
 Based on `S3_GAP_REMAINING.md` gap analysis, S3 API completeness is now achieved.
 

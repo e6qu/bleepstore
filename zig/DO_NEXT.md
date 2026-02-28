@@ -90,5 +90,41 @@ zig build e2e          # Zig E2E tests (34 tests)
 - [ ] All 160+ unit tests pass
 - [ ] All 86 E2E tests pass
 
+---
+
+## After Stage 16: Stage 17 — Pluggable Metadata Backends
+
+For parity with Python implementation, implement pluggable metadata backends.
+
+### Backends to Implement
+
+| Backend | Description | Status |
+|---------|-------------|--------|
+| `sqlite` | SQLite file (default) | ✅ Exists |
+| `memory` | In-memory hash maps | 🔲 New |
+| `local` | JSONL append-only files | 🔲 New |
+| `dynamodb` | AWS DynamoDB | 🔲 New |
+| `firestore` | GCP Firestore | 🔲 New |
+| `cosmos` | Azure Cosmos DB | 🔲 New |
+
+### Files to Create/Modify
+
+| File | Work |
+|------|------|
+| `src/metadata/memory.zig` | In-memory MetadataStore implementation |
+| `src/metadata/local.zig` | JSONL file-based MetadataStore |
+| `src/metadata/dynamodb.zig` | DynamoDB implementation |
+| `src/metadata/firestore.zig` | Firestore implementation |
+| `src/metadata/cosmos.zig` | Cosmos DB implementation |
+| `src/config.zig` | Add `metadata.engine` selector |
+
+---
+
+## Future
+
+- **Stage 18:** Cloud Metadata Backends (DynamoDB, Firestore, Cosmos DB)
+- **Stage 19:** Raft Consensus / Clustering
+- **Stage 20:** Event Queues (Redis, RabbitMQ, Kafka)
+
 ## Known Issues
 - `test_invalid_access_key` has hardcoded `endpoint_url="http://localhost:9000"` (test bug, per CLAUDE.md rule 6)
