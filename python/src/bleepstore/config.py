@@ -1,7 +1,7 @@
 """Configuration loading and Pydantic models for BleepStore."""
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import yaml
 from pydantic import BaseModel, Field
@@ -16,7 +16,7 @@ class ServerConfig(BaseModel):
     log_level: str = "INFO"
     log_format: str = "text"
     shutdown_timeout: int = 30
-    max_object_size: int = 5 * 1024 * 1024 * 1024 * 1024  # 5 TB
+    max_object_size: int = 5 * 1024 * 1024 * 1024 * 1024
 
 
 class AuthConfig(BaseModel):
@@ -27,11 +27,53 @@ class AuthConfig(BaseModel):
     enabled: bool = True
 
 
+class SQLiteConfig(BaseModel):
+    """SQLite metadata backend configuration."""
+
+    path: str = "./data/metadata.db"
+
+
+class LocalMetadataConfig(BaseModel):
+    """Local JSONL metadata backend configuration."""
+
+    root_dir: str = "./data/metadata"
+    compact_on_startup: bool = True
+
+
+class DynamoDBConfig(BaseModel):
+    """AWS DynamoDB metadata backend configuration."""
+
+    table: str = "bleepstore-metadata"
+    region: str = "us-east-1"
+    endpoint_url: Optional[str] = None
+
+
+class FirestoreConfig(BaseModel):
+    """GCP Firestore metadata backend configuration."""
+
+    collection: str = "bleepstore-metadata"
+    project: Optional[str] = None
+    credentials_file: Optional[str] = None
+
+
+class CosmosConfig(BaseModel):
+    """Azure Cosmos DB metadata backend configuration."""
+
+    database: str = "bleepstore"
+    container: str = "metadata"
+    endpoint: Optional[str] = None
+    connection_string: Optional[str] = None
+
+
 class MetadataConfig(BaseModel):
     """Metadata store configuration."""
 
     engine: str = "sqlite"
-    sqlite_path: str = "./data/metadata.db"
+    sqlite: SQLiteConfig = Field(default_factory=SQLiteConfig)
+    local: Optional[LocalMetadataConfig] = None
+    dynamodb: Optional[DynamoDBConfig] = None
+    firestore: Optional[FirestoreConfig] = None
+    cosmos: Optional[CosmosConfig] = None
 
 
 class StorageConfig(BaseModel):
@@ -39,12 +81,10 @@ class StorageConfig(BaseModel):
 
     backend: str = "local"
     local_root: str = "./data/objects"
-    # Memory backend
     memory_max_size_bytes: int = 0
     memory_persistence: str = "none"
     memory_snapshot_path: str = "./data/memory.snap"
     memory_snapshot_interval_seconds: int = 300
-    # AWS S3
     aws_bucket: str = ""
     aws_region: str = "us-east-1"
     aws_prefix: str = ""
@@ -52,12 +92,10 @@ class StorageConfig(BaseModel):
     aws_use_path_style: bool = False
     aws_access_key_id: str = ""
     aws_secret_access_key: str = ""
-    # GCP Cloud Storage
     gcp_bucket: str = ""
     gcp_project: str = ""
     gcp_prefix: str = ""
     gcp_credentials_file: str = ""
-    # Azure Blob
     azure_container: str = ""
     azure_account: str = ""
     azure_prefix: str = ""
@@ -93,7 +131,6 @@ class BleepStoreConfig(BaseModel):
 
 
 def _parse_server(data: dict[str, Any] | None) -> dict[str, Any]:
-    """Parse the server section from YAML data into a dict for Pydantic."""
     if data is None:
         return {}
     return {
@@ -108,7 +145,6 @@ def _parse_server(data: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _parse_auth(data: dict[str, Any] | None) -> dict[str, Any]:
-    """Parse the auth section from YAML data."""
     if data is None:
         return {}
     return {
@@ -119,24 +155,50 @@ def _parse_auth(data: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _parse_metadata(data: dict[str, Any] | None) -> dict[str, Any]:
-    """Parse the metadata section from YAML data.
-
-    Handles nested structure: metadata.sqlite.path -> sqlite_path
-    """
     if data is None:
         return {}
     result: dict[str, Any] = {"engine": data.get("engine", "sqlite")}
+
     sqlite_section = data.get("sqlite")
     if isinstance(sqlite_section, dict):
-        result["sqlite_path"] = sqlite_section.get("path", "./data/metadata.db")
+        result["sqlite"] = {"path": sqlite_section.get("path", "./data/metadata.db")}
+
+    local_section = data.get("local")
+    if isinstance(local_section, dict):
+        result["local"] = {
+            "root_dir": local_section.get("root_dir", "./data/metadata"),
+            "compact_on_startup": local_section.get("compact_on_startup", True),
+        }
+
+    dynamodb_section = data.get("dynamodb")
+    if isinstance(dynamodb_section, dict):
+        result["dynamodb"] = {
+            "table": dynamodb_section.get("table", "bleepstore-metadata"),
+            "region": dynamodb_section.get("region", "us-east-1"),
+            "endpoint_url": dynamodb_section.get("endpoint_url"),
+        }
+
+    firestore_section = data.get("firestore")
+    if isinstance(firestore_section, dict):
+        result["firestore"] = {
+            "collection": firestore_section.get("collection", "bleepstore-metadata"),
+            "project": firestore_section.get("project"),
+            "credentials_file": firestore_section.get("credentials_file"),
+        }
+
+    cosmos_section = data.get("cosmos")
+    if isinstance(cosmos_section, dict):
+        result["cosmos"] = {
+            "database": cosmos_section.get("database", "bleepstore"),
+            "container": cosmos_section.get("container", "metadata"),
+            "endpoint": cosmos_section.get("endpoint"),
+            "connection_string": cosmos_section.get("connection_string"),
+        }
+
     return result
 
 
 def _parse_storage(data: dict[str, Any] | None) -> dict[str, Any]:
-    """Parse the storage section from YAML data.
-
-    Handles nested structure: storage.local.root_dir -> local_root, etc.
-    """
     if data is None:
         return {}
 
@@ -184,7 +246,6 @@ def _parse_storage(data: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _parse_cluster(data: dict[str, Any] | None) -> dict[str, Any]:
-    """Parse the cluster section from YAML data."""
     if data is None:
         return {}
     return {
@@ -196,7 +257,6 @@ def _parse_cluster(data: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _parse_observability(data: dict[str, Any] | None) -> dict[str, Any]:
-    """Parse the observability section from YAML data."""
     if data is None:
         return {}
     return {
@@ -206,18 +266,6 @@ def _parse_observability(data: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def load_config(path: Path) -> BleepStoreConfig:
-    """Load a BleepStoreConfig from a YAML file.
-
-    Args:
-        path: Path to the YAML configuration file.
-
-    Returns:
-        A fully populated BleepStoreConfig validated by Pydantic.
-
-    Raises:
-        FileNotFoundError: If the config file does not exist.
-        yaml.YAMLError: If the file is not valid YAML.
-    """
     with open(path, "r") as fh:
         raw: dict[str, Any] = yaml.safe_load(fh) or {}
 

@@ -1,0 +1,51 @@
+# BleepStore Configuration — AWS DynamoDB Metadata Backend
+#
+# This configuration stores metadata in AWS DynamoDB.
+# Best for: AWS-native deployments, serverless, high availability
+#
+# Data Location:
+#   - Metadata: DynamoDB table "bleepstore-metadata"
+#   - Single-table design with pk/sk pattern
+#
+# Table Schema:
+#   - pk (Partition Key): "BUCKET#name" | "OBJECT#bucket#key" | "UPLOAD#id" | "CRED#access_key"
+#   - sk (Sort Key): "" for single items | "PART#001" for parts
+#   - All entity fields as top-level attributes
+#   - type: "bucket" | "object" | "upload" | "part" | "credential"
+#
+# Example Items:
+#   pk: "BUCKET#mybucket", sk: "", type: "bucket", name: "mybucket", region: "us-east-1", ...
+#   pk: "OBJECT#mybucket#file.txt", sk: "", type: "object", key: "file.txt", size: 100, ...
+#   pk: "UPLOAD#abc123", sk: "PART#001", type: "part", part_number: 1, size: 5242880, ...
+#
+# Authentication:
+#   - Uses standard AWS credential chain:
+#     1. AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env vars
+#     2. ~/.aws/credentials
+#     3. IAM role (EC2, Lambda, EKS)
+
+server:
+  host: "0.0.0.0"
+  port: 9000
+  region: "us-east-1"
+
+auth:
+  access_key: "bleepstore"
+  secret_key: "bleepstore-secret"
+
+metadata:
+  engine: "dynamodb"
+  dynamodb:
+    table: "bleepstore-metadata"
+    region: "us-east-1"
+
+storage:
+  backend: "aws"
+  aws:
+    bucket: "my-backing-bucket"
+    region: "us-east-1"
+    prefix: "bleepstore/"
+
+observability:
+  metrics: true
+  health_check: true

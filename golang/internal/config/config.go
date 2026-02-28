@@ -55,15 +55,64 @@ type AuthConfig struct {
 
 // MetadataConfig holds metadata store settings.
 type MetadataConfig struct {
-	// Engine is the metadata backend engine (e.g., "sqlite", "raft").
-	Engine string       `yaml:"engine"`
+	// Engine is the metadata backend engine (e.g., "sqlite", "memory", "local", "dynamodb", "firestore", "cosmos").
+	Engine string `yaml:"engine"`
+	// SQLite holds SQLite-specific settings.
 	SQLite SQLiteConfig `yaml:"sqlite"`
+	// Local holds local JSONL-specific settings.
+	Local LocalMetaConfig `yaml:"local"`
+	// DynamoDB holds DynamoDB-specific settings.
+	DynamoDB DynamoDBConfig `yaml:"dynamodb"`
+	// Firestore holds Firestore-specific settings.
+	Firestore FirestoreConfig `yaml:"firestore"`
+	// Cosmos holds Cosmos DB-specific settings.
+	Cosmos CosmosConfig `yaml:"cosmos"`
 }
 
 // SQLiteConfig holds SQLite-specific metadata store settings.
 type SQLiteConfig struct {
 	// Path is the filesystem path for the SQLite database file.
 	Path string `yaml:"path"`
+}
+
+// LocalMetaConfig holds local JSONL file-based metadata store settings.
+type LocalMetaConfig struct {
+	// RootDir is the directory where JSONL files are stored.
+	RootDir string `yaml:"root_dir"`
+	// CompactOnStartup enables compaction of JSONL files on startup.
+	CompactOnStartup bool `yaml:"compact_on_startup"`
+}
+
+// DynamoDBConfig holds DynamoDB-specific metadata store settings.
+type DynamoDBConfig struct {
+	// Table is the DynamoDB table name.
+	Table string `yaml:"table"`
+	// Region is the AWS region.
+	Region string `yaml:"region"`
+	// EndpointURL is a custom DynamoDB endpoint (for local testing).
+	EndpointURL string `yaml:"endpoint_url"`
+}
+
+// FirestoreConfig holds Firestore-specific metadata store settings.
+type FirestoreConfig struct {
+	// ProjectID is the GCP project ID.
+	ProjectID string `yaml:"project_id"`
+	// Collection is the Firestore collection prefix.
+	Collection string `yaml:"collection"`
+	// CredentialsFile is the path to a service account JSON file.
+	CredentialsFile string `yaml:"credentials_file"`
+}
+
+// CosmosConfig holds Azure Cosmos DB-specific metadata store settings.
+type CosmosConfig struct {
+	// Endpoint is the Cosmos DB account endpoint.
+	Endpoint string `yaml:"endpoint"`
+	// Database is the Cosmos DB database name.
+	Database string `yaml:"database"`
+	// Container is the Cosmos DB container name.
+	Container string `yaml:"container"`
+	// MasterKey is the Cosmos DB master key.
+	MasterKey string `yaml:"master_key"`
 }
 
 // StorageConfig holds object storage backend settings.
@@ -253,6 +302,9 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Metadata.SQLite.Path == "" {
 		cfg.Metadata.SQLite.Path = "./data/metadata.db"
+	}
+	if cfg.Metadata.Local.RootDir == "" {
+		cfg.Metadata.Local.RootDir = "./data/metadata"
 	}
 	if cfg.Server.ShutdownTimeout == 0 {
 		cfg.Server.ShutdownTimeout = 30
