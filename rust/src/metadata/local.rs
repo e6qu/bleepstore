@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Mutex;
 
@@ -315,7 +315,7 @@ impl LocalMetadataStore {
         })
     }
 
-    fn load_buckets(root_dir: &PathBuf, inner: &mut Inner) -> anyhow::Result<()> {
+    fn load_buckets(root_dir: &Path, inner: &mut Inner) -> anyhow::Result<()> {
         let path = root_dir.join("buckets.jsonl");
         if !path.exists() {
             return Ok(());
@@ -337,7 +337,7 @@ impl LocalMetadataStore {
         Ok(())
     }
 
-    fn load_objects(root_dir: &PathBuf, inner: &mut Inner) -> anyhow::Result<()> {
+    fn load_objects(root_dir: &Path, inner: &mut Inner) -> anyhow::Result<()> {
         let path = root_dir.join("objects.jsonl");
         if !path.exists() {
             return Ok(());
@@ -360,7 +360,7 @@ impl LocalMetadataStore {
         Ok(())
     }
 
-    fn load_uploads(root_dir: &PathBuf, inner: &mut Inner) -> anyhow::Result<()> {
+    fn load_uploads(root_dir: &Path, inner: &mut Inner) -> anyhow::Result<()> {
         let path = root_dir.join("uploads.jsonl");
         if !path.exists() {
             return Ok(());
@@ -384,7 +384,7 @@ impl LocalMetadataStore {
         Ok(())
     }
 
-    fn load_parts(root_dir: &PathBuf, inner: &mut Inner) -> anyhow::Result<()> {
+    fn load_parts(root_dir: &Path, inner: &mut Inner) -> anyhow::Result<()> {
         let path = root_dir.join("parts.jsonl");
         if !path.exists() {
             return Ok(());
@@ -408,7 +408,7 @@ impl LocalMetadataStore {
         Ok(())
     }
 
-    fn load_credentials(root_dir: &PathBuf, inner: &mut Inner) -> anyhow::Result<()> {
+    fn load_credentials(root_dir: &Path, inner: &mut Inner) -> anyhow::Result<()> {
         let path = root_dir.join("credentials.jsonl");
         if !path.exists() {
             return Ok(());
@@ -439,7 +439,7 @@ impl LocalMetadataStore {
             .append(true)
             .open(&path)?;
         let mut writer = BufWriter::new(file);
-        writeln!(writer, "{}", line)?;
+        writeln!(writer, "{line}")?;
         writer.flush()?;
         Ok(())
     }
@@ -496,7 +496,7 @@ impl LocalMetadataStore {
         {
             let mut writer = BufWriter::new(&temp);
             for line in &lines {
-                writeln!(writer, "{}", line)?;
+                writeln!(writer, "{line}")?;
             }
             writer.flush()?;
         }
