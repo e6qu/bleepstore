@@ -22,6 +22,9 @@ dependencies = [
 aws = [
     "aiobotocore>=2.7.0",
 ]
+dynamodb = [
+    "aiobotocore>=2.7.0",
+]
 gcp = [
     "gcloud-aio-storage>=9.0.0",
 ]
@@ -39,6 +42,7 @@ dev = [
     "gcloud-aio-storage>=9.0.0",
     "azure-storage-blob>=12.19.0",
     "azure-identity>=1.15.0",
+    "moto>=5.0.0",
 ]
 
 [project.scripts]
