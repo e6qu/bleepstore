@@ -28,6 +28,9 @@ dynamodb = [
 gcp = [
     "gcloud-aio-storage>=9.0.0",
 ]
+firestore = [
+    "google-cloud-firestore>=2.14.0",
+]
 azure = [
     "azure-storage-blob>=12.19.0",
     "azure-identity>=1.15.0",
@@ -40,6 +43,7 @@ dev = [
     "ruff",
     "aiobotocore>=2.7.0",
     "gcloud-aio-storage>=9.0.0",
+    "google-cloud-firestore>=2.14.0",
     "azure-storage-blob>=12.19.0",
     "azure-identity>=1.15.0",
     "moto>=5.0.0",
