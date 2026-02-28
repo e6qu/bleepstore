@@ -120,4 +120,4 @@ bleepstore/
 
 ## License
 
-MIT
+GNU Affero General Public License v3.0 (AGPLv3). See [LICENSE](LICENSE) for details.
