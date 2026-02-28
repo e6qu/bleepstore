@@ -50,7 +50,10 @@ impl MemoryMetadataStore {
             created_at: now,
         };
         let mut inner = self.inner.write().expect("rwlock poisoned");
-        inner.credentials.entry(access_key.to_string()).or_insert(record);
+        inner
+            .credentials
+            .entry(access_key.to_string())
+            .or_insert(record);
         Ok(())
     }
 }
@@ -217,21 +220,24 @@ impl MetadataStore for MemoryMetadataStore {
         let continuation_token = continuation_token.map(|s| s.to_string());
         Box::pin(async move {
             let inner = self.inner.read().expect("rwlock poisoned");
-            
+
             let effective_start = continuation_token.as_deref().unwrap_or(&start_after);
-            
+
             let mut all_objects: Vec<ObjectRecord> = inner
                 .objects
                 .iter()
-                .filter(|((b, k), _)| *b == bucket && k.as_str() > effective_start && k.starts_with(&prefix))
+                .filter(|((b, k), _)| {
+                    *b == bucket && k.as_str() > effective_start && k.starts_with(&prefix)
+                })
                 .map(|(_, obj)| obj.clone())
                 .collect();
-            
+
             all_objects.sort_by(|a, b| a.key.cmp(&b.key));
-            
+
             if delimiter.is_empty() {
                 let is_truncated = all_objects.len() > max_keys as usize;
-                let objects: Vec<ObjectRecord> = all_objects.into_iter().take(max_keys as usize).collect();
+                let objects: Vec<ObjectRecord> =
+                    all_objects.into_iter().take(max_keys as usize).collect();
                 let next_token = if is_truncated {
                     objects.last().map(|o| o.key.clone())
                 } else {
@@ -266,7 +272,9 @@ impl MetadataStore for MemoryMetadataStore {
 
                 let is_truncated = count >= max_keys;
                 let next_token = if is_truncated {
-                    objects.last().map(|o| o.key.clone())
+                    objects
+                        .last()
+                        .map(|o| o.key.clone())
                         .or_else(|| common_prefixes.iter().last().cloned())
                 } else {
                     None
@@ -395,7 +403,7 @@ impl MetadataStore for MemoryMetadataStore {
                 .map(|(_, p)| p.clone())
                 .collect();
             parts.sort_by_key(|p| p.part_number);
-            
+
             let is_truncated = parts.len() > max_parts as usize;
             if is_truncated {
                 parts.truncate(max_parts as usize);
@@ -474,33 +482,42 @@ impl MetadataStore for MemoryMetadataStore {
         let upload_id_marker = upload_id_marker.to_string();
         Box::pin(async move {
             let inner = self.inner.read().expect("rwlock poisoned");
-            
+
             let mut uploads: Vec<MultipartUploadRecord> = inner
                 .uploads
                 .iter()
                 .filter(|(_, u)| {
-                    u.bucket == bucket && u.key.starts_with(&prefix) && 
-                    (key_marker.is_empty() || u.key > key_marker || 
-                     (u.key == key_marker && !upload_id_marker.is_empty() && u.upload_id > upload_id_marker))
+                    u.bucket == bucket
+                        && u.key.starts_with(&prefix)
+                        && (key_marker.is_empty()
+                            || u.key > key_marker
+                            || (u.key == key_marker
+                                && !upload_id_marker.is_empty()
+                                && u.upload_id > upload_id_marker))
                 })
                 .map(|(_, u)| u.clone())
                 .collect();
-            
-            uploads.sort_by(|a, b| a.key.cmp(&b.key).then_with(|| a.upload_id.cmp(&b.upload_id)));
-            
+
+            uploads.sort_by(|a, b| {
+                a.key
+                    .cmp(&b.key)
+                    .then_with(|| a.upload_id.cmp(&b.upload_id))
+            });
+
             let is_truncated = uploads.len() > max_uploads as usize;
             if is_truncated {
                 uploads.truncate(max_uploads as usize);
             }
-            
+
             let (next_key_marker, next_upload_id_marker) = if is_truncated {
-                uploads.last()
+                uploads
+                    .last()
                     .map(|u| (Some(u.key.clone()), Some(u.upload_id.clone())))
                     .unwrap_or((None, None))
             } else {
                 (None, None)
             };
-            
+
             Ok(ListUploadsResult {
                 uploads,
                 is_truncated,
@@ -527,7 +544,9 @@ impl MetadataStore for MemoryMetadataStore {
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + '_>> {
         Box::pin(async move {
             let mut inner = self.inner.write().expect("rwlock poisoned");
-            inner.credentials.insert(record.access_key_id.clone(), record);
+            inner
+                .credentials
+                .insert(record.access_key_id.clone(), record);
             Ok(())
         })
     }
@@ -640,11 +659,23 @@ mod tests {
         let store = test_store();
         store.create_bucket(make_bucket("mybucket")).await.unwrap();
 
-        store.put_object(make_object("mybucket", "a/1.txt", 1)).await.unwrap();
-        store.put_object(make_object("mybucket", "a/2.txt", 2)).await.unwrap();
-        store.put_object(make_object("mybucket", "b/1.txt", 3)).await.unwrap();
+        store
+            .put_object(make_object("mybucket", "a/1.txt", 1))
+            .await
+            .unwrap();
+        store
+            .put_object(make_object("mybucket", "a/2.txt", 2))
+            .await
+            .unwrap();
+        store
+            .put_object(make_object("mybucket", "b/1.txt", 3))
+            .await
+            .unwrap();
 
-        let result = store.list_objects("mybucket", "", "", 10, "", None).await.unwrap();
+        let result = store
+            .list_objects("mybucket", "", "", 10, "", None)
+            .await
+            .unwrap();
         assert_eq!(result.objects.len(), 3);
         assert!(!result.is_truncated);
     }
@@ -654,11 +685,23 @@ mod tests {
         let store = test_store();
         store.create_bucket(make_bucket("mybucket")).await.unwrap();
 
-        store.put_object(make_object("mybucket", "a/1.txt", 1)).await.unwrap();
-        store.put_object(make_object("mybucket", "a/2.txt", 2)).await.unwrap();
-        store.put_object(make_object("mybucket", "b/1.txt", 3)).await.unwrap();
+        store
+            .put_object(make_object("mybucket", "a/1.txt", 1))
+            .await
+            .unwrap();
+        store
+            .put_object(make_object("mybucket", "a/2.txt", 2))
+            .await
+            .unwrap();
+        store
+            .put_object(make_object("mybucket", "b/1.txt", 3))
+            .await
+            .unwrap();
 
-        let result = store.list_objects("mybucket", "a/", "", 10, "", None).await.unwrap();
+        let result = store
+            .list_objects("mybucket", "a/", "", 10, "", None)
+            .await
+            .unwrap();
         assert_eq!(result.objects.len(), 2);
     }
 
@@ -666,11 +709,23 @@ mod tests {
     async fn test_delete_object() {
         let store = test_store();
         store.create_bucket(make_bucket("mybucket")).await.unwrap();
-        store.put_object(make_object("mybucket", "delete-me.txt", 1)).await.unwrap();
-        
-        assert!(store.object_exists("mybucket", "delete-me.txt").await.unwrap());
-        store.delete_object("mybucket", "delete-me.txt").await.unwrap();
-        assert!(!store.object_exists("mybucket", "delete-me.txt").await.unwrap());
+        store
+            .put_object(make_object("mybucket", "delete-me.txt", 1))
+            .await
+            .unwrap();
+
+        assert!(store
+            .object_exists("mybucket", "delete-me.txt")
+            .await
+            .unwrap());
+        store
+            .delete_object("mybucket", "delete-me.txt")
+            .await
+            .unwrap();
+        assert!(!store
+            .object_exists("mybucket", "delete-me.txt")
+            .await
+            .unwrap());
     }
 
     #[tokio::test]
@@ -724,9 +779,15 @@ mod tests {
         assert_eq!(parts.parts.len(), 1);
 
         let final_obj = make_object("mybucket", "large-file.bin", 2048);
-        store.complete_multipart_upload("upload-123", final_obj).await.unwrap();
+        store
+            .complete_multipart_upload("upload-123", final_obj)
+            .await
+            .unwrap();
 
-        let obj = store.get_object("mybucket", "large-file.bin").await.unwrap();
+        let obj = store
+            .get_object("mybucket", "large-file.bin")
+            .await
+            .unwrap();
         assert!(obj.is_some());
 
         let upload_after = store.get_multipart_upload("upload-123").await.unwrap();

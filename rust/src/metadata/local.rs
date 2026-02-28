@@ -285,7 +285,7 @@ impl LocalMetadataStore {
     pub fn new(config: &LocalMetaConfig) -> anyhow::Result<Self> {
         let root_dir = PathBuf::from(&config.root_dir);
         std::fs::create_dir_all(&root_dir)?;
-        
+
         let mut inner = Inner {
             buckets: HashMap::new(),
             objects: HashMap::new(),
@@ -293,13 +293,13 @@ impl LocalMetadataStore {
             parts: HashMap::new(),
             credentials: HashMap::new(),
         };
-        
+
         Self::load_buckets(&root_dir, &mut inner)?;
         Self::load_objects(&root_dir, &mut inner)?;
         Self::load_uploads(&root_dir, &mut inner)?;
         Self::load_parts(&root_dir, &mut inner)?;
         Self::load_credentials(&root_dir, &mut inner)?;
-        
+
         if config.compact_on_startup {
             let store = Self {
                 root_dir: root_dir.clone(),
@@ -308,7 +308,7 @@ impl LocalMetadataStore {
             store.compact_all()?;
             return Ok(store);
         }
-        
+
         Ok(Self {
             root_dir,
             inner: Mutex::new(inner),
@@ -376,7 +376,9 @@ impl LocalMetadataStore {
             if upload._deleted {
                 inner.uploads.remove(&upload.upload_id);
             } else {
-                inner.uploads.insert(upload.upload_id.clone(), upload.into());
+                inner
+                    .uploads
+                    .insert(upload.upload_id.clone(), upload.into());
             }
         }
         Ok(())
@@ -422,7 +424,9 @@ impl LocalMetadataStore {
             if cred._deleted {
                 inner.credentials.remove(&cred.access_key_id);
             } else {
-                inner.credentials.insert(cred.access_key_id.clone(), cred.into());
+                inner
+                    .credentials
+                    .insert(cred.access_key_id.clone(), cred.into());
             }
         }
         Ok(())
@@ -442,22 +446,46 @@ impl LocalMetadataStore {
 
     fn compact_all(&self) -> anyhow::Result<()> {
         let inner = self.inner.lock().expect("mutex poisoned");
-        self.compact_file("buckets.jsonl", inner.buckets.values().map(|b| {
-            serde_json::to_string(&JsonBucket::from(b.clone())).unwrap()
-        }).collect())?;
-        self.compact_file("objects.jsonl", inner.objects.values().map(|o| {
-            serde_json::to_string(&JsonObject::from(o.clone())).unwrap()
-        }).collect())?;
-        self.compact_file("uploads.jsonl", inner.uploads.values().map(|u| {
-            serde_json::to_string(&JsonUpload::from(u.clone())).unwrap()
-        }).collect())?;
-        let parts: Vec<String> = inner.parts.iter().map(|((upload_id, _), p)| {
-            serde_json::to_string(&JsonPart::from((upload_id.clone(), p.clone()))).unwrap()
-        }).collect();
+        self.compact_file(
+            "buckets.jsonl",
+            inner
+                .buckets
+                .values()
+                .map(|b| serde_json::to_string(&JsonBucket::from(b.clone())).unwrap())
+                .collect(),
+        )?;
+        self.compact_file(
+            "objects.jsonl",
+            inner
+                .objects
+                .values()
+                .map(|o| serde_json::to_string(&JsonObject::from(o.clone())).unwrap())
+                .collect(),
+        )?;
+        self.compact_file(
+            "uploads.jsonl",
+            inner
+                .uploads
+                .values()
+                .map(|u| serde_json::to_string(&JsonUpload::from(u.clone())).unwrap())
+                .collect(),
+        )?;
+        let parts: Vec<String> = inner
+            .parts
+            .iter()
+            .map(|((upload_id, _), p)| {
+                serde_json::to_string(&JsonPart::from((upload_id.clone(), p.clone()))).unwrap()
+            })
+            .collect();
         self.compact_file("parts.jsonl", parts)?;
-        self.compact_file("credentials.jsonl", inner.credentials.values().map(|c| {
-            serde_json::to_string(&JsonCredential::from(c.clone())).unwrap()
-        }).collect())?;
+        self.compact_file(
+            "credentials.jsonl",
+            inner
+                .credentials
+                .values()
+                .map(|c| serde_json::to_string(&JsonCredential::from(c.clone())).unwrap())
+                .collect(),
+        )?;
         Ok(())
     }
 
@@ -486,12 +514,12 @@ impl LocalMetadataStore {
             active: true,
             created_at: now,
         };
-        
+
         let mut inner = self.inner.lock().expect("mutex poisoned");
         if inner.credentials.contains_key(access_key) {
             return Ok(());
         }
-        
+
         let json = serde_json::to_string(&JsonCredential::from(record.clone()))?;
         self.append_line("credentials.jsonl", &json)?;
         inner.credentials.insert(access_key.to_string(), record);
@@ -676,21 +704,24 @@ impl MetadataStore for LocalMetadataStore {
         let continuation_token = continuation_token.map(|s| s.to_string());
         Box::pin(async move {
             let inner = self.inner.lock().expect("mutex poisoned");
-            
+
             let effective_start = continuation_token.as_deref().unwrap_or(&start_after);
-            
+
             let mut all_objects: Vec<ObjectRecord> = inner
                 .objects
                 .iter()
-                .filter(|((b, k), _)| *b == bucket && k.as_str() > effective_start && k.starts_with(&prefix))
+                .filter(|((b, k), _)| {
+                    *b == bucket && k.as_str() > effective_start && k.starts_with(&prefix)
+                })
                 .map(|(_, obj)| obj.clone())
                 .collect();
-            
+
             all_objects.sort_by(|a, b| a.key.cmp(&b.key));
-            
+
             if delimiter.is_empty() {
                 let is_truncated = all_objects.len() > max_keys as usize;
-                let objects: Vec<ObjectRecord> = all_objects.into_iter().take(max_keys as usize).collect();
+                let objects: Vec<ObjectRecord> =
+                    all_objects.into_iter().take(max_keys as usize).collect();
                 let next_token = if is_truncated {
                     objects.last().map(|o| o.key.clone())
                 } else {
@@ -725,7 +756,9 @@ impl MetadataStore for LocalMetadataStore {
 
                 let is_truncated = count >= max_keys;
                 let next_token = if is_truncated {
-                    objects.last().map(|o| o.key.clone())
+                    objects
+                        .last()
+                        .map(|o| o.key.clone())
                         .or_else(|| common_prefixes.iter().last().cloned())
                 } else {
                     None
@@ -904,7 +937,7 @@ impl MetadataStore for LocalMetadataStore {
                 .map(|(_, p)| p.clone())
                 .collect();
             parts.sort_by_key(|p| p.part_number);
-            
+
             let is_truncated = parts.len() > max_parts as usize;
             if is_truncated {
                 parts.truncate(max_parts as usize);
@@ -949,7 +982,7 @@ impl MetadataStore for LocalMetadataStore {
         Box::pin(async move {
             let obj_json = serde_json::to_string(&JsonObject::from(final_object.clone()))?;
             self.append_line("objects.jsonl", &obj_json)?;
-            
+
             let upload_tombstone = JsonUpload {
                 upload_id: upload_id.clone(),
                 bucket: String::new(),
@@ -970,7 +1003,7 @@ impl MetadataStore for LocalMetadataStore {
             };
             let upload_json = serde_json::to_string(&upload_tombstone)?;
             self.append_line("uploads.jsonl", &upload_json)?;
-            
+
             let mut inner = self.inner.lock().expect("mutex poisoned");
             let object_key = (final_object.bucket.clone(), final_object.key.clone());
             inner.objects.insert(object_key, final_object);
@@ -1006,7 +1039,7 @@ impl MetadataStore for LocalMetadataStore {
             };
             let json = serde_json::to_string(&tombstone)?;
             self.append_line("uploads.jsonl", &json)?;
-            
+
             let mut inner = self.inner.lock().expect("mutex poisoned");
             inner.parts.retain(|(uid, _), _| uid != &upload_id);
             inner.uploads.remove(&upload_id);
@@ -1028,33 +1061,42 @@ impl MetadataStore for LocalMetadataStore {
         let upload_id_marker = upload_id_marker.to_string();
         Box::pin(async move {
             let inner = self.inner.lock().expect("mutex poisoned");
-            
+
             let mut uploads: Vec<MultipartUploadRecord> = inner
                 .uploads
                 .iter()
                 .filter(|(_, u)| {
-                    u.bucket == bucket && u.key.starts_with(&prefix) && 
-                    (key_marker.is_empty() || u.key > key_marker || 
-                     (u.key == key_marker && !upload_id_marker.is_empty() && u.upload_id > upload_id_marker))
+                    u.bucket == bucket
+                        && u.key.starts_with(&prefix)
+                        && (key_marker.is_empty()
+                            || u.key > key_marker
+                            || (u.key == key_marker
+                                && !upload_id_marker.is_empty()
+                                && u.upload_id > upload_id_marker))
                 })
                 .map(|(_, u)| u.clone())
                 .collect();
-            
-            uploads.sort_by(|a, b| a.key.cmp(&b.key).then_with(|| a.upload_id.cmp(&b.upload_id)));
-            
+
+            uploads.sort_by(|a, b| {
+                a.key
+                    .cmp(&b.key)
+                    .then_with(|| a.upload_id.cmp(&b.upload_id))
+            });
+
             let is_truncated = uploads.len() > max_uploads as usize;
             if is_truncated {
                 uploads.truncate(max_uploads as usize);
             }
-            
+
             let (next_key_marker, next_upload_id_marker) = if is_truncated {
-                uploads.last()
+                uploads
+                    .last()
                     .map(|u| (Some(u.key.clone()), Some(u.upload_id.clone())))
                     .unwrap_or((None, None))
             } else {
                 (None, None)
             };
-            
+
             Ok(ListUploadsResult {
                 uploads,
                 is_truncated,
@@ -1083,7 +1125,9 @@ impl MetadataStore for LocalMetadataStore {
             let json = serde_json::to_string(&JsonCredential::from(record.clone()))?;
             self.append_line("credentials.jsonl", &json)?;
             let mut inner = self.inner.lock().expect("mutex poisoned");
-            inner.credentials.insert(record.access_key_id.clone(), record);
+            inner
+                .credentials
+                .insert(record.access_key_id.clone(), record);
             Ok(())
         })
     }
@@ -1150,14 +1194,17 @@ mod tests {
     #[tokio::test]
     async fn test_bucket_persistence() {
         let (store, tmp) = test_store();
-        store.create_bucket(make_bucket("persist-bucket")).await.unwrap();
-        
+        store
+            .create_bucket(make_bucket("persist-bucket"))
+            .await
+            .unwrap();
+
         let config = LocalMetaConfig {
             root_dir: tmp.path().to_str().unwrap().to_string(),
             compact_on_startup: false,
         };
         let store2 = LocalMetadataStore::new(&config).expect("failed to reload");
-        
+
         let fetched = store2.get_bucket("persist-bucket").await.unwrap();
         assert!(fetched.is_some());
     }
@@ -1191,11 +1238,23 @@ mod tests {
     async fn test_delete_object() {
         let (store, _tmp) = test_store();
         store.create_bucket(make_bucket("mybucket")).await.unwrap();
-        store.put_object(make_object("mybucket", "delete-me.txt", 1)).await.unwrap();
-        
-        assert!(store.object_exists("mybucket", "delete-me.txt").await.unwrap());
-        store.delete_object("mybucket", "delete-me.txt").await.unwrap();
-        assert!(!store.object_exists("mybucket", "delete-me.txt").await.unwrap());
+        store
+            .put_object(make_object("mybucket", "delete-me.txt", 1))
+            .await
+            .unwrap();
+
+        assert!(store
+            .object_exists("mybucket", "delete-me.txt")
+            .await
+            .unwrap());
+        store
+            .delete_object("mybucket", "delete-me.txt")
+            .await
+            .unwrap();
+        assert!(!store
+            .object_exists("mybucket", "delete-me.txt")
+            .await
+            .unwrap());
     }
 
     #[tokio::test]
@@ -1213,15 +1272,18 @@ mod tests {
     #[tokio::test]
     async fn test_compaction() {
         let (store, tmp) = test_store();
-        store.create_bucket(make_bucket("compact-test")).await.unwrap();
+        store
+            .create_bucket(make_bucket("compact-test"))
+            .await
+            .unwrap();
         store.delete_bucket("compact-test").await.unwrap();
-        
+
         let buckets_path = tmp.path().join("buckets.jsonl");
         let content = std::fs::read_to_string(&buckets_path).unwrap();
         assert!(content.contains("\"_deleted\":true"));
-        
+
         store.compact_all().unwrap();
-        
+
         let content_after = std::fs::read_to_string(&buckets_path).unwrap();
         assert!(!content_after.contains("\"_deleted\":true"));
     }

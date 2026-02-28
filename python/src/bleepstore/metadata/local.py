@@ -10,7 +10,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -97,7 +97,6 @@ class LocalMetadataStore:
 
     def _append_jsonl(self, name: str, record: dict[str, Any]) -> None:
         path = self._file_path(name)
-        temp_path = path.with_suffix(".tmp")
         with open(path, "a") as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             try:
@@ -165,7 +164,6 @@ class LocalMetadataStore:
                 continue
             if upload_id not in latest:
                 latest[upload_id] = {}
-            key = (upload_id, part_number)
             if rec.get("_deleted"):
                 latest[upload_id].pop(part_number, None)
             else:
