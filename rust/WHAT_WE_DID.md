@@ -1,5 +1,21 @@
 # BleepStore Rust — What We Did
 
+## 2026-03-01: Plan Update — Stage 17-18 Metadata Backends
+
+Updated planning documents to include pluggable and cloud metadata backends for parity with Python implementation.
+
+**Files modified:**
+- `PLAN.md`: Added Stage 17 (Pluggable Metadata Backends) and Stage 18 (Cloud Metadata Backends)
+- `STATUS.md`: Updated next milestone to Stage 17
+- `DO_NEXT.md`: Added detailed Stage 17 implementation plan with backend table
+
+**New stages:**
+- Stage 17: memory, local, + cloud backend stubs (DynamoDB, Firestore, Cosmos)
+- Stage 18: Full cloud backend implementations
+- Stage 19: Event Queues (renumbered from Stage 16)
+
+**Reference:** Python PRs #17, #18, #19 for cloud backend implementations
+
 ## Cross-Language Storage Identity Normalization (2026-02-25)
 
 Normalized SQLite storage and memory snapshot schemas from single TEXT PKs to composite PKs matching Python/Go/Zig.
