@@ -1,22 +1,20 @@
-# BleepStore — Python Implementation
+# BleepStore — Rust Implementation
 
-An S3-compatible object store implemented in Python using FastAPI.
+An S3-compatible object store implemented in Rust using axum.
 
 ## Prerequisites
 
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/) package manager
+- Rust 1.75+ (use [rustup](https://rustup.rs/))
 
 ## Quick Start
 
 ```bash
-# Setup
-cd python/
-uv venv .venv && source .venv/bin/activate
-uv pip install -e ".[dev]"
+# Setup and build
+cd rust/
+cargo build --release
 
 # Run
-bleepstore --config ../bleepstore.example.yaml --port 9010
+./target/release/bleepstore --config ../bleepstore.example.yaml --bind 0.0.0.0:9012
 ```
 
 ## Documentation
@@ -27,7 +25,7 @@ bleepstore --config ../bleepstore.example.yaml --port 9010
 
 ```bash
 # Unit tests
-uv run pytest tests/ -v
+cargo test
 
 # E2E tests (requires running server)
 ./run_e2e.sh
@@ -36,12 +34,14 @@ uv run pytest tests/ -v
 ## Development
 
 ```bash
-# Type checking
-uv run mypy src/bleepstore/
+# Format
+cargo fmt
 
-# Linting
-uv run ruff check src/
-uv run ruff format src/
+# Lint
+cargo clippy
+
+# Run with debug logging
+RUST_LOG=debug cargo run -- --config ../bleepstore.example.yaml
 ```
 
 ## Configuration
