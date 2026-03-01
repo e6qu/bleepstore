@@ -3,6 +3,12 @@ const config_mod = @import("config.zig");
 const server_mod = @import("server.zig");
 const metrics_mod = @import("metrics.zig");
 const SqliteMetadataStore = @import("metadata/sqlite.zig").SqliteMetadataStore;
+const MemoryMetadataStore = @import("metadata/memory.zig").MemoryMetadataStore;
+const LocalStore = @import("metadata/local.zig").LocalStore;
+const DynamoDBMetadataStore = @import("metadata/dynamodb.zig").DynamoDBMetadataStore;
+const FirestoreMetadataStore = @import("metadata/firestore.zig").FirestoreMetadataStore;
+const CosmosMetadataStore = @import("metadata/cosmos.zig").CosmosMetadataStore;
+const MetadataStore = @import("metadata/store.zig").MetadataStore;
 const LocalBackend = @import("storage/local.zig").LocalBackend;
 const MemoryBackend = @import("storage/memory.zig").MemoryBackend;
 const SqliteBackend = @import("storage/sqlite_backend.zig").SqliteBackend;
@@ -20,6 +26,11 @@ pub const handlers = struct {
 pub const metadata = struct {
     pub const store = @import("metadata/store.zig");
     pub const sqlite = @import("metadata/sqlite.zig");
+    pub const memory = @import("metadata/memory.zig");
+    pub const local = @import("metadata/local.zig");
+    pub const dynamodb = @import("metadata/dynamodb.zig");
+    pub const firestore = @import("metadata/firestore.zig");
+    pub const cosmos = @import("metadata/cosmos.zig");
 };
 
 pub const storage = struct {

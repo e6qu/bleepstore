@@ -1,5 +1,62 @@
 # BleepStore Zig — What We Did
 
+## 2026-03-01: Stage 17-18 — Pluggable & Cloud Metadata Backends
+
+### Summary
+Implemented Stage 17-18 pluggable and cloud metadata backends for parity with Python implementation. Fixed all Zig 0.15 API incompatibilities in existing memory.zig and local.zig. Created new cloud metadata backends (DynamoDB, Firestore, Cosmos DB). Updated config.zig with MetadataConfig and MetadataEngineType enum.
+
+### Files Modified
+
+#### `src/config.zig`
+- Added `MetadataConfig` struct with engine type selection and backend-specific configs
+- Added `MetadataEngineType` enum: sqlite, memory, local, dynamodb, firestore, cosmos
+- Added `metadata` field to `Config` struct
+
+#### `src/metadata/memory.zig` — Zig 0.15 API fixes
+- Fixed `ArrayList.init(allocator)` → `ArrayList.empty`
+- Fixed `deinit()` → `deinit(allocator)` for ArrayList
+- Fixed `fetchSwap` → `fetchPut`
+- Fixed `.size` → `.count()` for HashMap
+- Fixed `dupeOpt` return type issue
+- Fixed const pointer issue with `removed.value.deinit()`
+
+#### `src/metadata/local.zig` — Zig 0.15 API fixes
+- Fixed `lockExclusive()` → `lock()` / `unlock()` for RwLock
+- Fixed `std.io.bufferedReader` → `file.deprecatedReader()`
+- Fixed `std.json.stringify` → `std.json.Stringify.valueAlloc`
+- Fixed `ArrayList.init(allocator)` → `ArrayList.empty`
+- Fixed `shrinkAndFree(n)` → `shrinkAndFree(allocator, n)`
+- Fixed `parsed.object` → `parsed.value.object`
+- Fixed unused `self` in hash/eql context functions
+
+#### `src/metadata/dynamodb.zig` — NEW
+- Stub implementation of DynamoDB metadata store
+- Full VTable implementation returning `error.NotImplemented` for write operations
+- Read operations return empty results
+
+#### `src/metadata/firestore.zig` — NEW
+- Full implementation for GCP Firestore backend
+- HTTP client using `std.http.Client.fetch()`
+- Bearer token authentication via `FIRESTORE_ACCESS_TOKEN` env var
+- Document paths: `projects/{project}/databases/(default)/documents/{collection}/{doc_id}`
+- JSON parsing for field extraction
+
+#### `src/metadata/cosmos.zig` — NEW
+- Full implementation for Azure Cosmos DB backend
+- HTTP client using `std.http.Client.fetch()`
+- Bearer token authentication
+- REST API paths: `/dbs/{database}/colls/{container}/docs/{doc_id}`
+- JSON parsing for field extraction
+
+#### `src/main.zig`
+- Added imports for new metadata backends
+
+### Test Results
+- `zig build test` -- 160/160 pass, 0 leaks
+- `zig build` -- clean, no errors
+
+---
+
 ## 2026-03-01: Plan Update — Stage 17-18 Metadata Backends
 
 Updated planning documents to include pluggable and cloud metadata backends for parity with Python implementation.

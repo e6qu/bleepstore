@@ -126,7 +126,7 @@ pub const MemoryMetadataStore = struct {
             for (entry.value_ptr.items) |part| {
                 self.freePartEntry(part);
             }
-            entry.value_ptr.deinit();
+            entry.value_ptr.deinit(self.allocator);
         }
         self.parts.deinit();
 
@@ -204,7 +204,10 @@ pub const MemoryMetadataStore = struct {
     }
 
     fn dupeOpt(self: *Self, s: ?[]const u8) !?[]const u8 {
-        if (s) |str| return self.allocator.dupe(u8, str);
+        if (s) |str| {
+            const result = try self.allocator.dupe(u8, str);
+            return result;
+        }
         return null;
     }
 
@@ -325,11 +328,6 @@ pub const MemoryMetadataStore = struct {
         const key = try self.makeObjectKey(meta.bucket, meta.key);
         errdefer self.allocator.free(key);
 
-        if (self.objects.fetchSwap(key, undefined)) |old| {
-            self.allocator.free(old.key);
-            self.freeObjectEntry(old.value);
-        }
-
         const entry = ObjectEntry{
             .bucket = try self.dupe(meta.bucket),
             .key = try self.dupe(meta.key),
@@ -349,7 +347,10 @@ pub const MemoryMetadataStore = struct {
             .delete_marker = meta.delete_marker,
         };
 
-        try self.objects.put(key, entry);
+        if (try self.objects.fetchPut(key, entry)) |old| {
+            self.allocator.free(old.key);
+            self.freeObjectEntry(old.value);
+        }
     }
 
     fn getObjectMeta(ctx: *anyopaque, bucket: []const u8, key: []const u8) anyerror!?ObjectMeta {
@@ -593,7 +594,7 @@ pub const MemoryMetadataStore = struct {
 
         try self.uploads.put(key, entry);
 
-        const parts_list = std.ArrayList(PartEntry).init(self.allocator);
+        const parts_list: std.ArrayList(PartEntry) = .empty;
         try self.parts.put(try self.dupe(meta.upload_id), parts_list);
     }
 
@@ -641,7 +642,8 @@ pub const MemoryMetadataStore = struct {
             for (removed.value.items) |part| {
                 self.freePartEntry(part);
             }
-            removed.value.deinit();
+            var parts_list = removed.value;
+            parts_list.deinit(self.allocator);
         }
     }
 
@@ -779,7 +781,8 @@ pub const MemoryMetadataStore = struct {
             for (removed.value.items) |part| {
                 self.freePartEntry(part);
             }
-            removed.value.deinit();
+            var parts_list = removed.value;
+            parts_list.deinit(self.allocator);
         }
     }
 
@@ -879,11 +882,6 @@ pub const MemoryMetadataStore = struct {
         const key = try self.dupe(cred.access_key_id);
         errdefer self.allocator.free(key);
 
-        if (self.credentials.fetchSwap(key, undefined)) |old| {
-            self.allocator.free(old.key);
-            self.freeCredentialEntry(old.value);
-        }
-
         const entry = CredentialEntry{
             .access_key_id = try self.dupe(cred.access_key_id),
             .secret_key = try self.dupe(cred.secret_key),
@@ -893,21 +891,24 @@ pub const MemoryMetadataStore = struct {
             .created_at = try self.dupe(cred.created_at),
         };
 
-        try self.credentials.put(key, entry);
+        if (try self.credentials.fetchPut(key, entry)) |old| {
+            self.allocator.free(old.key);
+            self.freeCredentialEntry(old.value);
+        }
     }
 
     fn countBuckets(ctx: *anyopaque) anyerror!u64 {
         const self = getSelf(ctx);
         self.mutex.lock();
         defer self.mutex.unlock();
-        return @intCast(self.buckets.size);
+        return @intCast(self.buckets.count());
     }
 
     fn countObjects(ctx: *anyopaque) anyerror!u64 {
         const self = getSelf(ctx);
         self.mutex.lock();
         defer self.mutex.unlock();
-        return @intCast(self.objects.size);
+        return @intCast(self.objects.count());
     }
 
     fn getSelf(ctx: *anyopaque) *Self {
@@ -953,7 +954,7 @@ pub const MemoryMetadataStore = struct {
 test "MemoryMetadataStore: init and deinit" {
     var ms = MemoryMetadataStore.init(std.testing.allocator);
     defer ms.deinit();
-    try std.testing.expectEqual(@as(usize, 0), ms.buckets.size);
+    try std.testing.expectEqual(@as(usize, 0), ms.buckets.count());
 }
 
 test "MemoryMetadataStore: create and get bucket" {

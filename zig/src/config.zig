@@ -19,9 +19,28 @@ pub const AuthConfig = struct {
 pub const MetadataConfig = struct {
     engine: MetadataEngineType = .sqlite,
     sqlite_path: []const u8 = "./data/metadata.db",
+    local_root: []const u8 = "./data/metadata",
+    local_compact_on_startup: bool = true,
+    dynamodb_table: []const u8 = "bleepstore-metadata",
+    dynamodb_region: []const u8 = "us-east-1",
+    dynamodb_endpoint_url: []const u8 = "",
+    dynamodb_access_key_id: []const u8 = "",
+    dynamodb_secret_access_key: []const u8 = "",
+    firestore_collection: []const u8 = "bleepstore",
+    firestore_project: []const u8 = "",
+    firestore_credentials_file: []const u8 = "",
+    cosmos_database: []const u8 = "bleepstore",
+    cosmos_container: []const u8 = "metadata",
+    cosmos_endpoint: []const u8 = "",
+    cosmos_connection_string: []const u8 = "",
 
     pub const MetadataEngineType = enum {
         sqlite,
+        memory,
+        local,
+        dynamodb,
+        firestore,
+        cosmos,
         raft,
     };
 };
@@ -217,11 +236,49 @@ fn applyConfigValue(cfg: *Config, key: []const u8, value: []const u8) void {
     else if (std.mem.eql(u8, key, "metadata.engine")) {
         if (std.mem.eql(u8, value, "sqlite")) {
             cfg.metadata.engine = .sqlite;
+        } else if (std.mem.eql(u8, value, "memory")) {
+            cfg.metadata.engine = .memory;
+        } else if (std.mem.eql(u8, value, "local")) {
+            cfg.metadata.engine = .local;
+        } else if (std.mem.eql(u8, value, "dynamodb")) {
+            cfg.metadata.engine = .dynamodb;
+        } else if (std.mem.eql(u8, value, "firestore")) {
+            cfg.metadata.engine = .firestore;
+        } else if (std.mem.eql(u8, value, "cosmos")) {
+            cfg.metadata.engine = .cosmos;
         } else if (std.mem.eql(u8, value, "raft")) {
             cfg.metadata.engine = .raft;
         }
     } else if (std.mem.eql(u8, key, "metadata.sqlite_path") or std.mem.eql(u8, key, "metadata.sqlite.path") or std.mem.eql(u8, key, "sqlite.path")) {
         cfg.metadata.sqlite_path = value;
+    } else if (std.mem.eql(u8, key, "metadata.local_root") or std.mem.eql(u8, key, "metadata.local.root_dir")) {
+        cfg.metadata.local_root = value;
+    } else if (std.mem.eql(u8, key, "metadata.local_compact_on_startup")) {
+        cfg.metadata.local_compact_on_startup = std.mem.eql(u8, value, "true");
+    } else if (std.mem.eql(u8, key, "metadata.dynamodb_table") or std.mem.eql(u8, key, "dynamodb.table")) {
+        cfg.metadata.dynamodb_table = value;
+    } else if (std.mem.eql(u8, key, "metadata.dynamodb_region") or std.mem.eql(u8, key, "dynamodb.region")) {
+        cfg.metadata.dynamodb_region = value;
+    } else if (std.mem.eql(u8, key, "metadata.dynamodb_endpoint_url") or std.mem.eql(u8, key, "dynamodb.endpoint_url")) {
+        cfg.metadata.dynamodb_endpoint_url = value;
+    } else if (std.mem.eql(u8, key, "metadata.dynamodb_access_key_id") or std.mem.eql(u8, key, "dynamodb.access_key_id")) {
+        cfg.metadata.dynamodb_access_key_id = value;
+    } else if (std.mem.eql(u8, key, "metadata.dynamodb_secret_access_key") or std.mem.eql(u8, key, "dynamodb.secret_access_key")) {
+        cfg.metadata.dynamodb_secret_access_key = value;
+    } else if (std.mem.eql(u8, key, "metadata.firestore_collection") or std.mem.eql(u8, key, "firestore.collection")) {
+        cfg.metadata.firestore_collection = value;
+    } else if (std.mem.eql(u8, key, "metadata.firestore_project") or std.mem.eql(u8, key, "firestore.project")) {
+        cfg.metadata.firestore_project = value;
+    } else if (std.mem.eql(u8, key, "metadata.firestore_credentials_file") or std.mem.eql(u8, key, "firestore.credentials_file")) {
+        cfg.metadata.firestore_credentials_file = value;
+    } else if (std.mem.eql(u8, key, "metadata.cosmos_database") or std.mem.eql(u8, key, "cosmos.database")) {
+        cfg.metadata.cosmos_database = value;
+    } else if (std.mem.eql(u8, key, "metadata.cosmos_container") or std.mem.eql(u8, key, "cosmos.container")) {
+        cfg.metadata.cosmos_container = value;
+    } else if (std.mem.eql(u8, key, "metadata.cosmos_endpoint") or std.mem.eql(u8, key, "cosmos.endpoint")) {
+        cfg.metadata.cosmos_endpoint = value;
+    } else if (std.mem.eql(u8, key, "metadata.cosmos_connection_string") or std.mem.eql(u8, key, "cosmos.connection_string")) {
+        cfg.metadata.cosmos_connection_string = value;
     }
     // Storage settings
     else if (std.mem.eql(u8, key, "storage.backend")) {
