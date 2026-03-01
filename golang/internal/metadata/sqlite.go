@@ -1104,14 +1104,6 @@ func (s *SQLiteStore) ListMultipartUploads(ctx context.Context, bucket string, o
 
 // ---- Reaping operations ----
 
-// ExpiredUpload holds the identifying fields of an expired multipart upload,
-// returned by ReapExpiredUploads so the caller can clean up storage files.
-type ExpiredUpload struct {
-	UploadID   string
-	BucketName string
-	ObjectKey  string
-}
-
 // ReapExpiredUploads deletes multipart uploads older than ttlSeconds and their
 // associated parts. All deletes run inside a single transaction for atomicity.
 // Returns the list of reaped uploads (for storage cleanup) and any error.

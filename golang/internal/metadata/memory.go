@@ -630,22 +630,16 @@ func (s *MemoryStore) PutCredential(ctx context.Context, cred *CredentialRecord)
 	return nil
 }
 
-type MemoryExpiredUpload struct {
-	UploadID   string
-	BucketName string
-	ObjectKey  string
-}
-
-func (s *MemoryStore) ReapExpiredUploads(ttlSeconds int) ([]MemoryExpiredUpload, error) {
+func (s *MemoryStore) ReapExpiredUploads(ttlSeconds int) ([]ExpiredUpload, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	cutoff := time.Now().Add(-time.Duration(ttlSeconds) * time.Second)
-	var expired []MemoryExpiredUpload
+	var expired []ExpiredUpload
 
 	for uploadID, upload := range s.uploads {
 		if upload.InitiatedAt.Before(cutoff) {
-			expired = append(expired, MemoryExpiredUpload{
+			expired = append(expired, ExpiredUpload{
 				UploadID:   uploadID,
 				BucketName: upload.Bucket,
 				ObjectKey:  upload.Key,
