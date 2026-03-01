@@ -81,7 +81,7 @@ impl DynamoDbMetadataStore {
         let table_name = config
             .table_prefix
             .as_ref()
-            .map(|p| format!("{}_metadata", p))
+            .map(|p| format!("{p}_metadata"))
             .unwrap_or_else(|| "bleepstore_metadata".to_string());
 
         Ok(Self { client, table_name })
