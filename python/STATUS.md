@@ -1,6 +1,6 @@
 # BleepStore Python -- Status
 
-## Current Stage: S3 API + Pluggable Metadata COMPLETE
+## Current Stage: Cloud Metadata Backends COMPLETE (Stage 18)
 
 - **Unit tests:** 642/642 pass
 - **E2E tests:** 86/86 pass
@@ -14,28 +14,23 @@
 - Multipart uploads (create, upload, copy, complete, abort, list)
 - Storage backends: local, memory, sqlite, AWS S3, GCP GCS, Azure Blob
 
-## Metadata Backends (Stage 17)
+## Metadata Backends (Stage 17-18)
 
-| Backend | Status | File |
-|---------|--------|------|
-| `sqlite` | ✅ Production | `metadata/sqlite.py` |
-| `memory` | ✅ Complete | `metadata/memory.py` |
-| `local` | ✅ Complete | `metadata/local.py` |
-| `dynamodb` | 🔲 Stub | `metadata/dynamodb.py` |
-| `firestore` | 🔲 Stub | `metadata/firestore.py` |
-| `cosmos` | 🔲 Stub | `metadata/cosmos.py` |
+| Backend | Status | File | Notes |
+|---------|--------|------|-------|
+| `sqlite` | ✅ Production | `metadata/sqlite.py` | Default |
+| `memory` | ✅ Complete | `metadata/memory.py` | Testing |
+| `local` | ✅ Complete | `metadata/local.py` | JSONL files |
+| `dynamodb` | ✅ Complete | `metadata/dynamodb.py` | PR #17 |
+| `firestore` | ✅ Complete | `metadata/firestore.py` | PR #18 |
+| `cosmos` | ✅ Complete | `metadata/cosmos.py` | PR #19 |
 
-## Next Milestone: Stage 18 — Cloud Metadata Backends
+## Next Milestone: Stage 19 — Raft Consensus / Clustering
 
-Implement real cloud-native metadata stores:
-
-1. **Stage 18a:** AWS DynamoDB
-2. **Stage 18b:** GCP Firestore
-3. **Stage 18c:** Azure Cosmos DB
+Implement multi-node deployment with Raft-based consensus.
 
 ## Future Milestones
 
-- **Stage 19:** Raft Consensus / Clustering
 - **Stage 20:** Event Queues (Redis, RabbitMQ, Kafka)
 
 ## Run Tests
