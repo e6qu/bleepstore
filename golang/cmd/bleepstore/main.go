@@ -68,17 +68,64 @@ func main() {
 	// - Expired multipart reaping (Stage 7)
 	// - Default credential seeding (below)
 
-	// Initialize SQLite metadata store.
-	dbPath := cfg.Metadata.SQLite.Path
-	// Ensure parent directory exists.
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to create metadata directory: %v\n", err)
-		os.Exit(1)
+	// Initialize metadata store based on config.
+	var metaStore metadata.MetadataStore
+	engine := cfg.Metadata.Engine
+	if engine == "" {
+		engine = "sqlite"
 	}
-	metaStore, err := metadata.NewSQLiteStore(dbPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to initialize metadata store: %v\n", err)
-		os.Exit(1)
+
+	switch engine {
+	case "memory":
+		metaStore = metadata.NewMemoryStore()
+		slog.Info("Metadata backend initialized", "backend", "memory")
+	case "local":
+		localStore, err := metadata.NewLocalStore(&cfg.Metadata.Local)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to initialize local metadata store: %v\n", err)
+			os.Exit(1)
+		}
+		metaStore = localStore
+		slog.Info("Metadata backend initialized", "backend", "local", "root_dir", cfg.Metadata.Local.RootDir)
+	case "dynamodb":
+		dynamoStore, err := metadata.NewDynamoDBStore(&cfg.Metadata.DynamoDB)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to initialize DynamoDB metadata store: %v\n", err)
+			os.Exit(1)
+		}
+		metaStore = dynamoStore
+		slog.Info("Metadata backend initialized", "backend", "dynamodb", "table", cfg.Metadata.DynamoDB.Table)
+	case "firestore":
+		firestoreStore, err := metadata.NewFirestoreStore(context.Background(), &cfg.Metadata.Firestore)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to initialize Firestore metadata store: %v\n", err)
+			os.Exit(1)
+		}
+		metaStore = firestoreStore
+		slog.Info("Metadata backend initialized", "backend", "firestore", "collection", cfg.Metadata.Firestore.Collection)
+	case "cosmos":
+		cosmosStore, err := metadata.NewCosmosStore(context.Background(), &cfg.Metadata.Cosmos)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to initialize Cosmos DB metadata store: %v\n", err)
+			os.Exit(1)
+		}
+		metaStore = cosmosStore
+		slog.Info("Metadata backend initialized", "backend", "cosmos", "database", cfg.Metadata.Cosmos.Database, "container", cfg.Metadata.Cosmos.Container)
+	default:
+		// Default to SQLite metadata store.
+		dbPath := cfg.Metadata.SQLite.Path
+		// Ensure parent directory exists.
+		if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to create metadata directory: %v\n", err)
+			os.Exit(1)
+		}
+		sqliteStore, err := metadata.NewSQLiteStore(dbPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to initialize SQLite metadata store: %v\n", err)
+			os.Exit(1)
+		}
+		metaStore = sqliteStore
+		slog.Info("Metadata backend initialized", "backend", "sqlite", "path", dbPath)
 	}
 	defer metaStore.Close()
 
@@ -187,17 +234,19 @@ func main() {
 	}
 
 	// Crash-only recovery: reap expired multipart uploads (7-day TTL).
-	expired, reapErr := metaStore.ReapExpiredUploads(604800)
-	if reapErr != nil {
-		slog.Warn("Failed to reap expired multipart uploads", "error", reapErr)
-	} else if len(expired) > 0 {
-		slog.Info(fmt.Sprintf("Reaped %d expired multipart uploads", len(expired)))
-		// Clean up storage files for reaped uploads (local backend only).
-		if localBackend, ok := storageBackend.(*storage.LocalBackend); ok {
-			for _, u := range expired {
-				if err := localBackend.DeleteUploadParts(u.UploadID); err != nil {
-					slog.Warn("Failed to clean up parts for reaped upload",
-						"upload_id", u.UploadID, "error", err)
+	if reaper, ok := metaStore.(metadata.UploadReaper); ok {
+		expired, reapErr := reaper.ReapExpiredUploads(604800)
+		if reapErr != nil {
+			slog.Warn("Failed to reap expired multipart uploads", "error", reapErr)
+		} else if len(expired) > 0 {
+			slog.Info(fmt.Sprintf("Reaped %d expired multipart uploads", len(expired)))
+			// Clean up storage files for reaped uploads (local backend only).
+			if localBackend, ok := storageBackend.(*storage.LocalBackend); ok {
+				for _, u := range expired {
+					if err := localBackend.DeleteUploadParts(u.UploadID); err != nil {
+						slog.Warn("Failed to clean up parts for reaped upload",
+							"upload_id", u.UploadID, "error", err)
+					}
 				}
 			}
 		}
@@ -256,7 +305,7 @@ func main() {
 // seedDefaultCredentials creates the default credential record from the config
 // if it does not already exist. This runs on every startup as part of
 // crash-only recovery.
-func seedDefaultCredentials(store *metadata.SQLiteStore, cfg *config.Config) error {
+func seedDefaultCredentials(store metadata.MetadataStore, cfg *config.Config) error {
 	ctx := context.Background()
 
 	// Check if the default credential already exists.

@@ -217,3 +217,17 @@ type MetadataStore interface {
 	// PutCredential creates or updates a credential record.
 	PutCredential(ctx context.Context, cred *CredentialRecord) error
 }
+
+// ExpiredUpload holds the identifying fields of an expired multipart upload,
+// returned by ReapExpiredUploads so the caller can clean up storage files.
+type ExpiredUpload struct {
+	UploadID   string
+	BucketName string
+	ObjectKey  string
+}
+
+// UploadReaper is an optional interface for metadata stores that support
+// reaping expired multipart uploads.
+type UploadReaper interface {
+	ReapExpiredUploads(ttlSeconds int) ([]ExpiredUpload, error)
+}

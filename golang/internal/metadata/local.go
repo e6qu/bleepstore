@@ -1057,22 +1057,16 @@ func (s *LocalStore) PutCredential(ctx context.Context, cred *CredentialRecord) 
 	return s.appendEntry("credentials.jsonl", entry)
 }
 
-type LocalExpiredUpload struct {
-	UploadID   string
-	BucketName string
-	ObjectKey  string
-}
-
-func (s *LocalStore) ReapExpiredUploads(ttlSeconds int) ([]LocalExpiredUpload, error) {
+func (s *LocalStore) ReapExpiredUploads(ttlSeconds int) ([]ExpiredUpload, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	cutoff := time.Now().Add(-time.Duration(ttlSeconds) * time.Second)
-	var expired []LocalExpiredUpload
+	var expired []ExpiredUpload
 
 	for uploadID, upload := range s.uploads {
 		if upload.InitiatedAt.Before(cutoff) {
-			expired = append(expired, LocalExpiredUpload{
+			expired = append(expired, ExpiredUpload{
 				UploadID:   uploadID,
 				BucketName: upload.Bucket,
 				ObjectKey:  upload.Key,
