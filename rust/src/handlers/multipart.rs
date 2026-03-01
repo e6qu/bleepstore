@@ -49,6 +49,141 @@ fn days_to_ymd(days: u64) -> (i32, u32, u32) {
     (year as i32, m as u32, d as u32)
 }
 
+/// Strip surrounding double quotes from an ETag string for comparison.
+fn strip_etag_quotes(etag: &str) -> &str {
+    let etag = etag.trim();
+    if etag.starts_with('"') && etag.ends_with('"') && etag.len() >= 2 {
+        &etag[1..etag.len() - 1]
+    } else {
+        etag
+    }
+}
+
+/// Parse an ISO-8601 timestamp to SystemTime for conditional request evaluation.
+fn parse_iso8601_to_system_time(iso: &str) -> Option<std::time::SystemTime> {
+    if iso.len() < 19 {
+        return None;
+    }
+    let year: i32 = iso[0..4].parse().ok()?;
+    let month: u32 = iso[5..7].parse().ok()?;
+    let day: u32 = iso[8..10].parse().ok()?;
+    let hours: u32 = iso[11..13].parse().ok()?;
+    let minutes: u32 = iso[14..16].parse().ok()?;
+    let seconds: u32 = iso[17..19].parse().ok()?;
+
+    let days_since_epoch = ymd_to_days(year, month, day);
+    let total_secs = days_since_epoch as u64 * 86400
+        + hours as u64 * 3600
+        + minutes as u64 * 60
+        + seconds as u64;
+
+    Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(total_secs))
+}
+
+/// Convert (year, month, day) to days since Unix epoch.
+fn ymd_to_days(year: i32, month: u32, day: u32) -> i64 {
+    let y = if month <= 2 {
+        year as i64 - 1
+    } else {
+        year as i64
+    };
+    let m = if month <= 2 {
+        month as i64 + 9
+    } else {
+        month as i64 - 3
+    };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = (y - era * 400) as u64;
+    let doy = (153 * m as u64 + 2) / 5 + day as u64 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+
+    era * 146097 + doe as i64 - 719468
+}
+
+/// Evaluate x-amz-copy-source-if-* conditional headers against the source object.
+///
+/// Returns Ok(()) if the copy should proceed, Err(PreconditionFailed) if a condition fails.
+///
+/// Priority order (per S3 spec):
+///   1. x-amz-copy-source-if-match (412 on mismatch)
+///   2. x-amz-copy-source-if-unmodified-since (412 if modified) -- only if if-match absent
+///   3. x-amz-copy-source-if-none-match (412 on match)
+///   4. x-amz-copy-source-if-modified-since (412 if not modified) -- only if if-none-match absent
+fn evaluate_copy_source_conditionals(
+    headers: &HeaderMap,
+    etag: &str,
+    last_modified: &str,
+) -> Result<(), S3Error> {
+    let object_etag = strip_etag_quotes(etag);
+    let last_modified_time = parse_iso8601_to_system_time(last_modified);
+
+    // 1. x-amz-copy-source-if-match: ETag must match, else 412.
+    let if_match = headers
+        .get("x-amz-copy-source-if-match")
+        .and_then(|v| v.to_str().ok());
+    if let Some(if_match_val) = if_match {
+        let if_match_inner = strip_etag_quotes(if_match_val);
+        let matched = if if_match_inner == "*" {
+            true
+        } else {
+            if_match_inner
+                .split(',')
+                .any(|tag| strip_etag_quotes(tag.trim()) == object_etag)
+        };
+        if !matched {
+            return Err(S3Error::PreconditionFailed);
+        }
+    } else {
+        // 2. x-amz-copy-source-if-unmodified-since: 412 if modified after the date.
+        if let Some(if_unmodified) = headers
+            .get("x-amz-copy-source-if-unmodified-since")
+            .and_then(|v| v.to_str().ok())
+        {
+            if let (Some(obj_time), Ok(threshold)) =
+                (last_modified_time, httpdate::parse_http_date(if_unmodified))
+            {
+                if obj_time > threshold {
+                    return Err(S3Error::PreconditionFailed);
+                }
+            }
+        }
+    }
+
+    // 3. x-amz-copy-source-if-none-match: 412 if ETag matches.
+    let if_none_match = headers
+        .get("x-amz-copy-source-if-none-match")
+        .and_then(|v| v.to_str().ok());
+    if let Some(if_none_match_val) = if_none_match {
+        let if_none_match_inner = strip_etag_quotes(if_none_match_val);
+        let matched = if if_none_match_inner == "*" {
+            true
+        } else {
+            if_none_match_inner
+                .split(',')
+                .any(|tag| strip_etag_quotes(tag.trim()) == object_etag)
+        };
+        if matched {
+            return Err(S3Error::PreconditionFailed);
+        }
+    } else {
+        // 4. x-amz-copy-source-if-modified-since: 412 if NOT modified after the date.
+        if let Some(if_modified) = headers
+            .get("x-amz-copy-source-if-modified-since")
+            .and_then(|v| v.to_str().ok())
+        {
+            if let (Some(obj_time), Ok(threshold)) =
+                (last_modified_time, httpdate::parse_http_date(if_modified))
+            {
+                if obj_time <= threshold {
+                    return Err(S3Error::PreconditionFailed);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Extract user metadata from request headers.
 fn extract_user_metadata(headers: &HeaderMap) -> HashMap<String, String> {
     let mut meta = HashMap::new();
@@ -405,13 +540,16 @@ pub async fn upload_part_copy(
     }
 
     // Check source object exists.
-    let _src_record = state
+    let src_record = state
         .metadata
         .get_object(src_bucket, src_key)
         .await?
         .ok_or_else(|| S3Error::NoSuchKey {
             key: src_key.to_string(),
         })?;
+
+    // Evaluate x-amz-copy-source-if-* conditional headers.
+    evaluate_copy_source_conditionals(headers, &src_record.etag, &src_record.last_modified)?;
 
     // Read source object data from storage.
     let src_storage_key = format!("{src_bucket}/{src_key}");
@@ -804,6 +942,16 @@ pub async fn list_multipart_uploads(
         .map(|s| s.as_str())
         .unwrap_or("");
 
+    // Parse and validate encoding-type parameter.
+    let encoding_type = query.get("encoding-type").map(|s| s.as_str());
+    if let Some(enc) = encoding_type {
+        if enc != "url" {
+            return Err(S3Error::InvalidArgument {
+                message: "Invalid EncodingType specified".to_string(),
+            });
+        }
+    }
+
     // Query metadata store.
     let result = state
         .metadata
@@ -834,6 +982,7 @@ pub async fn list_multipart_uploads(
         result.next_key_marker.as_deref(),
         result.next_upload_id_marker.as_deref(),
         prefix,
+        encoding_type,
     );
 
     Ok((
