@@ -112,9 +112,8 @@ async fn main() -> anyhow::Result<()> {
                 Arc::new(store)
             }
             "local" => {
-                let store = bleepstore::metadata::local::LocalMetadataStore::new(
-                    &config.metadata.local,
-                )?;
+                let store =
+                    bleepstore::metadata::local::LocalMetadataStore::new(&config.metadata.local)?;
                 store.seed_credential(&config.auth.access_key, &config.auth.secret_key)?;
                 info!(
                     "Local JSONL metadata store initialized at {}",

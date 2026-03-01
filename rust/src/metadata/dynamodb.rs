@@ -100,7 +100,10 @@ impl MetadataStore for DynamoDbMetadataStore {
         Box::pin(async move {
             let mut item = HashMap::new();
             item.insert("pk".to_string(), AttributeValue::S(pk_bucket(&record.name)));
-            item.insert("sk".to_string(), AttributeValue::S(sk_metadata().to_string()));
+            item.insert(
+                "sk".to_string(),
+                AttributeValue::S(sk_metadata().to_string()),
+            );
             item.insert("type".to_string(), AttributeValue::S("bucket".to_string()));
             item.insert("name".to_string(), AttributeValue::S(record.name));
             item.insert("region".to_string(), AttributeValue::S(record.region));
@@ -147,7 +150,10 @@ impl MetadataStore for DynamoDbMetadataStore {
                 Ok(Some(BucketRecord {
                     name: map.get("name").cloned().unwrap_or_default(),
                     created_at: map.get("created_at").cloned().unwrap_or_default(),
-                    region: map.get("region").cloned().unwrap_or_else(|| "us-east-1".to_string()),
+                    region: map
+                        .get("region")
+                        .cloned()
+                        .unwrap_or_else(|| "us-east-1".to_string()),
                     owner_id: map.get("owner_id").cloned().unwrap_or_default(),
                     owner_display: map.get("owner_display").cloned().unwrap_or_default(),
                     acl: map.get("acl").cloned().unwrap_or_else(|| "{}".to_string()),
@@ -191,8 +197,14 @@ impl MetadataStore for DynamoDbMetadataStore {
                     .scan()
                     .table_name(&self.table_name)
                     .filter_expression("begins_with(pk, :prefix) AND sk = :metadata")
-                    .expression_attribute_values(":prefix", AttributeValue::S("BUCKET#".to_string()))
-                    .expression_attribute_values(":metadata", AttributeValue::S(sk_metadata().to_string()));
+                    .expression_attribute_values(
+                        ":prefix",
+                        AttributeValue::S("BUCKET#".to_string()),
+                    )
+                    .expression_attribute_values(
+                        ":metadata",
+                        AttributeValue::S(sk_metadata().to_string()),
+                    );
 
                 if let Some(key) = &exclusive_start_key {
                     query = query.set_exclusive_start_key(Some(key.clone()));
@@ -205,7 +217,10 @@ impl MetadataStore for DynamoDbMetadataStore {
                     buckets.push(BucketRecord {
                         name: map.get("name").cloned().unwrap_or_default(),
                         created_at: map.get("created_at").cloned().unwrap_or_default(),
-                        region: map.get("region").cloned().unwrap_or_else(|| "us-east-1".to_string()),
+                        region: map
+                            .get("region")
+                            .cloned()
+                            .unwrap_or_else(|| "us-east-1".to_string()),
                         owner_id: map.get("owner_id").cloned().unwrap_or_default(),
                         owner_display: map.get("owner_display").cloned().unwrap_or_default(),
                         acl: map.get("acl").cloned().unwrap_or_else(|| "{}".to_string()),
@@ -271,11 +286,17 @@ impl MetadataStore for DynamoDbMetadataStore {
                 "pk".to_string(),
                 AttributeValue::S(pk_object(&record.bucket, &record.key)),
             );
-            item.insert("sk".to_string(), AttributeValue::S(sk_metadata().to_string()));
+            item.insert(
+                "sk".to_string(),
+                AttributeValue::S(sk_metadata().to_string()),
+            );
             item.insert("type".to_string(), AttributeValue::S("object".to_string()));
             item.insert("bucket".to_string(), AttributeValue::S(record.bucket));
             item.insert("key".to_string(), AttributeValue::S(record.key));
-            item.insert("size".to_string(), AttributeValue::N(record.size.to_string()));
+            item.insert(
+                "size".to_string(),
+                AttributeValue::N(record.size.to_string()),
+            );
             item.insert("etag".to_string(), AttributeValue::S(record.etag));
             item.insert(
                 "content_type".to_string(),
@@ -367,7 +388,10 @@ impl MetadataStore for DynamoDbMetadataStore {
                     acl: map.get("acl").cloned().unwrap_or_else(|| "{}".to_string()),
                     last_modified: map.get("last_modified").cloned().unwrap_or_default(),
                     user_metadata: user_meta,
-                    delete_marker: map.get("delete_marker").map(|s| s == "true").unwrap_or(false),
+                    delete_marker: map
+                        .get("delete_marker")
+                        .map(|s| s == "true")
+                        .unwrap_or(false),
                 }))
             } else {
                 Ok(None)
@@ -433,8 +457,14 @@ impl MetadataStore for DynamoDbMetadataStore {
                     .scan()
                     .table_name(&self.table_name)
                     .filter_expression("begins_with(pk, :prefix) AND sk = :metadata")
-                    .expression_attribute_values(":prefix", AttributeValue::S(prefix_filter.clone()))
-                    .expression_attribute_values(":metadata", AttributeValue::S(sk_metadata().to_string()))
+                    .expression_attribute_values(
+                        ":prefix",
+                        AttributeValue::S(prefix_filter.clone()),
+                    )
+                    .expression_attribute_values(
+                        ":metadata",
+                        AttributeValue::S(sk_metadata().to_string()),
+                    )
                     .limit((max_keys + 1) as i32);
 
                 if let Some(key) = &exclusive_start_key {
@@ -473,7 +503,10 @@ impl MetadataStore for DynamoDbMetadataStore {
                             acl: map.get("acl").cloned().unwrap_or_else(|| "{}".to_string()),
                             last_modified: map.get("last_modified").cloned().unwrap_or_default(),
                             user_metadata: user_meta,
-                            delete_marker: map.get("delete_marker").map(|s| s == "true").unwrap_or(false),
+                            delete_marker: map
+                                .get("delete_marker")
+                                .map(|s| s == "true")
+                                .unwrap_or(false),
                         });
                     }
                     if objects.len() > max_keys as usize {
@@ -642,7 +675,10 @@ impl MetadataStore for DynamoDbMetadataStore {
                     .table_name(&self.table_name)
                     .filter_expression("begins_with(pk, :prefix) AND sk = :metadata")
                     .expression_attribute_values(":prefix", AttributeValue::S(prefix.clone()))
-                    .expression_attribute_values(":metadata", AttributeValue::S(sk_metadata().to_string()))
+                    .expression_attribute_values(
+                        ":metadata",
+                        AttributeValue::S(sk_metadata().to_string()),
+                    )
                     .select(aws_sdk_dynamodb::types::Select::Count);
 
                 if let Some(key) = &exclusive_start_key {
@@ -672,7 +708,10 @@ impl MetadataStore for DynamoDbMetadataStore {
                 "pk".to_string(),
                 AttributeValue::S(pk_upload(&record.upload_id)),
             );
-            item.insert("sk".to_string(), AttributeValue::S(sk_metadata().to_string()));
+            item.insert(
+                "sk".to_string(),
+                AttributeValue::S(sk_metadata().to_string()),
+            );
             item.insert("type".to_string(), AttributeValue::S("upload".to_string()));
             item.insert("upload_id".to_string(), AttributeValue::S(record.upload_id));
             item.insert("bucket".to_string(), AttributeValue::S(record.bucket));
@@ -908,7 +947,10 @@ impl MetadataStore for DynamoDbMetadataStore {
                     .table_name(&self.table_name)
                     .key_condition_expression("pk = :pk AND begins_with(sk, :part_prefix)")
                     .expression_attribute_values(":pk", AttributeValue::S(pk_upload(&upload_id)))
-                    .expression_attribute_values(":part_prefix", AttributeValue::S("PART#".to_string()));
+                    .expression_attribute_values(
+                        ":part_prefix",
+                        AttributeValue::S("PART#".to_string()),
+                    );
 
                 if let Some(key) = &exclusive_start_key {
                     query = query.set_exclusive_start_key(Some(key.clone()));
@@ -1146,7 +1188,11 @@ impl MetadataStore for DynamoDbMetadataStore {
                 }
             }
 
-            uploads.sort_by(|a, b| a.key.cmp(&b.key).then_with(|| a.upload_id.cmp(&b.upload_id)));
+            uploads.sort_by(|a, b| {
+                a.key
+                    .cmp(&b.key)
+                    .then_with(|| a.upload_id.cmp(&b.upload_id))
+            });
 
             let is_truncated = uploads.len() > max_uploads as usize;
             if is_truncated {
@@ -1188,10 +1234,7 @@ impl MetadataStore for DynamoDbMetadataStore {
 
             if let Some(item) = result.item() {
                 let map = item_to_record(item);
-                let active = map
-                    .get("active")
-                    .map(|s| s == "true")
-                    .unwrap_or(true);
+                let active = map.get("active").map(|s| s == "true").unwrap_or(true);
                 if !active {
                     return Ok(None);
                 }
@@ -1219,13 +1262,22 @@ impl MetadataStore for DynamoDbMetadataStore {
                 "pk".to_string(),
                 AttributeValue::S(pk_credential(&record.access_key_id)),
             );
-            item.insert("sk".to_string(), AttributeValue::S(sk_metadata().to_string()));
-            item.insert("type".to_string(), AttributeValue::S("credential".to_string()));
+            item.insert(
+                "sk".to_string(),
+                AttributeValue::S(sk_metadata().to_string()),
+            );
+            item.insert(
+                "type".to_string(),
+                AttributeValue::S("credential".to_string()),
+            );
             item.insert(
                 "access_key_id".to_string(),
                 AttributeValue::S(record.access_key_id),
             );
-            item.insert("secret_key".to_string(), AttributeValue::S(record.secret_key));
+            item.insert(
+                "secret_key".to_string(),
+                AttributeValue::S(record.secret_key),
+            );
             item.insert("owner_id".to_string(), AttributeValue::S(record.owner_id));
             item.insert(
                 "display_name".to_string(),
