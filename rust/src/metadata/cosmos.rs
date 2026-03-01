@@ -39,6 +39,7 @@ fn doc_id_credential(access_key: &str) -> String {
     format!("cred_{access_key}")
 }
 
+#[allow(dead_code)]
 fn now_iso() -> String {
     let now = std::time::SystemTime::now();
     let since_epoch = now
@@ -49,6 +50,7 @@ fn now_iso() -> String {
     format_timestamp(secs, millis)
 }
 
+#[allow(dead_code)]
 fn format_timestamp(secs: u64, millis: u32) -> String {
     let days = secs / 86400;
     let day_secs = secs % 86400;
@@ -59,6 +61,7 @@ fn format_timestamp(secs: u64, millis: u32) -> String {
     format!("{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}.{millis:03}Z")
 }
 
+#[allow(dead_code)]
 fn days_to_ymd(days: u64) -> (i32, u32, u32) {
     let z = days as i64 + 719468;
     let era = if z >= 0 { z } else { z - 146096 } / 146097;
@@ -193,13 +196,8 @@ impl CosmosMetadataStore {
             .unwrap_or_else(|| "metadata".to_string());
 
         let master_key = config.connection_string.as_ref().and_then(|cs| {
-            cs.split(';').find_map(|part| {
-                if part.starts_with("AccountKey=") {
-                    Some(part[11..].to_string())
-                } else {
-                    None
-                }
-            })
+            cs.split(';')
+                .find_map(|part| part.strip_prefix("AccountKey=").map(|s| s.to_string()))
         });
 
         let store = Self {
@@ -347,7 +345,7 @@ impl CosmosMetadataStore {
             .header("x-ms-version", "2018-12-31")
             .header(
                 "x-ms-documentdb-partitionkey",
-                format!("[\"{}\"]", partition_key),
+                format!("[\"{partition_key}\"]"),
             )
             .send()
             .await?;
@@ -385,7 +383,7 @@ impl CosmosMetadataStore {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("Failed to create item: {} - {}", status, body);
+            anyhow::bail!("Failed to create item: {status} - {body}");
         }
 
         Ok(())
@@ -416,7 +414,7 @@ impl CosmosMetadataStore {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("Failed to upsert item: {} - {}", status, body);
+            anyhow::bail!("Failed to upsert item: {status} - {body}");
         }
 
         Ok(())
@@ -446,7 +444,7 @@ impl CosmosMetadataStore {
             .header("Content-Type", "application/json")
             .header(
                 "x-ms-documentdb-partitionkey",
-                format!("[\"{}\"]", partition_key),
+                format!("[\"{partition_key}\"]"),
             )
             .json(item)
             .send()
@@ -455,7 +453,7 @@ impl CosmosMetadataStore {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("Failed to replace item: {} - {}", status, body);
+            anyhow::bail!("Failed to replace item: {status} - {body}");
         }
 
         Ok(())
@@ -479,7 +477,7 @@ impl CosmosMetadataStore {
             .header("x-ms-version", "2018-12-31")
             .header(
                 "x-ms-documentdb-partitionkey",
-                format!("[\"{}\"]", partition_key),
+                format!("[\"{partition_key}\"]"),
             )
             .send()
             .await?;
@@ -487,7 +485,7 @@ impl CosmosMetadataStore {
         if !resp.status().is_success() && resp.status().as_u16() != 404 {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("Failed to delete item: {} - {}", status, body);
+            anyhow::bail!("Failed to delete item: {status} - {body}");
         }
 
         Ok(())
@@ -530,7 +528,7 @@ impl CosmosMetadataStore {
             .json(&body);
 
         if let Some(pk) = partition_key {
-            req = req.header("x-ms-documentdb-partitionkey", format!("[\"{}\"]", pk));
+            req = req.header("x-ms-documentdb-partitionkey", format!("[\"{pk}\"]"));
         }
 
         let resp = req.send().await?;
@@ -538,7 +536,7 @@ impl CosmosMetadataStore {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("Query failed: {} - {}", status, body);
+            anyhow::bail!("Query failed: {status} - {body}");
         }
 
         #[derive(Deserialize)]
@@ -777,7 +775,7 @@ impl MetadataStore for CosmosMetadataStore {
             }
 
             let effective_start = continuation_token.as_ref().unwrap_or(&start_after);
-            let prefix_filter = format!("object_{}_{prefix}", bucket);
+            let prefix_filter = format!("object_{bucket}_{prefix}");
 
             let mut query =
                 "SELECT * FROM c WHERE c.type = 'object' AND c.bucket = @bucket".to_string();
