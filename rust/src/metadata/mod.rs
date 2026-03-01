@@ -4,6 +4,9 @@
 //! uploads.  The [`store::MetadataStore`] trait defines the interface;
 //! [`sqlite::SqliteMetadataStore`] is the default implementation.
 
+pub mod cosmos;
+pub mod dynamodb;
+pub mod firestore;
 pub mod local;
 pub mod memory;
 pub mod sqlite;

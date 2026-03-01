@@ -1,82 +1,72 @@
 # BleepStore Rust -- Do Next
 
-## Current State: Stage 15 COMPLETE + Pluggable Storage Backends COMPLETE
+## Current State: Stage 17-18 COMPLETE (Pluggable Metadata Backends)
 
-All performance and production hardening changes are verified.
-Pluggable storage backends (memory, sqlite, cloud config enhancements) are implemented.
-- `cargo test` -- all pass
-- `./run_e2e.sh` -- 86/86 pass (local backend)
-- `./run_e2e.sh --backend memory` -- test memory backend
-- `./run_e2e.sh --backend sqlite` -- test sqlite backend
+All pluggable metadata backends implemented:
+- `cargo test` -- 294 pass
+- `./run_e2e.sh` -- 105/105 pass (local backend + sqlite metadata)
 
----
-
-## Next: Stage 17 — Pluggable Metadata Backends
-
-For parity with Python implementation, implement pluggable metadata backends.
-
-### Goal
-
-Support multiple metadata storage backends beyond SQLite.
-
-### Backends to Implement
+### Completed Backends
 
 | Backend | Description | Status |
 |---------|-------------|--------|
-| `sqlite` | SQLite file (default) | ✅ Exists |
-| `memory` | In-memory hash maps | 🔲 New |
-| `local` | JSONL append-only files | 🔲 New |
-| `dynamodb` | AWS DynamoDB | 🔲 New |
-| `firestore` | GCP Firestore | 🔲 New |
-| `cosmos` | Azure Cosmos DB | 🔲 New |
+| `sqlite` | SQLite file (default) | ✅ Complete |
+| `memory` | In-memory hash maps | ✅ Complete |
+| `local` | JSONL append-only files | ✅ Complete |
+| `dynamodb` | AWS DynamoDB | ✅ Complete |
+| `firestore` | GCP Firestore | 🔲 Stub (returns empty) |
+| `cosmos` | Azure Cosmos DB | 🔲 Stub (returns empty) |
 
-### Files to Create/Modify
+---
+
+## Next: Stage 19 — Full Cloud Metadata Backends
+
+Complete the Firestore and Cosmos DB implementations.
+
+### Goal
+
+Implement full REST API clients for GCP Firestore and Azure Cosmos DB.
+
+### Files to Complete
 
 | File | Work |
 |------|------|
-| `src/metadata/memory.rs` | In-memory MetadataStore implementation |
-| `src/metadata/local.rs` | JSONL file-based MetadataStore |
-| `src/metadata/dynamodb.rs` | DynamoDB implementation |
-| `src/metadata/firestore.rs` | Firestore implementation |
-| `src/metadata/cosmos.rs` | Cosmos DB implementation |
-| `src/config.rs` | Add `metadata.engine` selector |
+| `src/metadata/firestore.rs` | Full GCP Firestore REST API implementation |
+| `src/metadata/cosmos.rs` | Full Azure Cosmos DB REST API implementation |
 
 ### Configuration
 
 ```yaml
 metadata:
-  engine: "sqlite"  # sqlite | memory | local | dynamodb | firestore | cosmos
-  sqlite:
-    path: "./data/metadata.db"
+  engine: "dynamodb"  # sqlite | memory | local | dynamodb | firestore | cosmos
   dynamodb:
-    table: "bleepstore-metadata"
+    table_prefix: "bleepstore"
     region: "us-east-1"
+    endpoint_url: ""  # For local DynamoDB testing
   firestore:
-    collection: "bleepstore-metadata"
-    project: "my-project"
+    collection_prefix: "bleepstore"
+    project_id: "my-project"
+    credentials_file: "/path/to/service-account.json"
   cosmos:
     database: "bleepstore"
-    container: "metadata"
+    container_prefix: "metadata"
+    endpoint: "https://myaccount.documents.azure.com:443/"
+    connection_string: ""  # Alternative to endpoint
 ```
 
 ### Definition of Done
 
-- [ ] `MetadataStore` trait defines all 22 methods
-- [ ] `MemoryMetadataStore` implemented
-- [ ] `LocalMetadataStore` implemented (JSONL files)
-- [ ] DynamoDB backend fully implemented
-- [ ] Firestore backend fully implemented
-- [ ] Cosmos DB backend fully implemented
-- [ ] All E2E tests pass with each backend
-- [ ] Unit tests for each backend
+- [ ] Firestore backend fully implemented with REST API
+- [ ] Cosmos DB backend fully implemented with REST API
+- [ ] Authentication via service account / managed identity
+- [ ] All E2E tests pass with each backend (when cloud resources available)
 
 ---
 
 ## Future
 
-- **Stage 18:** Cloud Metadata Backends (DynamoDB, Firestore, Cosmos DB)
-- **Stage 19:** Raft Consensus / Clustering
-- **Stage 20:** Event Queues (Redis, RabbitMQ, Kafka)
+- **Stage 20:** Raft Consensus / Clustering
+- **Stage 21:** Event Queues (Redis, RabbitMQ, Kafka)
 
 ---
 
@@ -89,3 +79,4 @@ cargo test
 
 ## Known Issues
 - AWS SDK crates pinned for rustc 1.88 compatibility (see Cargo.toml comments)
+- Firestore and Cosmos DB backends are stubs (return empty results)

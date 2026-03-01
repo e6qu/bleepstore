@@ -101,26 +101,70 @@ async fn main() -> anyhow::Result<()> {
         info!("Prometheus metrics disabled by configuration");
     }
 
-    // Initialize metadata store (SQLite).
-    let metadata_path = &config.metadata.sqlite.path;
-    // Ensure parent directory exists for the SQLite file.
-    if let Some(parent) = std::path::Path::new(metadata_path).parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let metadata_store = bleepstore::metadata::sqlite::SqliteMetadataStore::new(metadata_path)?;
-    info!("SQLite metadata store initialized at {}", metadata_path);
+    // Initialize metadata store based on config.
+    let expired_uploads: Vec<(String, String, String)> = Vec::new();
+    let metadata: Arc<dyn bleepstore::metadata::store::MetadataStore> =
+        match config.metadata.engine.as_str() {
+            "memory" => {
+                let store = bleepstore::metadata::memory::MemoryMetadataStore::new();
+                store.seed_credential(&config.auth.access_key, &config.auth.secret_key)?;
+                info!("Memory metadata store initialized");
+                Arc::new(store)
+            }
+            "local" => {
+                let store = bleepstore::metadata::local::LocalMetadataStore::new(
+                    &config.metadata.local,
+                )?;
+                store.seed_credential(&config.auth.access_key, &config.auth.secret_key)?;
+                info!(
+                    "Local JSONL metadata store initialized at {}",
+                    config.metadata.local.root_dir
+                );
+                Arc::new(store)
+            }
+            "dynamodb" => {
+                let store = bleepstore::metadata::dynamodb::DynamoDbMetadataStore::new(
+                    &config.metadata.dynamodb,
+                )
+                .await?;
+                store.seed_credential(&config.auth.access_key, &config.auth.secret_key)?;
+                info!("DynamoDB metadata store initialized");
+                Arc::new(store)
+            }
+            "firestore" => {
+                let store = bleepstore::metadata::firestore::FirestoreMetadataStore::new(
+                    &config.metadata.firestore,
+                )
+                .await?;
+                store.seed_credential(&config.auth.access_key, &config.auth.secret_key)?;
+                info!("Firestore metadata store initialized");
+                Arc::new(store)
+            }
+            "cosmos" => {
+                let store =
+                    bleepstore::metadata::cosmos::CosmosMetadataStore::new(&config.metadata.cosmos)
+                        .await?;
+                store.seed_credential(&config.auth.access_key, &config.auth.secret_key)?;
+                info!("Cosmos DB metadata store initialized");
+                Arc::new(store)
+            }
+            _ => {
+                let metadata_path = &config.metadata.sqlite.path;
+                if let Some(parent) = std::path::Path::new(metadata_path).parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                let store = bleepstore::metadata::sqlite::SqliteMetadataStore::new(metadata_path)?;
+                store.seed_credential(&config.auth.access_key, &config.auth.secret_key)?;
+                info!("SQLite metadata store initialized at {}", metadata_path);
 
-    // Seed default credentials from config (crash-only: idempotent on every startup).
-    metadata_store.seed_credential(&config.auth.access_key, &config.auth.secret_key)?;
-    info!("Default credentials seeded");
+                let expired = store.reap_expired_uploads(604800)?;
+                if !expired.is_empty() {
+                    info!("Reaped {} expired multipart uploads", expired.len());
+                }
 
-    // Crash-only recovery: reap expired multipart uploads (default TTL: 7 days).
-    let expired_uploads = metadata_store.reap_expired_uploads(604800)?;
-    if !expired_uploads.is_empty() {
-        info!("Reaped {} expired multipart uploads", expired_uploads.len());
-    }
-
-    let metadata: Arc<dyn bleepstore::metadata::store::MetadataStore> = Arc::new(metadata_store);
+                Arc::new(store)
+            }
+        };
 
     // Initialize storage backend based on config.
     let storage: Arc<dyn bleepstore::storage::backend::StorageBackend> =

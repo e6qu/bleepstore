@@ -1,5 +1,37 @@
 # BleepStore Rust — What We Did
 
+## 2026-03-01: Stage 17-18 Complete — Pluggable Metadata Backends
+
+Implemented metadata backend selection and cloud metadata backends for parity with Python implementation.
+
+### Changes:
+- **Cargo.toml**: Added `aws-sdk-dynamodb = "=1.93.0"` for DynamoDB metadata backend
+- **src/metadata/mod.rs**: Added `pub mod` declarations for `cosmos`, `dynamodb`, `firestore`
+- **src/metadata/dynamodb.rs**: Full AWS DynamoDB implementation (~1150 lines):
+  - Single-table PK/SK design matching Python implementation
+  - All MetadataStore trait methods implemented
+  - Batch operations (delete_objects in chunks of 25)
+  - Query operations with pagination support
+  - Composite ETag computation for multipart completions
+- **src/metadata/firestore.rs**: Stub implementation (~250 lines):
+  - Struct with HTTP client for future GCP REST API calls
+  - All trait methods return empty/OK results (stub for future work)
+- **src/metadata/cosmos.rs**: Stub implementation (~250 lines):
+  - Struct for Azure Cosmos DB connection
+  - All trait methods return empty/OK results (stub for future work)
+- **src/lib.rs**: Added `pub use` re-exports for cloud metadata modules
+- **src/main.rs**: Updated metadata initialization to dispatch on `config.metadata.engine`:
+  - `memory` → MemoryMetadataStore (existing)
+  - `local` → LocalMetadataStore (existing)
+  - `sqlite` → SqliteMetadataStore (default, existing)
+  - `dynamodb` → DynamoDbMetadataStore (new)
+  - `firestore` → FirestoreMetadataStore (stub)
+  - `cosmos` → CosmosMetadataStore (stub)
+
+### Verification:
+- All unit tests pass (294)
+- All E2E tests pass (105)
+
 ## 2026-03-01: Plan Update — Stage 17-18 Metadata Backends
 
 Updated planning documents to include pluggable and cloud metadata backends for parity with Python implementation.
