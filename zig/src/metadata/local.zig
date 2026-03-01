@@ -18,27 +18,27 @@ pub const LocalConfig = struct {
 const Inner = struct {
     buckets: std.StringHashMap(BucketMeta),
     objects: std.HashMap(struct { []const u8, []const u8 }, ObjectMeta, struct {
-        pub fn hash(self: @This(), key: struct { []const u8, []const u8 }) u64 {
+        pub fn hash(_: @This(), key: struct { []const u8, []const u8 }) u64 {
             var hasher = std.hash.Wyhash.init(0);
             hasher.update(key.@"0");
             hasher.update(":");
             hasher.update(key.@"1");
             return hasher.final();
         }
-        pub fn eql(self: @This(), a: struct { []const u8, []const u8 }, b: struct { []const u8, []const u8 }) bool {
+        pub fn eql(_: @This(), a: struct { []const u8, []const u8 }, b: struct { []const u8, []const u8 }) bool {
             return std.mem.eql(u8, a.@"0", b.@"0") and std.mem.eql(u8, a.@"1", b.@"1");
         }
     }, std.hash_map.default_max_load_percentage),
     uploads: std.StringHashMap(MultipartUploadMeta),
     parts: std.HashMap(struct { []const u8, u32 }, PartMeta, struct {
-        pub fn hash(self: @This(), key: struct { []const u8, u32 }) u64 {
+        pub fn hash(_: @This(), key: struct { []const u8, u32 }) u64 {
             var hasher = std.hash.Wyhash.init(0);
             hasher.update(key.@"0");
             hasher.update(":");
             hasher.update(std.mem.asBytes(&key.@"1"));
             return hasher.final();
         }
-        pub fn eql(self: @This(), a: struct { []const u8, u32 }, b: struct { []const u8, u32 }) bool {
+        pub fn eql(_: @This(), a: struct { []const u8, u32 }, b: struct { []const u8, u32 }) bool {
             return std.mem.eql(u8, a.@"0", b.@"0") and a.@"1" == b.@"1";
         }
     }, std.hash_map.default_max_load_percentage),
@@ -73,8 +73,8 @@ pub const LocalStore = struct {
     }
 
     pub fn deinit(self: *LocalStore) void {
-        self.inner.lockExclusive();
-        defer self.inner.unlockExclusive();
+        self.inner.lock();
+        defer self.inner.unlock();
         var iter = self.inner_data.buckets.iterator();
         while (iter.next()) |entry| {
             entry.value_ptr.deinit(self.allocator);
@@ -114,23 +114,16 @@ pub const LocalStore = struct {
         };
         defer file.close();
 
-        var buf_reader = std.io.bufferedReader(file.reader());
-        const reader = buf_reader.reader();
+        const reader = file.deprecatedReader();
 
-        var line_buf: std.ArrayList(u8) = .init(self.allocator);
-        defer line_buf.deinit();
+        while (reader.readUntilDelimiterOrEofAlloc(self.allocator, '\n', 1024 * 1024)) |maybe_line| {
+            const line = maybe_line orelse break;
+            defer self.allocator.free(line);
 
-        while (true) {
-            line_buf.clearRetainingCapacity();
-            reader.streamUntilDelimiter(line_buf.writer(), '\n', null) catch |err| {
-                if (err == error.EndOfStream) break;
-                return err;
-            };
-
-            const parsed = std.json.parseFromSlice(std.json.Value, self.allocator, line_buf.items, .{}) catch continue;
+            const parsed = std.json.parseFromSlice(std.json.Value, self.allocator, line, .{}) catch continue;
             defer parsed.deinit();
 
-            const obj = parsed.object;
+            const obj = parsed.value.object;
             if (obj.get("_deleted")) |del| {
                 if (del == .bool and del.bool) continue;
             }
@@ -142,6 +135,8 @@ pub const LocalStore = struct {
                 .part => try self.parsePart(obj),
                 .credential => try self.parseCredential(obj),
             }
+        } else |err| {
+            if (err != error.EndOfStream) return err;
         }
     }
 
@@ -206,7 +201,7 @@ pub const LocalStore = struct {
         const upload_id = obj.get("upload_id").?.string;
         const duped_id = try self.allocator.dupe(u8, upload_id);
 
-        var meta: PartMeta = .{
+        const meta: PartMeta = .{
             .part_number = @intCast(obj.get("part_number").?.integer),
             .etag = try self.allocator.dupe(u8, obj.get("etag").?.string),
             .size = @intCast(obj.get("size").?.integer),
@@ -241,21 +236,21 @@ pub const LocalStore = struct {
         const file = try std.fs.cwd().createFile(path, .{ .truncate = false });
         defer file.close();
         try file.seekFromEnd(0);
-        try file.writer().writeAll(line);
-        try file.writer().writeByte('\n');
+        try file.deprecatedWriter().writeAll(line);
+        try file.deprecatedWriter().writeByte('\n');
     }
 
     // --- MetadataStore implementation via vtable wrappers ---
 
     pub fn createBucket(ctx: *anyopaque, meta: BucketMeta) anyerror!void {
         const self: *LocalStore = @ptrCast(@alignCast(ctx));
-        self.inner.lockExclusive();
-        defer self.inner.unlockExclusive();
+        self.inner.lock();
+        defer self.inner.unlock();
 
         const duped_name = try self.allocator.dupe(u8, meta.name);
         errdefer self.allocator.free(duped_name);
 
-        var owned_meta: BucketMeta = .{
+        const owned_meta: BucketMeta = .{
             .name = duped_name,
             .creation_date = try self.allocator.dupe(u8, meta.creation_date),
             .region = try self.allocator.dupe(u8, meta.region),
@@ -266,9 +261,7 @@ pub const LocalStore = struct {
 
         try self.inner_data.buckets.put(duped_name, owned_meta);
 
-        var json = std.ArrayList(u8).init(self.allocator);
-        defer json.deinit();
-        try std.json.stringify(.{
+        const json_str = try std.json.Stringify.valueAlloc(self.allocator, .{
             .type = "bucket",
             .name = meta.name,
             .created_at = meta.creation_date,
@@ -276,25 +269,25 @@ pub const LocalStore = struct {
             .owner_id = meta.owner_id,
             .owner_display = meta.owner_display,
             .acl = meta.acl,
-        }, .{}, json.writer());
-        try self.appendLine("buckets.jsonl", json.items);
+        }, .{});
+        defer self.allocator.free(json_str);
+        try self.appendLine("buckets.jsonl", json_str);
     }
 
     pub fn deleteBucket(ctx: *anyopaque, name: []const u8) anyerror!void {
         const self: *LocalStore = @ptrCast(@alignCast(ctx));
-        self.inner.lockExclusive();
-        defer self.inner.unlockExclusive();
+        self.inner.lock();
+        defer self.inner.unlock();
 
         _ = self.inner_data.buckets.fetchRemove(name);
 
-        var json = std.ArrayList(u8).init(self.allocator);
-        defer json.deinit();
-        try std.json.stringify(.{
+        const json_str = try std.json.Stringify.valueAlloc(self.allocator, .{
             .type = "bucket",
             .name = name,
             ._deleted = true,
-        }, .{}, json.writer());
-        try self.appendLine("buckets.jsonl", json.items);
+        }, .{});
+        defer self.allocator.free(json_str);
+        try self.appendLine("buckets.jsonl", json_str);
     }
 
     pub fn getBucket(ctx: *anyopaque, name: []const u8) anyerror!?BucketMeta {
@@ -309,12 +302,12 @@ pub const LocalStore = struct {
         self.inner.lockShared();
         defer self.inner.unlockShared();
 
-        var list = std.ArrayList(BucketMeta).init(self.allocator);
+        var list: std.ArrayList(BucketMeta) = .empty;
         var iter = self.inner_data.buckets.iterator();
         while (iter.next()) |entry| {
-            try list.append(entry.value_ptr.*);
+            try list.append(self.allocator, entry.value_ptr.*);
         }
-        return list.toOwnedSlice();
+        return list.toOwnedSlice(self.allocator);
     }
 
     pub fn bucketExists(ctx: *anyopaque, name: []const u8) anyerror!bool {
@@ -326,8 +319,8 @@ pub const LocalStore = struct {
 
     pub fn updateBucketAcl(ctx: *anyopaque, name: []const u8, acl: []const u8) anyerror!void {
         const self: *LocalStore = @ptrCast(@alignCast(ctx));
-        self.inner.lockExclusive();
-        defer self.inner.unlockExclusive();
+        self.inner.lock();
+        defer self.inner.unlock();
 
         if (self.inner_data.buckets.getPtr(name)) |bucket| {
             self.allocator.free(bucket.acl);
@@ -337,13 +330,13 @@ pub const LocalStore = struct {
 
     pub fn putObjectMeta(ctx: *anyopaque, meta: ObjectMeta) anyerror!void {
         const self: *LocalStore = @ptrCast(@alignCast(ctx));
-        self.inner.lockExclusive();
-        defer self.inner.unlockExclusive();
+        self.inner.lock();
+        defer self.inner.unlock();
 
         const bucket = try self.allocator.dupe(u8, meta.bucket);
         const key = try self.allocator.dupe(u8, meta.key);
 
-        var owned: ObjectMeta = .{
+        const owned: ObjectMeta = .{
             .bucket = bucket,
             .key = key,
             .size = meta.size,
@@ -362,9 +355,7 @@ pub const LocalStore = struct {
 
         try self.inner_data.objects.put(.{ bucket, key }, owned);
 
-        var json = std.ArrayList(u8).init(self.allocator);
-        defer json.deinit();
-        try std.json.stringify(.{
+        const json_str = try std.json.Stringify.valueAlloc(self.allocator, .{
             .type = "object",
             .bucket = meta.bucket,
             .key = meta.key,
@@ -373,8 +364,9 @@ pub const LocalStore = struct {
             .content_type = meta.content_type,
             .last_modified = meta.last_modified,
             .storage_class = meta.storage_class,
-        }, .{}, json.writer());
-        try self.appendLine("objects.jsonl", json.items);
+        }, .{});
+        defer self.allocator.free(json_str);
+        try self.appendLine("objects.jsonl", json_str);
     }
 
     pub fn getObjectMeta(ctx: *anyopaque, bucket: []const u8, key: []const u8) anyerror!?ObjectMeta {
@@ -386,20 +378,19 @@ pub const LocalStore = struct {
 
     pub fn deleteObjectMeta(ctx: *anyopaque, bucket: []const u8, key: []const u8) anyerror!bool {
         const self: *LocalStore = @ptrCast(@alignCast(ctx));
-        self.inner.lockExclusive();
-        defer self.inner.unlockExclusive();
+        self.inner.lock();
+        defer self.inner.unlock();
 
         const existed = self.inner_data.objects.remove(.{ bucket, key });
 
-        var json = std.ArrayList(u8).init(self.allocator);
-        defer json.deinit();
-        try std.json.stringify(.{
+        const json_str = try std.json.Stringify.valueAlloc(self.allocator, .{
             .type = "object",
             .bucket = bucket,
             .key = key,
             ._deleted = true,
-        }, .{}, json.writer());
-        try self.appendLine("objects.jsonl", json.items);
+        }, .{});
+        defer self.allocator.free(json_str);
+        try self.appendLine("objects.jsonl", json_str);
 
         return existed;
     }
@@ -408,8 +399,8 @@ pub const LocalStore = struct {
         const self: *LocalStore = @ptrCast(@alignCast(ctx));
         var results = try self.allocator.alloc(bool, keys.len);
 
-        self.inner.lockExclusive();
-        defer self.inner.unlockExclusive();
+        self.inner.lock();
+        defer self.inner.unlock();
 
         for (keys, 0..) |key, i| {
             results[i] = self.inner_data.objects.remove(.{ bucket, key });
@@ -422,7 +413,7 @@ pub const LocalStore = struct {
         self.inner.lockShared();
         defer self.inner.unlockShared();
 
-        var objects = std.ArrayList(ObjectMeta).init(self.allocator);
+        var objects: std.ArrayList(ObjectMeta) = .empty;
         var iter = self.inner_data.objects.iterator();
 
         while (iter.next()) |entry| {
@@ -433,7 +424,7 @@ pub const LocalStore = struct {
             if (delimiter.len > 0) {
                 if (std.mem.indexOf(u8, obj_key[prefix.len..], delimiter) != null) continue;
             }
-            try objects.append(entry.value_ptr.*);
+            try objects.append(self.allocator, entry.value_ptr.*);
         }
 
         std.sort.block(ObjectMeta, objects.items, {}, struct {
@@ -444,7 +435,7 @@ pub const LocalStore = struct {
 
         const is_truncated = objects.items.len > max_keys;
         if (is_truncated) {
-            objects.shrinkAndFree(max_keys);
+            objects.shrinkAndFree(self.allocator, max_keys);
         }
 
         return .{
@@ -464,8 +455,8 @@ pub const LocalStore = struct {
 
     pub fn updateObjectAcl(ctx: *anyopaque, bucket: []const u8, key: []const u8, acl: []const u8) anyerror!void {
         const self: *LocalStore = @ptrCast(@alignCast(ctx));
-        self.inner.lockExclusive();
-        defer self.inner.unlockExclusive();
+        self.inner.lock();
+        defer self.inner.unlock();
 
         if (self.inner_data.objects.getPtr(.{ bucket, key })) |obj| {
             self.allocator.free(obj.acl);
@@ -475,11 +466,11 @@ pub const LocalStore = struct {
 
     pub fn createMultipartUpload(ctx: *anyopaque, meta: MultipartUploadMeta) anyerror!void {
         const self: *LocalStore = @ptrCast(@alignCast(ctx));
-        self.inner.lockExclusive();
-        defer self.inner.unlockExclusive();
+        self.inner.lock();
+        defer self.inner.unlock();
 
         const upload_id = try self.allocator.dupe(u8, meta.upload_id);
-        var owned: MultipartUploadMeta = .{
+        const owned: MultipartUploadMeta = .{
             .upload_id = upload_id,
             .bucket = try self.allocator.dupe(u8, meta.bucket),
             .key = try self.allocator.dupe(u8, meta.key),
@@ -500,8 +491,8 @@ pub const LocalStore = struct {
 
     pub fn abortMultipartUpload(ctx: *anyopaque, upload_id: []const u8) anyerror!void {
         const self: *LocalStore = @ptrCast(@alignCast(ctx));
-        self.inner.lockExclusive();
-        defer self.inner.unlockExclusive();
+        self.inner.lock();
+        defer self.inner.unlock();
 
         _ = self.inner_data.uploads.fetchRemove(upload_id);
 
@@ -515,11 +506,11 @@ pub const LocalStore = struct {
 
     pub fn putPartMeta(ctx: *anyopaque, upload_id: []const u8, part: PartMeta) anyerror!void {
         const self: *LocalStore = @ptrCast(@alignCast(ctx));
-        self.inner.lockExclusive();
-        defer self.inner.unlockExclusive();
+        self.inner.lock();
+        defer self.inner.unlock();
 
         const duped_id = try self.allocator.dupe(u8, upload_id);
-        var owned: PartMeta = .{
+        const owned: PartMeta = .{
             .part_number = part.part_number,
             .etag = try self.allocator.dupe(u8, part.etag),
             .size = part.size,
@@ -534,12 +525,12 @@ pub const LocalStore = struct {
         self.inner.lockShared();
         defer self.inner.unlockShared();
 
-        var parts = std.ArrayList(PartMeta).init(self.allocator);
+        var parts: std.ArrayList(PartMeta) = .empty;
         var iter = self.inner_data.parts.iterator();
 
         while (iter.next()) |entry| {
             if (std.mem.eql(u8, entry.key_ptr.@"0", upload_id) and entry.key_ptr.@"1" > part_marker) {
-                try parts.append(entry.value_ptr.*);
+                try parts.append(self.allocator, entry.value_ptr.*);
             }
         }
 
@@ -551,7 +542,7 @@ pub const LocalStore = struct {
 
         const is_truncated = parts.items.len > max_parts;
         if (is_truncated) {
-            parts.shrinkAndFree(max_parts);
+            parts.shrinkAndFree(self.allocator, max_parts);
         }
 
         return .{
@@ -566,12 +557,12 @@ pub const LocalStore = struct {
         self.inner.lockShared();
         defer self.inner.unlockShared();
 
-        var parts = std.ArrayList(PartMeta).init(self.allocator);
+        var parts: std.ArrayList(PartMeta) = .empty;
         var iter = self.inner_data.parts.iterator();
 
         while (iter.next()) |entry| {
             if (std.mem.eql(u8, entry.key_ptr.@"0", upload_id)) {
-                try parts.append(entry.value_ptr.*);
+                try parts.append(self.allocator, entry.value_ptr.*);
             }
         }
 
@@ -581,13 +572,13 @@ pub const LocalStore = struct {
             }
         }.lessThan);
 
-        return parts.toOwnedSlice();
+        return parts.toOwnedSlice(self.allocator);
     }
 
     pub fn completeMultipartUpload(ctx: *anyopaque, upload_id: []const u8, object_meta: ObjectMeta) anyerror!void {
         const self: *LocalStore = @ptrCast(@alignCast(ctx));
-        self.inner.lockExclusive();
-        defer self.inner.unlockExclusive();
+        self.inner.lock();
+        defer self.inner.unlock();
 
         try @This().putObjectMeta(ctx, object_meta);
         _ = self.inner_data.uploads.fetchRemove(upload_id);
@@ -605,19 +596,19 @@ pub const LocalStore = struct {
         self.inner.lockShared();
         defer self.inner.unlockShared();
 
-        var uploads = std.ArrayList(MultipartUploadMeta).init(self.allocator);
+        var uploads: std.ArrayList(MultipartUploadMeta) = .empty;
         var iter = self.inner_data.uploads.iterator();
 
         while (iter.next()) |entry| {
             const upload = entry.value_ptr;
             if (!std.mem.eql(u8, upload.bucket, bucket)) continue;
             if (prefix.len > 0 and !std.mem.startsWith(u8, upload.key, prefix)) continue;
-            try uploads.append(upload.*);
+            try uploads.append(self.allocator, upload.*);
         }
 
         const is_truncated = uploads.items.len > max_uploads;
         if (is_truncated) {
-            uploads.shrinkAndFree(max_uploads);
+            uploads.shrinkAndFree(self.allocator, max_uploads);
         }
 
         return .{
@@ -635,11 +626,11 @@ pub const LocalStore = struct {
 
     pub fn putCredential(ctx: *anyopaque, cred: Credential) anyerror!void {
         const self: *LocalStore = @ptrCast(@alignCast(ctx));
-        self.inner.lockExclusive();
-        defer self.inner.unlockExclusive();
+        self.inner.lock();
+        defer self.inner.unlock();
 
         const key = try self.allocator.dupe(u8, cred.access_key_id);
-        var owned: Credential = .{
+        const owned: Credential = .{
             .access_key_id = key,
             .secret_key = try self.allocator.dupe(u8, cred.secret_key),
             .owner_id = try self.allocator.dupe(u8, cred.owner_id),

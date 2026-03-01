@@ -1,10 +1,18 @@
 # BleepStore Zig -- Status
 
-## Current Stage: Stage 15 COMPLETE -- Performance Optimization & Production Readiness
+## Current Stage: Stage 17-18 COMPLETE -- Pluggable & Cloud Metadata Backends
 
 ## Zig Version: 0.15.2 (minimum: 0.15.0), ZLS: 0.15.1
 
-Stage 15 adds performance optimization and production hardening:
+Stage 17-18 adds pluggable metadata backends and cloud metadata backends for parity with Python implementation:
+- **MetadataConfig** in config.zig with `MetadataEngineType` enum (sqlite, memory, local, dynamodb, firestore, cosmos)
+- **memory.zig**: In-memory hash map metadata store (fixed for Zig 0.15 API)
+- **local.zig**: JSONL append-only file metadata store (fixed for Zig 0.15 API)
+- **dynamodb.zig**: DynamoDB metadata store (stub - returns NotImplemented for writes)
+- **firestore.zig**: GCP Firestore metadata store (full HTTP implementation)
+- **cosmos.zig**: Azure Cosmos DB metadata store (full HTTP implementation)
+
+Stage 15 performance optimization and production hardening is complete:
 - **SigV4 signing key cache** (24h TTL) and **credential cache** (60s TTL) to avoid
   per-request HMAC-SHA256 derivation and SQLite queries
 - **Batch DeleteObjects** using `DELETE ... WHERE key IN (?)` instead of per-key SQL
@@ -40,8 +48,6 @@ Per `S3_GAP_REMAINING.md` (2026-02-27):
 
 ## Future Milestones
 
-- **Stage 17:** Pluggable Metadata Backends (memory, local, cloud stubs)
-- **Stage 18:** Cloud Metadata Backends (DynamoDB, Firestore, Cosmos DB)
 - **Stage 19:** Raft Consensus / Clustering
 - **Stage 20:** Event Queues (Redis, RabbitMQ, Kafka)
 
@@ -278,6 +284,14 @@ Close remaining gaps identified in the gap analysis.
 - **AWS S3 gateway** (`src/storage/aws.zig`): Proxies to upstream S3 bucket. Enhanced config: `endpoint_url`, `use_path_style`.
 - **GCP Cloud Storage gateway** (`src/storage/gcp.zig`): Proxies to upstream GCS bucket. Enhanced config: `credentials_file`.
 - **Azure Blob gateway** (`src/storage/azure.zig`): Proxies to upstream Azure container. Enhanced config: `connection_string`, `use_managed_identity`.
+
+## Metadata Backends
+- **SQLite** (`src/metadata/sqlite.zig`): Default backend. Full CRUD with WAL mode, foreign keys, busy timeout. 20 unit tests.
+- **Memory** (`src/metadata/memory.zig`): In-memory hash maps with std.Thread.Mutex. Full VTable implementation. Fixed for Zig 0.15.
+- **Local** (`src/metadata/local.zig`): JSONL append-only files per entity type. Loads on startup, appends on write. Fixed for Zig 0.15.
+- **DynamoDB** (`src/metadata/dynamodb.zig`): AWS DynamoDB backend. Stub implementation (NotImplemented for writes).
+- **Firestore** (`src/metadata/gcp.zig`): GCP Firestore backend. Full HTTP implementation with Bearer token auth.
+- **Cosmos DB** (`src/metadata/cosmos.zig`): Azure Cosmos DB backend. Full HTTP implementation with Bearer token auth.
 
 ## What Doesn't Work Yet
 - PutBucketAcl with XML body not fully parsed (canned ACL via header works)
