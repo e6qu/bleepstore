@@ -560,6 +560,15 @@ pub struct UploadEntry<'a> {
     pub owner_display: &'a str,
 }
 
+/// URL-encode a key for S3 encoding-type=url responses.
+fn url_encode_key(key: &str, encoding_type: Option<&str>) -> String {
+    if encoding_type == Some("url") {
+        percent_encoding::percent_encode(key.as_bytes(), percent_encoding::CONTROLS).to_string()
+    } else {
+        key.to_string()
+    }
+}
+
 /// Render `<ListMultipartUploadsResult>` for ListMultipartUploads.
 #[allow(clippy::too_many_arguments)]
 pub fn render_list_multipart_uploads_result(
@@ -572,6 +581,7 @@ pub fn render_list_multipart_uploads_result(
     next_key_marker: Option<&str>,
     next_upload_id_marker: Option<&str>,
     prefix: &str,
+    encoding_type: Option<&str>,
 ) -> String {
     let mut writer = Writer::new(Cursor::new(Vec::new()));
 
@@ -588,13 +598,24 @@ pub fn render_list_multipart_uploads_result(
     writer.write_event(Event::Start(root)).expect("start root");
 
     write_text_element(&mut writer, "Bucket", bucket);
-    write_text_element(&mut writer, "KeyMarker", key_marker);
+    write_text_element(
+        &mut writer,
+        "KeyMarker",
+        &url_encode_key(key_marker, encoding_type),
+    );
     write_text_element(&mut writer, "UploadIdMarker", upload_id_marker);
     if let Some(nkm) = next_key_marker {
-        write_text_element(&mut writer, "NextKeyMarker", nkm);
+        write_text_element(
+            &mut writer,
+            "NextKeyMarker",
+            &url_encode_key(nkm, encoding_type),
+        );
     }
     if let Some(nuim) = next_upload_id_marker {
         write_text_element(&mut writer, "NextUploadIdMarker", nuim);
+    }
+    if let Some(enc) = encoding_type {
+        write_text_element(&mut writer, "EncodingType", enc);
     }
     write_text_element(&mut writer, "MaxUploads", &max_uploads.to_string());
     write_text_element(
@@ -603,14 +624,22 @@ pub fn render_list_multipart_uploads_result(
         if is_truncated { "true" } else { "false" },
     );
     if !prefix.is_empty() {
-        write_text_element(&mut writer, "Prefix", prefix);
+        write_text_element(
+            &mut writer,
+            "Prefix",
+            &url_encode_key(prefix, encoding_type),
+        );
     }
 
     for entry in entries {
         writer
             .write_event(Event::Start(BytesStart::new("Upload")))
             .expect("start Upload");
-        write_text_element(&mut writer, "Key", entry.key);
+        write_text_element(
+            &mut writer,
+            "Key",
+            &url_encode_key(entry.key, encoding_type),
+        );
         write_text_element(&mut writer, "UploadId", entry.upload_id);
 
         // Initiator (same as Owner for simplicity)
