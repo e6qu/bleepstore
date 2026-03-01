@@ -28,6 +28,7 @@ const FIRESTORE_EMULATOR_HOST: &str = "FIRESTORE_EMULATOR_HOST";
 const DEFAULT_COLLECTION: &str = "bleepstore";
 const UNICODE_SENTINEL: char = '\u{f8ff}';
 
+#[allow(dead_code)]
 fn now_iso() -> String {
     chrono::Utc::now()
         .format("%Y-%m-%dT%H:%M:%S.000Z")
@@ -40,11 +41,11 @@ fn encode_key(key: &str) -> String {
 
 fn _decode_key(encoded: &str) -> Result<String> {
     let bytes = URL_SAFE_NO_PAD.decode(encoded)?;
-    String::from_utf8(bytes).map_err(|e| anyhow!("Invalid UTF-8 in key: {}", e))
+    String::from_utf8(bytes).map_err(|e| anyhow!("Invalid UTF-8 in key: {e}"))
 }
 
 fn doc_id_bucket(bucket: &str) -> String {
-    format!("bucket_{}", bucket)
+    format!("bucket_{bucket}")
 }
 
 fn doc_id_object(bucket: &str, key: &str) -> String {
@@ -52,15 +53,15 @@ fn doc_id_object(bucket: &str, key: &str) -> String {
 }
 
 fn doc_id_upload(upload_id: &str) -> String {
-    format!("upload_{}", upload_id)
+    format!("upload_{upload_id}")
 }
 
 fn doc_id_part(part_number: u32) -> String {
-    format!("part_{:05}", part_number)
+    format!("part_{part_number:05}")
 }
 
 fn doc_id_credential(access_key: &str) -> String {
-    format!("cred_{}", access_key)
+    format!("cred_{access_key}")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -195,7 +196,7 @@ impl FirestoreMetadataStore {
 
         let (base_url, database_id) =
             if let Ok(emulator_host) = std::env::var(FIRESTORE_EMULATOR_HOST) {
-                (format!("http://{}", emulator_host), "(default)".to_string())
+                (format!("http://{emulator_host}"), "(default)".to_string())
             } else {
                 (
                     "https://firestore.googleapis.com".to_string(),
@@ -314,10 +315,10 @@ impl FirestoreMetadataStore {
         });
 
         let key = EncodingKey::from_rsa_pem(private_key.as_bytes())
-            .map_err(|e| anyhow!("Failed to parse RSA key: {}", e))?;
+            .map_err(|e| anyhow!("Failed to parse RSA key: {e}"))?;
 
         let token = encode(&Header::new(Algorithm::RS256), &claims, &key)
-            .map_err(|e| anyhow!("Failed to encode JWT: {}", e))?;
+            .map_err(|e| anyhow!("Failed to encode JWT: {e}"))?;
 
         Ok(token)
     }
@@ -351,7 +352,7 @@ impl FirestoreMetadataStore {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(anyhow!("Firestore get failed: {} - {}", status, body));
+            return Err(anyhow!("Firestore get failed: {status} - {body}"));
         }
 
         let doc: FirestoreDocument = response.json().await?;
@@ -388,7 +389,7 @@ impl FirestoreMetadataStore {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(anyhow!("Firestore create failed: {} - {}", status, body));
+            return Err(anyhow!("Firestore create failed: {status} - {body}"));
         }
 
         Ok(())
@@ -432,7 +433,7 @@ impl FirestoreMetadataStore {
             if !response.status().is_success() {
                 let status = response.status();
                 let body = response.text().await.unwrap_or_default();
-                return Err(anyhow!("Firestore set failed: {} - {}", status, body));
+                return Err(anyhow!("Firestore set failed: {status} - {body}"));
             }
         }
 
@@ -462,7 +463,7 @@ impl FirestoreMetadataStore {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(anyhow!("Firestore update failed: {} - {}", status, body));
+            return Err(anyhow!("Firestore update failed: {status} - {body}"));
         }
 
         Ok(())
@@ -477,7 +478,7 @@ impl FirestoreMetadataStore {
         if !response.status().is_success() && response.status() != reqwest::StatusCode::NOT_FOUND {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(anyhow!("Firestore delete failed: {} - {}", status, body));
+            return Err(anyhow!("Firestore delete failed: {status} - {body}"));
         }
 
         Ok(())
@@ -503,11 +504,7 @@ impl FirestoreMetadataStore {
         if !response.status().is_success() {
             let status = response.status();
             let body_text = response.text().await.unwrap_or_default();
-            return Err(anyhow!(
-                "Firestore commit failed: {} - {}",
-                status,
-                body_text
-            ));
+            return Err(anyhow!("Firestore commit failed: {status} - {body_text}"));
         }
 
         Ok(())
@@ -535,11 +532,7 @@ impl FirestoreMetadataStore {
         if !response.status().is_success() {
             let status = response.status();
             let body_text = response.text().await.unwrap_or_default();
-            return Err(anyhow!(
-                "Firestore query failed: {} - {}",
-                status,
-                body_text
-            ));
+            return Err(anyhow!("Firestore query failed: {status} - {body_text}"));
         }
 
         let responses: Vec<FirestoreRunQueryResponse> = response.json().await?;
@@ -573,9 +566,7 @@ impl FirestoreMetadataStore {
             let status = response.status();
             let body_text = response.text().await.unwrap_or_default();
             return Err(anyhow!(
-                "Firestore subcollection query failed: {} - {}",
-                status,
-                body_text
+                "Firestore subcollection query failed: {status} - {body_text}"
             ));
         }
 
@@ -667,7 +658,7 @@ impl FirestoreMetadataStore {
             user_metadata,
             delete_marker: fields
                 .get("delete_marker")
-                .map(|v| Self::extract_bool(v))
+                .map(Self::extract_bool)
                 .unwrap_or(false),
         })
     }
@@ -712,10 +703,7 @@ impl FirestoreMetadataStore {
 
     fn doc_to_credential(doc: &FirestoreDocument) -> Option<CredentialRecord> {
         let fields = &doc.fields;
-        let active = fields
-            .get("active")
-            .map(|v| Self::extract_bool(v))
-            .unwrap_or(true);
+        let active = fields.get("active").map(Self::extract_bool).unwrap_or(true);
 
         if !active {
             return None;
@@ -806,10 +794,8 @@ impl MetadataStore for FirestoreMetadataStore {
             };
 
             let docs = self.run_query(query).await?;
-            let mut buckets: Vec<BucketRecord> = docs
-                .iter()
-                .filter_map(|doc| Self::doc_to_bucket(doc))
-                .collect();
+            let mut buckets: Vec<BucketRecord> =
+                docs.iter().filter_map(Self::doc_to_bucket).collect();
             buckets.sort_by(|a, b| a.name.cmp(&b.name));
             Ok(buckets)
         })
@@ -984,7 +970,7 @@ impl MetadataStore for FirestoreMetadataStore {
                         field_path: "key".to_string(),
                     },
                     op: "LESS_THAN".to_string(),
-                    value: Self::string_value(format!("{}{}", prefix, UNICODE_SENTINEL)),
+                    value: Self::string_value(format!("{prefix}{UNICODE_SENTINEL}")),
                 });
             }
 
@@ -1028,7 +1014,7 @@ impl MetadataStore for FirestoreMetadataStore {
 
             let mut objects: Vec<ObjectRecord> = docs
                 .iter()
-                .filter_map(|doc| Self::doc_to_object(doc))
+                .filter_map(Self::doc_to_object)
                 .filter(|obj| obj.key.as_str() > effective_start)
                 .collect();
 
@@ -1517,7 +1503,7 @@ impl MetadataStore for FirestoreMetadataStore {
                         field_path: "key".to_string(),
                     },
                     op: "LESS_THAN".to_string(),
-                    value: Self::string_value(format!("{}{}", prefix, UNICODE_SENTINEL)),
+                    value: Self::string_value(format!("{prefix}{UNICODE_SENTINEL}")),
                 });
             }
 
@@ -1561,7 +1547,7 @@ impl MetadataStore for FirestoreMetadataStore {
 
             let mut uploads: Vec<MultipartUploadRecord> = docs
                 .iter()
-                .filter_map(|doc| Self::doc_to_upload(doc))
+                .filter_map(Self::doc_to_upload)
                 .filter(|u| {
                     if key_marker.is_empty() {
                         true
