@@ -1,14 +1,36 @@
 # BleepStore Zig -- Do Next
 
-## Current State: Stage 15 Complete -- Performance Optimization
+## Current State: Stage 17-18 Complete -- Pluggable & Cloud Metadata Backends
 
-Stage 15 (Performance Optimization) is complete. 160/160 unit tests pass. 86/86 E2E tests pass.
+Stage 17-18 (Pluggable & Cloud Metadata Backends) is complete. 160/160 unit tests pass. 86/86 E2E tests pass.
 
 - `zig build` -- clean
 - `zig build test` -- 160/160 pass, 0 leaks
 - Python E2E -- **86/86 pass**
 
-## Next: Stage 16 -- S3 API Completeness
+### Completed in Stage 17-18
+
+| Backend | Description | Status |
+|---------|-------------|--------|
+| `sqlite` | SQLite file (default) | ✅ Pre-existing |
+| `memory` | In-memory hash maps | ✅ Fixed for Zig 0.15 |
+| `local` | JSONL append-only files | ✅ Fixed for Zig 0.15 |
+| `dynamodb` | AWS DynamoDB | ✅ Stub implementation |
+| `firestore` | GCP Firestore | ✅ Full HTTP implementation |
+| `cosmos` | Azure Cosmos DB | ✅ Full HTTP implementation |
+
+### Key Zig 0.15 API Fixes Applied
+- `lockExclusive()` → `lock()` / `unlock()` for RwLock
+- `ArrayList.init(allocator)` → `ArrayList.empty`
+- `shrinkAndFree(n)` → `shrinkAndFree(allocator, n)`
+- `std.io.bufferedReader` → `file.deprecatedReader()`
+- `std.json.stringify` → `std.json.Stringify.valueAlloc`
+- `fetchSwap` → `fetchPut`
+- `.size` → `.count()` for HashMap
+- `parsed.object` → `parsed.value.object`
+- `deinit()` → `deinit(allocator)` for ArrayList
+
+## Next: Stage 19 -- Raft Consensus / Clustering
 
 ### Goal
 Close the remaining S3 API gaps identified in `S3_GAP_REMAINING.md` to achieve full S3 compliance for Phase 1 scope.
@@ -92,38 +114,8 @@ zig build e2e          # Zig E2E tests (34 tests)
 
 ---
 
-## After Stage 16: Stage 17 — Pluggable Metadata Backends
-
-For parity with Python implementation, implement pluggable metadata backends.
-
-### Backends to Implement
-
-| Backend | Description | Status |
-|---------|-------------|--------|
-| `sqlite` | SQLite file (default) | ✅ Exists |
-| `memory` | In-memory hash maps | 🔲 New |
-| `local` | JSONL append-only files | 🔲 New |
-| `dynamodb` | AWS DynamoDB | 🔲 New |
-| `firestore` | GCP Firestore | 🔲 New |
-| `cosmos` | Azure Cosmos DB | 🔲 New |
-
-### Files to Create/Modify
-
-| File | Work |
-|------|------|
-| `src/metadata/memory.zig` | In-memory MetadataStore implementation |
-| `src/metadata/local.zig` | JSONL file-based MetadataStore |
-| `src/metadata/dynamodb.zig` | DynamoDB implementation |
-| `src/metadata/firestore.zig` | Firestore implementation |
-| `src/metadata/cosmos.zig` | Cosmos DB implementation |
-| `src/config.zig` | Add `metadata.engine` selector |
-
----
-
 ## Future
 
-- **Stage 18:** Cloud Metadata Backends (DynamoDB, Firestore, Cosmos DB)
-- **Stage 19:** Raft Consensus / Clustering
 - **Stage 20:** Event Queues (Redis, RabbitMQ, Kafka)
 
 ## Known Issues

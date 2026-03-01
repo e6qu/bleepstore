@@ -21,6 +21,12 @@ pub mod xml;
 use crate::config::Config;
 use crate::metadata::store::MetadataStore;
 use crate::storage::backend::StorageBackend;
+pub use metadata::cosmos;
+pub use metadata::dynamodb;
+pub use metadata::firestore;
+pub use metadata::local;
+pub use metadata::memory;
+pub use metadata::sqlite;
 
 /// Shared application state passed to all handlers via `axum::extract::State`.
 pub struct AppState {
