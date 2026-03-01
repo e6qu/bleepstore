@@ -6,6 +6,25 @@
 - **E2E tests:** 86/86 pass
 - **Metadata backends:** sqlite, memory, local, dynamodb, firestore, cosmos (all complete)
 
+### Metadata Backends (Reference Implementation)
+
+| Backend | Status | File |
+|---------|--------|------|
+| `sqlite` | ✅ Complete | `metadata/sqlite.py` |
+| `memory` | ✅ Complete | `metadata/memory.py` |
+| `local` | ✅ Complete | `metadata/local.py` |
+| `dynamodb` | ✅ Complete | `metadata/dynamodb.py` |
+| `firestore` | ✅ Complete | `metadata/firestore.py` |
+| `cosmos` | ✅ Complete | `metadata/cosmos.py` |
+
+**Note:** Python is the reference implementation for all cloud metadata backends. Other implementations (Go, Rust, Zig) should follow these patterns.
+
+---
+
+## Phase 1 & 2: COMPLETE
+
+Python has completed all cloud metadata backends and S3 minor gaps. See other implementations for remaining work.
+
 ---
 
 ## Next: Stage 19 — Raft Consensus / Clustering

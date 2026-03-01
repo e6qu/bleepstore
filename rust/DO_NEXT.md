@@ -4,9 +4,9 @@
 
 All pluggable metadata backends implemented:
 - `cargo test` -- 294 pass
-- `./run_e2e.sh` -- 105/105 pass (local backend + sqlite metadata)
+- `./run_e2e.sh` -- 86/86 pass
 
-### Completed Backends
+### Metadata Backends Status
 
 | Backend | Description | Status |
 |---------|-------------|--------|
@@ -14,59 +14,89 @@ All pluggable metadata backends implemented:
 | `memory` | In-memory hash maps | ✅ Complete |
 | `local` | JSONL append-only files | ✅ Complete |
 | `dynamodb` | AWS DynamoDB | ✅ Complete |
-| `firestore` | GCP Firestore | 🔲 Stub (returns empty) |
-| `cosmos` | Azure Cosmos DB | 🔲 Stub (returns empty) |
+| `firestore` | GCP Firestore | 🔲 Stub |
+| `cosmos` | Azure Cosmos DB | 🔲 Stub |
 
 ---
 
-## Next: Stage 19 — Full Cloud Metadata Backends
+## Phase 1: Complete Cloud Metadata Backends
 
-Complete the Firestore and Cosmos DB implementations.
+### Task 1.1: Implement Firestore Metadata Backend
 
-### Goal
+**Goal:** Full GCP Firestore implementation using `gcloud-sdk` crate or HTTP client.
 
-Implement full REST API clients for GCP Firestore and Azure Cosmos DB.
+**Files to modify:**
+- `src/metadata/firestore.rs` -- Replace stub with full implementation
+- `Cargo.toml` -- Add `gcloud-sdk` or use HTTP with `reqwest`
 
-### Files to Complete
+**Implementation notes:**
+- Collection/document design with subcollections for parts
+- URL-safe base64 encoding for object keys (Firestore doesn't allow `/`)
+- All 22 MetadataStore trait methods
 
-| File | Work |
-|------|------|
-| `src/metadata/firestore.rs` | Full GCP Firestore REST API implementation |
-| `src/metadata/cosmos.rs` | Full Azure Cosmos DB REST API implementation |
+**Test requirements:**
+- Skipped by default (require `FIRESTORE_EMULATOR_HOST`)
+- Reference: Python implementation at `python/src/bleepstore/metadata/firestore.py`
 
-### Configuration
+---
 
-```yaml
-metadata:
-  engine: "dynamodb"  # sqlite | memory | local | dynamodb | firestore | cosmos
-  dynamodb:
-    table_prefix: "bleepstore"
-    region: "us-east-1"
-    endpoint_url: ""  # For local DynamoDB testing
-  firestore:
-    collection_prefix: "bleepstore"
-    project_id: "my-project"
-    credentials_file: "/path/to/service-account.json"
-  cosmos:
-    database: "bleepstore"
-    container_prefix: "metadata"
-    endpoint: "https://myaccount.documents.azure.com:443/"
-    connection_string: ""  # Alternative to endpoint
-```
+### Task 1.2: Implement Cosmos DB Metadata Backend
 
-### Definition of Done
+**Goal:** Full Azure Cosmos DB implementation using `azure_data_cosmos` crate.
 
-- [ ] Firestore backend fully implemented with REST API
-- [ ] Cosmos DB backend fully implemented with REST API
-- [ ] Authentication via service account / managed identity
-- [ ] All E2E tests pass with each backend (when cloud resources available)
+**Files to modify:**
+- `src/metadata/cosmos.rs` -- Replace stub with full implementation
+- `Cargo.toml` -- Add `azure_data_cosmos` crate
+
+**Implementation notes:**
+- Single-container with `/type` partition key
+- SQL queries with `STARTSWITH()` for prefix matching
+- No base64 encoding needed (Cosmos allows `/` in IDs)
+- All 22 MetadataStore trait methods
+
+**Test requirements:**
+- Skipped by default (require `COSMOS_TEST_ENDPOINT` + `COSMOS_TEST_KEY`)
+- Reference: Python implementation at `python/src/bleepstore/metadata/cosmos.py`
+
+---
+
+## Phase 2: S3 Minor Gaps (After Phase 1)
+
+### Task 2.1: Verify/Implement encoding-type=url in ListMultipartUploads
+
+Check if implemented; if not, add support.
+
+**Files to modify:**
+- `src/handlers/multipart.rs`
+
+### Task 2.2: Verify/Implement response-* Query Params on GetObject
+
+Check if implemented; if not, add support.
+
+**Files to modify:**
+- `src/handlers/object.rs`
+
+---
+
+## Definition of Done
+
+**Phase 1:**
+- [ ] Firestore: All 22 MetadataStore methods work
+- [ ] Cosmos DB: All 22 MetadataStore methods work
+- [ ] Unit tests for each (skipped by default)
+- [ ] All E2E tests still pass
+
+**Phase 2:**
+- [ ] encoding-type=url works in ListMultipartUploads
+- [ ] response-* params override GetObject headers
+- [ ] All 86 E2E tests pass
 
 ---
 
 ## Future
 
-- **Stage 20:** Raft Consensus / Clustering
-- **Stage 21:** Event Queues (Redis, RabbitMQ, Kafka)
+- **Stage 19:** Raft Consensus / Clustering
+- **Stage 20:** Event Queues (Redis, RabbitMQ, Kafka)
 
 ---
 
@@ -76,7 +106,3 @@ cd /Users/zardoz/projects/bleepstore/rust
 cargo test
 ./run_e2e.sh
 ```
-
-## Known Issues
-- AWS SDK crates pinned for rustc 1.88 compatibility (see Cargo.toml comments)
-- Firestore and Cosmos DB backends are stubs (return empty results)
